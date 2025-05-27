@@ -3,6 +3,7 @@ class DefaultAttrKeys:
     T = "t"
     MASK = "mask"
     SOLUTION = "solution"
+    TRACK_ID = "track_id"
 
     EDGE_ID = "edge_id"
     EDGE_WEIGHT = "weight"
