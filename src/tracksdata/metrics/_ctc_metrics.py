@@ -110,16 +110,15 @@ def _matching_data(
 
         if optimal_matching and len(_rows) > 0:
             LOG.info("Solving optimal matching ...")
-            _ious = np.asarray(_ious, dtype=np.float32)
-            _mapped_ref = np.asarray(_mapped_ref, dtype=int)
-            _mapped_comp = np.asarray(_mapped_comp, dtype=int)
 
             weights = sp.csr_array((_ious, (_rows, _cols)), dtype=np.float32)
             rows_id, cols_id = sp.csgraph.min_weight_full_bipartite_matching(weights, maximize=True)
 
-            _mapped_ref = _mapped_ref[rows_id].tolist()
-            _mapped_comp = _mapped_comp[cols_id].tolist()
+            # loading original group ids and filtering by the matches
+            _mapped_ref = ref_group[reference_graph_key][rows_id].to_list()
+            _mapped_comp = comp_group[input_graph_key][cols_id].to_list()
             _ious = weights[rows_id, cols_id].tolist()
+
             LOG.info("Done!")
 
         mapped_ref.append(_mapped_ref)
