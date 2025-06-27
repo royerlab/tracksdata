@@ -1,0 +1,100 @@
+site_name: tracksdata
+site_url: https://jookuma.github.io/tracksdata/
+repo_name: "jookuma/tracksdata"
+repo_url: "https://github.com/jookuma/tracksdata"
+# site_url: https://royerlab.github.io/tracksdata/
+# repo_name: "royerlab/tracksdata"
+# repo_url: "https://github.com/royerlab/tracksdata"
+watch: [mkdocs.yml, README.md, src]
+
+# Version management with mike
+extra:
+  version:
+    provider: mike
+    default: latest
+
+# maximum strictness
+# https://www.mkdocs.org/user-guide/configuration/#validation
+strict: true
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+  links:
+    # Allow an absolute link to the features page for our code snippets
+    absolute_links: ignore
+
+
+theme:
+  name: material
+  icon:
+    logo: material/graph
+  palette:
+    scheme: default
+    primary: lime
+    accent: deep-orange
+
+nav:
+  - Home: index.md
+  - Getting Started: getting_started.md
+  - Installation: installation.md
+  - Concepts: concepts.md
+  - FAQ: faq.md
+  - Contributing: contributing.md
+
+plugins:
+  - search
+  - api-autonav:
+      modules: ['src/tracksdata']
+      on_implicit_namespace_package: skip
+      exclude_private: true
+      exclude:
+        - "tracksdata.conftest"
+  # from: https://github.com/tlambert03/mkdocs-api-autonav/tree/main
+  - mkdocstrings:
+      default_handler: python_xref
+      handlers:
+        python_xref:
+          inventories:
+            - https://docs.python.org/3/objects.inv
+            - https://numpy.org/doc/stable/objects.inv
+            - https://docs.pola.rs/api/python/stable/objects.inv
+            - http://docs.sqlalchemy.org/en/stable/objects.inv
+          options:
+            docstring_section_style: list # or "table"
+            docstring_style: "numpy"
+            filters:
+              - "!^_"
+              - "^(?!.*_test)"
+              - "!conftest"
+            group_by_category: true
+            heading_level: 1
+            # begin python-xref
+            relative_crossrefs: true
+            check_crossrefs: true
+            # end python-xref
+            inherited_members: true
+            merge_init_into_class: true
+            parameter_headings: true
+            separate_signature: true
+            show_bases: true
+            show_if_no_docstring: false
+            show_root_heading: true
+            show_signature_annotations: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            show_inheritance_diagram: true
+            summary: true
+
+markdown_extensions:
+  - admonition
+  - pymdownx.snippets:
+      check_paths: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+      use_pygments: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences

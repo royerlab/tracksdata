@@ -25,13 +25,20 @@ def _minimal_example(show_napari_viewer: bool) -> None:
     )
 
     print("starting tracking ...")
+    graph = RustWorkXGraph()
 
     nodes_operator = RegionPropsNodes(show_progress=False)
+    nodes_operator.add_nodes(graph, labels=labels)
+    print(f"Number of nodes: {graph.num_nodes}")
+
     dist_operator = DistanceEdges(distance_threshold=30.0, n_neighbors=5, show_progress=False)
+    dist_operator.add_edges(graph)
+    print(f"Number of edges: {graph.num_edges}")
+
     iou_operator = IoUEdgeAttr(output_key="iou", show_progress=False)
+    iou_operator.add_edge_attrs(graph)
 
     dist_weight = 1 / dist_operator.distance_threshold
-
     solver = NearestNeighborsSolver(
         edge_weight=-EdgeAttr("iou") + EdgeAttr("weight") * dist_weight,
         max_children=2,
@@ -43,15 +50,6 @@ def _minimal_example(show_napari_viewer: bool) -> None:
     #     disappearance_weight=10.0,
     #     division_weight=1.0,
     # )
-
-    graph = RustWorkXGraph()
-    nodes_operator.add_nodes(graph, labels=labels)
-    print(f"Number of nodes: {graph.num_nodes}")
-
-    dist_operator.add_edges(graph)
-    print(f"Number of edges: {graph.num_edges}")
-    iou_operator.add_edge_attrs(graph)
-
     solver.solve(graph)
 
     print("Converting to napari format ...")

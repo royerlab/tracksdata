@@ -141,8 +141,7 @@ def compute_ctc_metrics_data(
     """
     Compute intermediate data required for CTC metrics.
 
-    Reference:
-    https://github.com/CellTrackingChallenge/py-ctcmetrics/blob/main/ctc_metrics/scripts/evaluate.py
+    Reference: [ctc_metrics.scripts.evaluate.calculate_metrics](https://github.com/CellTrackingChallenge/py-ctcmetrics/blob/main/ctc_metrics/scripts/evaluate.py)
 
     Parameters
     ----------
@@ -188,10 +187,10 @@ def evaluate_ctc_metrics(
     metrics: list[str] | None = None,
 ) -> dict[str, float]:
     """
-    Evaluate CTC metrics using `py-ctcmetrics` developed by Timo Kaiser.
+    Evaluate CTC metrics using `py-ctcmetrics` developed by [Timo Kaiser](https://github.com/TimoK93).
 
-    If you use this function, please cite the respective papers of each metric, as described in:
-    https://github.com/CellTrackingChallenge/py-ctcmetrics?tab=readme-ov-file#acknowledgement-and-citations
+    If you use this function, please cite the respective papers of each metric, as described in
+    [here](https://github.com/CellTrackingChallenge/py-ctcmetrics?tab=readme-ov-file#acknowledgement-and-citations).
 
     IMPORTANT: The `SEG` metric is computed from the TRA masks.
 

@@ -10,6 +10,27 @@ from tracksdata.utils._dtypes import polars_dtype_to_numpy_dtype
 
 
 class GraphArrayView(BaseReadOnlyArray):
+    """
+    Class used to view the content of a graph as an array.
+
+    The resulting graph behaves as a read-only numpy array,
+    displaying arbitrary attributes inside their respective instance mask.
+
+    The content is lazy loaded from the original data source as
+    it's done with a [zarr.Array](https://zarr.readthedocs.io/en/stable/index.html)
+
+    Parameters
+    ----------
+    graph : BaseGraph
+        The graph to view as an array.
+    shape : tuple[int, ...]
+        The shape of the array.
+    attr_key : str
+        The attribute key to view as an array.
+    offset : int | np.ndarray, optional
+        The offset to apply to the array.
+    """
+
     def __init__(
         self,
         graph: BaseGraph,

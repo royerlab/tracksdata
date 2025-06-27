@@ -8,6 +8,82 @@ from tracksdata.nodes._base_nodes import BaseNodesOperator
 
 
 class RandomNodes(BaseNodesOperator):
+    """
+    Generate random node coordinates for testing and simulation purposes.
+
+    RandomNodes creates nodes with randomly distributed coordinates within the
+    unit hypercube [0,1]^n. This is useful for testing tracking algorithms,
+    generating synthetic datasets, or creating baseline comparisons. The number
+    of nodes per time point can vary randomly within a specified range.
+
+    Parameters
+    ----------
+    n_time_points : int
+        The number of time points to generate nodes for.
+    n_nodes_per_tp : tuple[int, int]
+        The minimum and maximum number of nodes to generate per time point.
+        The actual number is randomly chosen within this range for each time point.
+    n_dim : Literal[2, 3], default 3
+        The spatial dimensionality of the coordinates:
+
+        - 2: generates (x, y) coordinates
+        - 3: generates (x, y, z) coordinates
+    random_state : int, default 0
+        Random seed for reproducible results.
+    show_progress : bool, default False
+        Whether to display progress bars during node generation.
+
+    Attributes
+    ----------
+    n_time_points : int
+        Number of time points to generate.
+    n_nodes : tuple[int, int]
+        Range of nodes per time point.
+    spatial_cols : list[str]
+        Names of spatial coordinate columns.
+    rng : np.random.Generator
+        Random number generator instance.
+
+    See Also
+    --------
+    :class:`tracksdata.nodes.RegionPropsNodes`
+        Extract nodes from segmented images using region properties.
+    :class:`tracksdata.nodes.Mask`
+        Node operator for mask-based objects.
+
+    Examples
+    --------
+    Generate 2D random nodes:
+
+    ```python
+    from tracksdata.nodes import RandomNodes
+
+    node_op = RandomNodes(n_time_points=10, n_nodes_per_tp=(5, 15), n_dim=2, random_state=42)
+    ```
+
+    Add nodes to a graph:
+
+    ```python
+    node_op.add_nodes(graph)
+    ```
+
+    Generate nodes for a specific time point:
+
+    ```python
+    node_op.add_nodes(graph, t=5)
+    ```
+
+    Use 3D coordinates with consistent node count:
+
+    ```python
+    node_op = RandomNodes(
+        n_time_points=20,
+        n_nodes_per_tp=(10, 10),  # exactly 10 nodes per time point
+        n_dim=3,
+    )
+    ```
+    """
+
     def __init__(
         self,
         n_time_points: int,

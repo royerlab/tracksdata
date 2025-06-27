@@ -21,7 +21,106 @@ from tracksdata.utils._logging import LOG
 
 class ILPSolver(BaseSolver):
     """
-    Solver tracking problem with integer linear programming.
+    Optimal tracking solver using Integer Linear Programming (ILP).
+
+    ILPSolver formulates the multi-object tracking problem as an Integer Linear
+    Programming optimization problem. It finds globally optimal solutions by
+    minimizing a cost function while satisfying flow conservation constraints.
+    The solver supports appearance, disappearance, and division events, making
+    it suitable for complex biological tracking scenarios.
+
+    The optimization problem includes:
+
+    - Node selection variables (whether a detection is part of a track)
+    - Edge selection variables (connections between detections)
+    - Appearance variables (track starts)
+    - Disappearance variables (track ends)
+    - Division variables (cell divisions or track splits)
+
+    Parameters
+    ----------
+    edge_weight : str | ExprInput, default DEFAULT_ATTR_KEYS.EDGE_WEIGHT
+        Edge attribute or expression to use as edge costs in the optimization.
+        Lower values indicate preferred connections.
+    node_weight : str | ExprInput, default 0.0
+        Node attribute or expression to use as node costs.
+    appearance_weight : str | ExprInput, default 0.0
+        Cost for track appearances (new tracks starting).
+    disappearance_weight : str | ExprInput, default 0.0
+        Cost for track disappearances (tracks ending).
+    division_weight : str | ExprInput, default 0.0
+        Cost for track divisions (one track splitting into two).
+    output_key : str, default DEFAULT_ATTR_KEYS.SOLUTION
+        Attribute key to store the solution (True/False for selected items).
+    num_threads : int, default 1
+        Number of threads to use for solving.
+    reset : bool, default True
+        Whether to reset previous solutions before solving.
+    return_solution : bool, default True
+        Whether to return a subgraph containing only the solution.
+    gap : float, default 0.0
+        Optimality gap tolerance (0.0 for exact solutions).
+
+    Attributes
+    ----------
+    edge_weight_expr : EdgeAttr
+        Compiled edge weight expression.
+    node_weight_expr : NodeAttr
+        Compiled node weight expression.
+    appearance_weight_expr : NodeAttr
+        Compiled appearance weight expression.
+    disappearance_weight_expr : NodeAttr
+        Compiled disappearance weight expression.
+    division_weight_expr : NodeAttr
+        Compiled division weight expression.
+
+    See Also
+    --------
+    :class:`tracksdata.solvers.NearestNeighborsSolver`
+        Greedy nearest neighbors tracking solver.
+    :class:`tracksdata.attrs.NodeAttr`
+        For creating node attribute expressions.
+    :class:`tracksdata.attrs.EdgeAttr`
+        For creating edge attribute expressions.
+
+    Examples
+    --------
+    Basic tracking with distance-based costs:
+
+    ```python
+    from tracksdata.solvers import ILPSolver
+
+    solver = ILPSolver(edge_weight="distance")
+    solution = solver.solve(graph)
+    ```
+
+    Tracking with appearance and disappearance costs:
+
+    ```python
+    solver = ILPSolver(edge_weight="distance", appearance_weight=10.0, disappearance_weight=10.0)
+    solution = solver.solve(graph)
+    ```
+
+    Using attribute expressions for complex costs:
+
+    ```python
+    from tracksdata.attrs import EdgeAttr
+
+    solver = ILPSolver(edge_weight=EdgeAttr("distance") + 0.1 * EdgeAttr("angle_change"), division_weight=5.0)
+    solution = solver.solve(graph)
+    ```
+
+    Notes
+    -----
+    The solver uses the ilpy library which provides interfaces to commercial
+    solvers (Gurobi) and open-source solvers (SCIP). For best performance,
+    install Gurobi if available, otherwise SCIP will be used as fallback.
+
+    The ILP formulation ensures:
+
+    - Flow conservation: incoming flow equals outgoing flow for each node
+    - Track consistency: each detection belongs to at most one track
+    - Optimal solution: globally minimizes the total cost function
     """
 
     def __init__(

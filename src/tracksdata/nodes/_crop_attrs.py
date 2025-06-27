@@ -36,21 +36,25 @@ class CropFuncAttrs(BaseNodeAttrsOperator):
 
     Examples
     --------
-    >>> video = ...
-    >>> graph = ...
+    ```python
+    video = ...
+    graph = ...
 
-    >>> def intensity_median_times_t(mask: Mask, image: NDArray, t: int) -> float:
-    ...     cropped_frame = mask.crop(image)
-    ...     valid_pixels = cropped_frame[mask.mask]
-    ...     return np.median(valid_pixels) * t
 
-    >>> crop_attrs = CropFuncAttrs(
-    ...     func=intensity_median,
-    ...     output_key="intensity_median",
-    ...     attr_keys=["t"],
-    ... )
+    def intensity_median_times_t(mask: Mask, image: NDArray, t: int) -> float:
+        cropped_frame = mask.crop(image)
+        valid_pixels = cropped_frame[mask.mask]
+        return np.median(valid_pixels) * t
 
-    >>> crop_attrs.add_node_attrs(graph, frames=video)
+
+    crop_attrs = CropFuncAttrs(
+        func=intensity_median,
+        output_key="intensity_median",
+        attr_keys=["t"],
+    )
+
+    crop_attrs.add_node_attrs(graph, frames=video)
+    ```
 
     """
 

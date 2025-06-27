@@ -1,3 +1,23 @@
+"""
+Module to compose attribute expressions for attribute filtering or value evaluation.
+
+Attributes are used to query content of nodes and edges through their names as columns in a data frame.
+
+Users will mostly interact with [NodeAttr][tracksdata.attrs.NodeAttr] and [EdgeAttr][tracksdata.attrs.EdgeAttr]
+which are thin wrappers around [Attr][tracksdata.attrs.Attr] to distinguish between node and edge attributes
+in ambiguous cases.
+
+They can be used to filter elements in the graph as:
+```python
+graph.subgraph(NodeAttr("t") == 1)
+```
+
+Or to create complex expression when solving the tracking problem:
+```python
+NearestNeighborsSolver(-Attr("iou") * (-Attr("distance") / 30.0).exp())
+```
+"""
+
 import functools
 import math
 import operator
@@ -43,6 +63,22 @@ _OPS_MATH_SYMBOLS: dict[Callable, str] = {
 
 
 class AttrComparison:
+    """
+    Class to store a comparison between an [Attr][tracksdata.attrs.Attr] and a value.
+    It's mainly used for filtering.
+    Complex expression are transformed back to [Attr][tracksdata.attrs.Attr] objects
+    which can be used to evaluate the expression on a DataFrame.
+
+    Parameters
+    ----------
+    attr : Attr
+        The attribute to compare.
+    op : Callable
+        The operator to use for the comparison.
+    other : ExprInput
+        The value to compare the attribute to.
+    """
+
     def __init__(self, attr: "Attr", op: Callable, other: ExprInput) -> None:
         if attr.has_inf():
             raise ValueError("Comparison operators are not supported for expressions with infinity.")
@@ -72,6 +108,10 @@ class AttrComparison:
         return f"{type(self.attr).__name__}({self.column}) {_OPS_MATH_SYMBOLS[self.op]} {self.other}"
 
     def to_attr(self) -> "Attr":
+        """
+        Transform the comparison back to an [Attr][tracksdata.attrs.Attr] object.
+        This is useful for evaluating the expression on a DataFrame.
+        """
         return Attr(self.op(pl.col(self.column), self.other))
 
     def __getattr__(self, attr: str) -> Any:
@@ -121,7 +161,7 @@ class AttrComparison:
 
 class Attr:
     """
-    A class to compose an attribute expression for graph attributes.
+    A class to compose an attribute expression for attribute filtering or value evaluation.
 
     Parameters
     ----------
@@ -130,9 +170,12 @@ class Attr:
 
     Examples
     --------
-    >>> `AttrExpr("iou").log()`
-    >>> `AttrExpr(1.0)`
-    >>> `AttrExpr((1 - AttrExpr("iou")) * AttrExpr("distance"))`
+    ```python
+    Attr("t") == 1  # filter for time point 1
+    Attr("iou").log()  # log the iou
+    Attr(1.0)  # constant value
+    Attr((1 - Attr("iou")) * Attr("distance"))  # complex expression
+    ```
     """
 
     expr: Expr
@@ -168,6 +211,23 @@ class Attr:
         return expr
 
     def _delegate_operator(self, other: ExprInput, op: Callable[[Expr, Expr], Expr], reverse: bool = False) -> "Attr":
+        """
+        Delegate the operator to the expression.
+
+        Parameters
+        ----------
+        other : ExprInput
+            The other expression to delegate the operator to.
+        op : Callable[[Expr, Expr], Expr]
+            The operator to delegate.
+        reverse : bool, optional
+            Whether the operator is reversed.
+
+        Returns
+        -------
+        Attr
+            The result of the operator.
+        """
         # Special handling for multiplication with infinity
         if op == operator.mul:
             # Check if we're multiplying with infinity scalar
@@ -219,6 +279,27 @@ class Attr:
         op: Callable,
         reverse: bool = False,
     ) -> "AttrComparison | Attr":
+        """
+        Simplified version of `_delegate_operator` for comparison operators.
+        [AttrComparison][tracksdata.attrs.AttrComparison] has a limited scope and
+        it's mainly used for filtering.
+        If creating an [AttrComparison][tracksdata.attrs.AttrComparison] object is
+        not possible, it will return an [Attr][tracksdata.attrs.Attr] object.
+
+        Parameters
+        ----------
+        other : ExprInput
+            The other expression to delegate the operator to.
+        op : Callable
+            The operator to delegate.
+        reverse : bool, optional
+            Whether the operator is reversed.
+
+        Returns
+        -------
+        AttrComparison | Attr
+            The result of the operator.
+        """
         if reverse:
             lhs = Attr(other)
             rhs = self
@@ -238,6 +319,19 @@ class Attr:
         return result
 
     def evaluate(self, df: DataFrame) -> Series:
+        """
+        Evaluate the expression on a DataFrame returning a numeric result.
+
+        Parameters
+        ----------
+        df : DataFrame
+            The DataFrame to evaluate the expression on.
+
+        Returns
+        -------
+        Series
+            The evaluated expression.
+        """
         return df.select(self.expr).to_series()
 
     @property
@@ -493,13 +587,21 @@ _setup_ops()
 
 class NodeAttr(Attr):
     """
-    A class to represent a node attribute.
+    Wrapper of [Attr][tracksdata.attrs.Attr] to represent a node attribute.
+
+    See Also
+    --------
+    `tracksdata.attrs.Attr` : The base class for all attributes.
     """
 
 
 class EdgeAttr(Attr):
     """
-    A class to represent an edge attribute.
+    Wrapper of [Attr][tracksdata.attrs.Attr] to represent an edge attribute.
+
+    See Also
+    --------
+    `tracksdata.attrs.Attr` : The base class for all attributes.
     """
 
 

@@ -70,7 +70,9 @@ class BaseGraph(abc.ABC):
             The attributes of the node to be added, must have a "t" key.
             The keys of the attributes will be used as the attributes of the node.
             For example:
-            >>> `graph.add_node(dict(t=0, label='A', intensity=100))`
+            ```python
+            graph.add_node(dict(t=0, label="A", intensity=100))
+            ```
         validate_keys : bool
             Whether to check if the attributes keys are valid.
             If False, the attributes keys will not be checked,
@@ -144,7 +146,9 @@ class BaseGraph(abc.ABC):
             The keys of the data will be used as the attributes of the edges.
             Must have "source_id" and "target_id" keys.
             For example:
-            >>> `graph.bulk_add_edges([dict(source_id=0, target_id=1, weight=1.0)])`
+            ```python
+            graph.bulk_add_edges([dict(source_id=0, target_id=1, weight=1.0)])
+            ```
         """
         # this method benefits the SQLGraph backend
         for edge in edges:
@@ -213,7 +217,9 @@ class BaseGraph(abc.ABC):
         ----------
         attrs : AttrComparison
             Attributes to filter by, for example:
-            >>> `graph.filter_nodes_by_attrs(Attr("t") == 0, Attr("label") == "A")`
+            ```python
+            graph.filter_nodes_by_attrs(Attr("t") == 0, Attr("label") == "A")
+            ```
 
         Returns
         -------
@@ -428,7 +434,9 @@ class BaseGraph(abc.ABC):
 
         Examples
         --------
-        >>> graph = BaseGraph.from_ctc("Fluo-N2DL-HeLa/01_GT/TRA")
+        ```python
+        graph = BaseGraph.from_ctc("Fluo-N2DL-HeLa/01_GT/TRA")
+        ```
 
         See Also
         --------

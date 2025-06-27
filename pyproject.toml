@@ -50,6 +50,14 @@ test = [
   "pytest-html",
   "py-ctcmetrics",
 ]
+docs = [
+  "mkdocs",
+  "mkdocs-api-autonav",
+  "mkdocs-material",
+  "mkdocstrings-python",
+  "mkdocstrings-python-xref",
+  "mike",
+]
 
 [project.urls]
 Documentation = "https://github.com/jookuma/tracksdata#readme"

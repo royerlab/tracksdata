@@ -15,6 +15,26 @@ def _constrained_nearest_neighbors(
     solution: np.ndarray,
     max_children: int,
 ) -> None:
+    """
+    Optimized constraint satisfaction for nearest neighbor tracking.
+
+    Numba-compiled function that efficiently applies tracking constraints by
+    processing edges in weight-sorted order (best first) and greedily accepting
+    edges that don't violate constraints. Ensures optimal solution for the
+    nearest neighbor tracking problem in O(n) time.
+
+    Parameters
+    ----------
+    sorted_source : np.ndarray
+        Array of source node IDs, sorted by edge weights (best first).
+    sorted_target : np.ndarray
+        Array of target node IDs, corresponding to sorted_source.
+    solution : np.ndarray
+        Output boolean array to store the solution. Modified in-place.
+        True indicates the edge is selected in the solution.
+    max_children : int
+        Maximum number of children each source node can have.
+    """
     children_counter = typed.Dict.empty(
         key_type=np.int64,
         value_type=np.int64,
@@ -44,28 +64,75 @@ def _constrained_nearest_neighbors(
 
 class NearestNeighborsSolver(BaseSolver):
     """
-    Solver tracking problem with nearest neighbor ordering of edges.
-    Each node can have only one parent and up to `max_children` child.
+    Solver for tracking problems using nearest neighbor edge selection.
+
+    Implements a greedy nearest neighbor approach to solve tracking problems by
+    selecting the best edges while enforcing constraints on parent-child relationships.
+    Works by sorting all edges by weight, greedily selecting edges starting from the
+    best weights, and enforcing constraints (each node can have at most one parent
+    and max_children children). Runs in O(n log n) time due to sorting, where n is
+    the number of edges.
 
     Parameters
     ----------
+    max_children : int, default 2
+        Maximum number of children (successors) each node can have.
+        This constrains cell division events in biological tracking.
+    edge_weight : str | AttrExpr, default DEFAULT_ATTR_KEYS.EDGE_WEIGHT
+        Edge attribute key or expression to use as edge weights for sorting.
+        Lower weights are preferred (treated as better matches).
+        Can be a string key or AttrExpr for complex expressions.
+    output_key : str, default DEFAULT_ATTR_KEYS.SOLUTION
+        Attribute key to store the solution boolean values in nodes and edges.
+
+    Attributes
+    ----------
     max_children : int
-        The maximum number of children a node can have.
-    edge_weight : str | AttrExpr
-        Key to get the edge weight from the graph or an expression to evaluate
-        composing edge attributes of the graph.
-
-        For example:
-        >>> `edge_weight=-AttrExpr("iou")`
-        will use the negative IoU as edge weight.
-
-        >>> `edge_weight=AttrExpr("iou").log() * AttrExpr("weight")`
-        will use the log of IoU times the default weight as edge weight.
-
+        Maximum number of children per node.
+    solution_key : str
+        Key used to store solution results.
+    edge_weight_expr : AttrExpr
+        Expression used to compute edge weights.
     output_key : str
         The key to store the solution in the graph.
     reset : bool
         Whether to reset the solution values in the whole graph before solving.
+
+    Examples
+    --------
+    Basic usage with default settings:
+
+    ```python
+    from tracksdata.solvers import NearestNeighborsSolver
+
+    solver = NearestNeighborsSolver()
+    solver.solve(graph)
+    ```
+
+    Customize maximum children for cell division tracking:
+
+    ```python
+    solver = NearestNeighborsSolver(max_children=3)
+    solver.solve(graph)
+    ```
+
+    Use custom edge weight expression:
+
+    ```python
+    from tracksdata.attrs import EdgeAttr
+
+    solver = NearestNeighborsSolver(
+        edge_weight=-EdgeAttr("iou"),  # Higher IoU is better
+        max_children=2,
+    )
+    ```
+
+    Combine multiple edge attributes:
+
+    ```python
+    weight_expr = EdgeAttr("distance") + 0.5 * EdgeAttr("color_diff")
+    solver = NearestNeighborsSolver(edge_weight=weight_expr)
+    ```
     """
 
     def __init__(
@@ -89,13 +156,31 @@ class NearestNeighborsSolver(BaseSolver):
         graph: BaseGraph,
     ) -> GraphView | None:
         """
-        Solve the tracking problem with nearest neighbor ordering of edges.
-        Each node can have only one parent and up to `max_children` child.
+        Solve the tracking problem using nearest neighbor edge selection.
+
+        Applies the nearest neighbor algorithm to find the optimal set of edges
+        that form valid tracking paths while respecting parent-child relationship
+        constraints. Automatically extends the graph schema to include the solution
+        key if it doesn't already exist.
 
         Parameters
         ----------
         graph : BaseGraph
-            The graph to solve.
+            The graph containing nodes and edges to solve. The graph will be
+            modified in-place to add solution attributes to nodes and edges.
+
+        Examples
+        --------
+        ```python
+        solver = NearestNeighborsSolver(max_children=2)
+        solver.solve(graph)
+        ```
+
+        Access solution edges:
+
+        ```python
+        solution_edges = graph.edge_attrs().filter(pl.col("solution") == True)
+        ```
 
         Returns
         -------

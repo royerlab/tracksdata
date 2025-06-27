@@ -131,10 +131,13 @@ def load_ctc(
 
     Examples
     --------
-    >>> from tracksdata.io import load_ctc
-    >>> from tracksdata.graph import RustWorkXGraph
-    >>> graph = RustWorkXGraph()
-    >>> load_ctc("Fluo-N2DL-HeLa/01_GT/TRA", graph)
+    ```python
+    from tracksdata.io import load_ctc
+    from tracksdata.graph import RustWorkXGraph
+
+    graph = RustWorkXGraph()
+    load_ctc("Fluo-N2DL-HeLa/01_GT/TRA", graph)
+    ```
 
     See Also
     --------

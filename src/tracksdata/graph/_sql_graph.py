@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 
 def _is_builtin(obj: Any) -> bool:
+    """Check if an object is a built-in type."""
     return getattr(obj.__class__, "__module__", None) == "builtins"
 
 
@@ -30,7 +31,7 @@ def _data_numpy_to_native(data: dict[str, Any]) -> None:
     Parameters
     ----------
     data : dict[str, Any]
-        The data to convert.
+        The data to convert. Modified in place.
     """
     for k, v in data.items():
         if np.isscalar(v) and hasattr(v, "item"):
@@ -66,6 +67,78 @@ def _filter_query(
 
 
 class SQLGraph(BaseGraph):
+    """
+    SQL-based graph implementation using SQLAlchemy ORM.
+
+    Provides persistent storage and efficient querying of large graphs with
+    support for dynamic schema modification and various database backends.
+    Node IDs are automatically generated based on time to ensure uniqueness
+    across time points.
+
+    Parameters
+    ----------
+    drivername : str
+        The database driver name (e.g., 'sqlite', 'postgresql', 'mysql').
+    database : str
+        The database name or path. For SQLite, this is the file path.
+    username : str, optional
+        Database username. Not required for SQLite.
+    password : str, optional
+        Database password. Not required for SQLite.
+    host : str, optional
+        Database host. Not required for SQLite.
+    port : int, optional
+        Database port. Not required for SQLite.
+    overwrite : bool, default False
+        If True, drop and recreate all tables. Use with caution as this
+        will delete all existing data.
+
+    Attributes
+    ----------
+    node_id_time_multiplier : int
+        Multiplier used to generate node IDs based on time (default: 1,000,000,000).
+    Base : type[DeclarativeBase]
+        SQLAlchemy declarative base class for this graph instance.
+    Node : type[DeclarativeBase]
+        SQLAlchemy model class for nodes.
+    Edge : type[DeclarativeBase]
+        SQLAlchemy model class for edges.
+
+    See Also
+    --------
+    :class:`tracksdata.graph.BaseGraph`
+        Base class for all graph implementations.
+    :class:`tracksdata.graph.RustworkxGraph`
+        In memory Rustworkx-based graph implementation.
+
+    Examples
+    --------
+    Create an in-memory SQLite graph:
+
+    ```python
+    graph = SQLGraph("sqlite", ":memory:")
+    ```
+
+    Create a persistent SQLite graph:
+
+    ```python
+    graph = SQLGraph("sqlite", "my_graph.db")
+    ```
+
+    Create a PostgreSQL graph:
+
+    ```python
+    graph = SQLGraph("postgresql", "tracking_db", username="user", password="pass", host="localhost", port=5432)
+    ```
+
+    Add nodes and edges:
+
+    ```python
+    node_id = graph.add_node({"t": 0, "x": 10.5, "y": 20.3})
+    edge_id = graph.add_edge(node_id, target_id, {"weight": 0.8})
+    ```
+    """
+
     node_id_time_multiplier: int = 1_000_000_000
     Base: type[DeclarativeBase]
     Node: type[DeclarativeBase]
@@ -107,7 +180,12 @@ class SQLGraph(BaseGraph):
         self._update_max_id_per_time()
 
     def _define_schema(self) -> None:
-        """Define the database schema classes for this SQLGraph instance."""
+        """
+        Define the database schema classes for this SQLGraph instance.
+
+        Creates unique SQLAlchemy model classes for this graph instance to
+        avoid conflicts between multiple SQLGraph instances.
+        """
 
         class Base(DeclarativeBase):
             pass
@@ -145,6 +223,13 @@ class SQLGraph(BaseGraph):
         return df
 
     def _update_max_id_per_time(self) -> None:
+        """
+        Update the maximum node ID for each time point.
+
+        Scans the database to find the current maximum node ID for each time
+        point and updates the internal cache to ensure newly created nodes
+        have unique IDs.
+        """
         with Session(self._engine) as session:
             for t in session.query(self.Node.t).distinct():
                 self._max_id_per_time[t] = int(session.query(sa.func.max(self.Node.node_id)).scalar())
@@ -154,6 +239,40 @@ class SQLGraph(BaseGraph):
         attrs: dict[str, Any],
         validate_keys: bool = True,
     ) -> int:
+        """
+        Add a node to the graph at time t.
+
+        Node IDs are automatically generated based on the time point and
+        the node_id_time_multiplier to ensure uniqueness across time points.
+
+        Parameters
+        ----------
+        attrs : dict[str, Any]
+            The attributes of the node to be added. Must contain a "t" key
+            specifying the time point. Additional keys will be stored as
+            node attributes.
+        validate_keys : bool, default True
+            Whether to check if the attribute keys are valid against the
+            current schema. If False, validation is skipped for performance.
+
+        Returns
+        -------
+        int
+            The ID of the newly added node.
+
+        Raises
+        ------
+        ValueError
+            If validate_keys is True and the attributes contain invalid keys,
+            or if the "t" key is missing.
+
+        Examples
+        --------
+        ```python
+        node_id = graph.add_node({"t": 0, "x": 10.5, "y": 20.3})
+        node_id = graph.add_node({"t": 1, "x": 15.2, "y": 25.8, "intensity": 150.0})
+        ```
+        """
         if validate_keys:
             self._validate_attributes(attrs, self.node_attr_keys, "node")
 
@@ -182,14 +301,28 @@ class SQLGraph(BaseGraph):
         nodes: list[dict[str, Any]],
     ) -> None:
         """
-        Faster method to add multiple nodes to the graph with less overhead and fewer checks.
+        Add multiple nodes to the graph efficiently.
+
+        Provides better performance than calling add_node multiple times by
+        using SQLAlchemy's bulk insert functionality and reducing database
+        transactions. Automatically assigns node IDs and handles time-based
+        ID generation.
 
         Parameters
         ----------
         nodes : list[dict[str, Any]]
-            The data of the nodes to be added.
-            The keys of the data will be used as the attributes of the nodes.
-            Must have "t" key.
+            List of node attribute dictionaries. Each dictionary must contain
+            a "t" key and any additional attribute keys.
+
+        Examples
+        --------
+        ```python
+        nodes = [
+            {"t": 0, "x": 10, "y": 20, "label": "A"},
+            {"t": 0, "x": 15, "y": 25, "label": "B"},
+        ]
+        graph.bulk_add_nodes(nodes)
+        ```
         """
         for node in nodes:
             time = node["t"]
@@ -209,6 +342,38 @@ class SQLGraph(BaseGraph):
         attrs: dict[str, Any],
         validate_keys: bool = True,
     ) -> int:
+        """
+        Add an edge to the graph.
+
+        Parameters
+        ----------
+        source_id : int
+            The ID of the source node.
+        target_id : int
+            The ID of the target node.
+        attrs : dict[str, Any]
+            Additional attributes for the edge (e.g., weight, distance).
+        validate_keys : bool, default True
+            Whether to check if the attribute keys are valid against the
+            current schema. If False, validation is skipped for performance.
+
+        Returns
+        -------
+        int
+            The ID of the newly added edge.
+
+        Raises
+        ------
+        ValueError
+            If validate_keys is True and the attributes contain invalid keys.
+
+        Examples
+        --------
+        ```python
+        edge_id = graph.add_edge(node1_id, node2_id, {"weight": 0.8})
+        edge_id = graph.add_edge(node1_id, node2_id, {"weight": 0.9, "distance": 5.2, "confidence": 0.95})
+        ```
+        """
         if validate_keys:
             self._validate_attributes(attrs, self.edge_attr_keys, "edge")
 
@@ -236,14 +401,26 @@ class SQLGraph(BaseGraph):
         edges: list[dict[str, Any]],
     ) -> None:
         """
-        Faster method to add multiple edges to the graph with less overhead and fewer checks.
+        Add multiple edges to the graph efficiently.
+
+        Provides better performance than calling add_edge multiple times by
+        using SQLAlchemy's bulk insert functionality.
 
         Parameters
         ----------
         edges : list[dict[str, Any]]
-            The data of the edges to be added.
-            The keys of the data will be used as the attributes of the edges.
-            Must have "source_id" and "target_id" keys.
+            List of edge attribute dictionaries. Each dictionary must contain
+            "source_id" and "target_id" keys, plus any additional feature keys.
+
+        Examples
+        --------
+        ```python
+        edges = [
+            {"source_id": 1, "target_id": 2, "weight": 0.8},
+            {"source_id": 2, "target_id": 3, "weight": 0.9"},
+        ]
+        graph.bulk_add_edges(edges)
+        ```
         """
         for edge in edges:
             _data_numpy_to_native(edge)
@@ -260,8 +437,29 @@ class SQLGraph(BaseGraph):
         attr_keys: Sequence[str] | str | None = None,
     ) -> dict[int, pl.DataFrame] | pl.DataFrame:
         """
-        Get the predecessors or sucessors of a list of nodes.
-        See more information below.
+        Get the predecessors or successors of nodes via database joins.
+
+        Helper method used by sucessors() and predecessors() to efficiently
+        query neighbor relationships through SQL joins.
+
+        Parameters
+        ----------
+        node_key : str
+            The edge attribute key for the query node (e.g., "source_id").
+        neighbor_key : str
+            The edge attribute key for the neighbor node (e.g., "target_id").
+        node_ids : list[int] | int
+            The IDs of the nodes to get neighbors for.
+        attr_keys : Sequence[str] | str | None, optional
+            The attribute keys to retrieve for neighbor nodes. If None,
+            all attributes are retrieved.
+
+        Returns
+        -------
+        dict[int, pl.DataFrame] | pl.DataFrame
+            If multiple node_ids are provided, returns a dictionary mapping
+            each node_id to a DataFrame of its neighbors. If a single node_id
+            is provided, returns the DataFrame directly.
         """
         single_node = False
         if isinstance(node_ids, int):
@@ -303,6 +501,35 @@ class SQLGraph(BaseGraph):
         node_ids: list[int] | int,
         attr_keys: Sequence[str] | str | None = None,
     ) -> dict[int, pl.DataFrame] | pl.DataFrame:
+        """
+        Get the successor nodes of given nodes.
+
+        Successors are nodes that are targets of edges originating from the
+        given nodes (outgoing edges). Uses efficient SQL joins to retrieve
+        successor information with their attributes in a single query.
+
+        Parameters
+        ----------
+        node_ids : list[int] | int
+            The IDs of the nodes to get successors for.
+        attr_keys : Sequence[str] | str | None, optional
+            The attribute keys to retrieve for successor nodes. If None,
+            all attributes are retrieved.
+
+        Returns
+        -------
+        dict[int, pl.DataFrame] | pl.DataFrame
+            If a list of node_ids is provided, returns a dictionary mapping
+            each node_id to a DataFrame of its successors. If a single node_id
+            is provided, returns the DataFrame directly.
+
+        Examples
+        --------
+        ```python
+        successors_df = graph.sucessors(node_id)
+        successors_dict = graph.sucessors([node1, node2, node3])
+        ```
+        """
         return self._get_neighbors(
             node_key=DEFAULT_ATTR_KEYS.EDGE_SOURCE,
             neighbor_key=DEFAULT_ATTR_KEYS.EDGE_TARGET,
@@ -315,6 +542,35 @@ class SQLGraph(BaseGraph):
         node_ids: list[int] | int,
         attr_keys: Sequence[str] | str | None = None,
     ) -> dict[int, pl.DataFrame] | pl.DataFrame:
+        """
+        Get the predecessor nodes of given nodes.
+
+        Predecessors are nodes that are sources of edges targeting the
+        given nodes (incoming edges). Uses efficient SQL joins to retrieve
+        predecessor information with their attributes in a single query.
+
+        Parameters
+        ----------
+        node_ids : list[int] | int
+            The IDs of the nodes to get predecessors for.
+        attr_keys : Sequence[str] | str | None, optional
+            The attribute keys to retrieve for predecessor nodes. If None,
+            all attributes are retrieved.
+
+        Returns
+        -------
+        dict[int, pl.DataFrame] | pl.DataFrame
+            If a list of node_ids is provided, returns a dictionary mapping
+            each node_id to a DataFrame of its predecessors. If a single node_id
+            is provided, returns the DataFrame directly.
+
+        Examples
+        --------
+        ```python
+        predecessors_df = graph.predecessors(node_id)
+        predecessors_dict = graph.predecessors([node1, node2, node3])
+        ```
+        """
         return self._get_neighbors(
             node_key=DEFAULT_ATTR_KEYS.EDGE_TARGET,
             neighbor_key=DEFAULT_ATTR_KEYS.EDGE_SOURCE,
@@ -326,12 +582,51 @@ class SQLGraph(BaseGraph):
         self,
         *attrs: AttrComparison,
     ) -> list[int]:
+        """
+        Filter nodes by their attribute values.
+
+        Performs an SQL query with WHERE clauses for each specified attribute,
+        providing efficient filtering for large graphs.
+
+        Parameters
+        ----------
+        attrs : dict[str, Any]
+            Dictionary of attribute-value pairs to filter by. Only nodes
+            that match all specified attributes will be returned.
+
+        Returns
+        -------
+        list[int]
+            List of node IDs that match the filter criteria.
+
+        Examples
+        --------
+        ```python
+        node_ids = graph.filter_nodes_by_attribute({"t": 0})
+        node_ids = graph.filter_nodes_by_attribute({"t": 1, "label": "A"})
+        ```
+        """
         with Session(self._engine) as session:
             query = session.query(self.Node.node_id)
             query = _filter_query(query, self.Node, attrs)
             return [i for (i,) in query.all()]
 
     def node_ids(self) -> list[int]:
+        """
+        Get the IDs of all nodes in the graph.
+
+        Returns
+        -------
+        list[int]
+            List of all node IDs in the graph.
+
+        Examples
+        --------
+        ```python
+        all_nodes = graph.node_ids()
+        print(f"Graph contains {len(all_nodes)} nodes")
+        ```
+        """
         with Session(self._engine) as session:
             return [i for (i,) in session.query(self.Node.node_id).all()]
 
