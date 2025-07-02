@@ -2,6 +2,7 @@ import math
 from copy import deepcopy
 from typing import Any, Protocol
 
+import numpy as np
 from tqdm import tqdm
 
 from tracksdata.constants import DEFAULT_ATTR_KEYS
@@ -59,21 +60,30 @@ def default_node_interpolation(
         raise ValueError(f"w = {w} is not between 0 and 1")
 
     ndim = new_attrs[DEFAULT_ATTR_KEYS.MASK].mask.ndim
-    bbox = new_attrs[DEFAULT_ATTR_KEYS.MASK].bbox
+    new_bbox = new_attrs[DEFAULT_ATTR_KEYS.MASK].bbox
 
-    for i, attr_key in enumerate(["x", "y", "z"][:ndim]):
-        if attr_key not in src_attrs or attr_key not in tgt_attrs:
-            continue
-        # TODO: make this part more clear
-        src_val = src_attrs[attr_key]
-        tgt_val = tgt_attrs[attr_key]
-        new_val = w * src_val + (1 - w) * tgt_val
-        new_attrs[attr_key] = new_val
-        offset = round(new_val - tgt_val) - 1
-        bbox[ndim - i - 1] = bbox[ndim - i - 1] + offset
-        bbox[2 * ndim - i - 1] = bbox[2 * ndim - i - 1] + offset
+    # updating bounding box
+    tgt_center = tgt_attrs[DEFAULT_ATTR_KEYS.MASK].bbox_center()
+    src_center = src_attrs[DEFAULT_ATTR_KEYS.MASK].bbox_center()
+    signed_dist = tgt_center - src_center
+    offset = -np.round((1 - w) * signed_dist).astype(int)
 
-    new_attrs[DEFAULT_ATTR_KEYS.MASK].bbox = bbox
+    for i in range(ndim):
+        if offset[i] > 0:
+            new_value = new_bbox[ndim + i] - offset[i]
+            dist_to_border = min(new_value - tgt_attrs[DEFAULT_ATTR_KEYS.MASK].bbox[ndim + i], 0)
+            offset[i] += dist_to_border
+        else:
+            new_value = new_bbox[i] + offset[i]
+            dist_to_border = max(tgt_attrs[DEFAULT_ATTR_KEYS.MASK].bbox[i] - new_value, 0)
+            offset[i] += dist_to_border
+
+    new_bbox[ndim:] = new_bbox[ndim:] + offset
+    new_bbox[:ndim] = new_bbox[:ndim] + offset
+    new_attrs[DEFAULT_ATTR_KEYS.MASK].bbox = new_bbox
+
+    for o, attr_key in zip(offset[::-1], ["x", "y", "z"], strict=False):
+        new_attrs[attr_key] += o
 
     return new_attrs
 
