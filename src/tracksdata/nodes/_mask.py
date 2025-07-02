@@ -90,13 +90,19 @@ class Mask:
             slicing = tuple(slice(self._bbox[i], self._bbox[i + ndim]) for i in range(ndim))
 
         else:
-            center = (self._bbox[: self._mask.ndim] + self._bbox[self._mask.ndim :]) // 2
+            center = self.bbox_center()
             half_shape = np.asarray(shape) // 2
             start = np.maximum(center - half_shape, 0)
             end = np.minimum(center + half_shape, image.shape)
             slicing = tuple(slice(s, e) for s, e in zip(start, end, strict=True))
 
         return image[slicing]
+
+    def bbox_center(self) -> NDArray[np.integer]:
+        """
+        Get the center of the bounding box.
+        """
+        return (self._bbox[: self._mask.ndim] + self._bbox[self._mask.ndim :]) // 2
 
     def mask_indices(
         self,
