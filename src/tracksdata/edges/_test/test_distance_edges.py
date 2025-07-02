@@ -266,16 +266,32 @@ def test_distance_edges_add_edges_with_delta_t() -> None:
     graph.add_node_attr_key("y", 0.0)
 
     # Add nodes at t=0, t=1, t=2
-    _ = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
-    _ = graph.add_node({DEFAULT_ATTR_KEYS.T: 1, "x": 1.0, "y": 1.0})
-    _ = graph.add_node({DEFAULT_ATTR_KEYS.T: 2, "x": 2.0, "y": 2.0})
+    node_0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
+    node_1 = graph.add_node({DEFAULT_ATTR_KEYS.T: 1, "x": 1.0, "y": 1.0})
+    node_2 = graph.add_node({DEFAULT_ATTR_KEYS.T: 2, "x": 2.0, "y": 2.0})
+    node_3 = graph.add_node({DEFAULT_ATTR_KEYS.T: 3, "x": 3.0, "y": 3.0})
 
     operator = DistanceEdges(distance_threshold=5.0, n_neighbors=2, delta_t=2, show_progress=False)
 
     operator.add_edges(graph)
 
-    # Should have edges from t=0 and t=1 to t=2
-    assert graph.num_edges >= 0
+    edges_df = graph.edge_attrs()
+    edge_list = {
+        (src, tgt)
+        for src, tgt in zip(
+            edges_df[DEFAULT_ATTR_KEYS.EDGE_SOURCE].to_list(),
+            edges_df[DEFAULT_ATTR_KEYS.EDGE_TARGET].to_list(),
+            strict=True,
+        )
+    }
+    expected_edge_list = {
+        (node_0, node_1),
+        (node_1, node_2),
+        (node_2, node_3),
+        (node_0, node_2),
+        (node_1, node_3),
+    }
+    assert edge_list == expected_edge_list
 
 
 def test_distance_edges_invalid_delta_t() -> None:
