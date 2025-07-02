@@ -2,13 +2,13 @@ import math
 from copy import deepcopy
 from typing import Any, Protocol
 
-import numpy as np
 from tqdm import tqdm
 
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.edges._generic_edges import GenericNodeFunctionEdgeAttrs
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.nodes._base_nodes import BaseNodesOperator
+from tracksdata.nodes._mask import bbox_interpolation_offset
 from tracksdata.utils._logging import LOG
 
 
@@ -63,20 +63,11 @@ def default_node_interpolation(
     new_bbox = new_attrs[DEFAULT_ATTR_KEYS.MASK].bbox
 
     # updating bounding box
-    tgt_center = tgt_attrs[DEFAULT_ATTR_KEYS.MASK].bbox_center()
-    src_center = src_attrs[DEFAULT_ATTR_KEYS.MASK].bbox_center()
-    signed_dist = tgt_center - src_center
-    offset = -np.round((1 - w) * signed_dist).astype(int)
-
-    for i in range(ndim):
-        if offset[i] > 0:
-            new_value = new_bbox[ndim + i] - offset[i]
-            dist_to_border = min(new_value - tgt_attrs[DEFAULT_ATTR_KEYS.MASK].bbox[ndim + i], 0)
-            offset[i] += dist_to_border
-        else:
-            new_value = new_bbox[i] + offset[i]
-            dist_to_border = max(tgt_attrs[DEFAULT_ATTR_KEYS.MASK].bbox[i] - new_value, 0)
-            offset[i] += dist_to_border
+    offset = bbox_interpolation_offset(
+        tgt_bbox=tgt_attrs[DEFAULT_ATTR_KEYS.MASK].bbox,
+        src_bbox=src_attrs[DEFAULT_ATTR_KEYS.MASK].bbox,
+        w=w,
+    )
 
     new_bbox[ndim:] = new_bbox[ndim:] + offset
     new_bbox[:ndim] = new_bbox[:ndim] + offset
@@ -182,7 +173,7 @@ class NodeInterpolator(BaseNodesOperator):
         for long_edge in tqdm(
             list(long_edges.iter_rows(named=True)),
             disable=not self.show_progress,
-            desc="Interpolating nodes",
+            desc="Interpolating and adding nodes",
         ):
             delta_t = long_edge[self.delta_t_key]
 
