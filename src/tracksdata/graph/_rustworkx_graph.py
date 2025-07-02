@@ -791,3 +791,74 @@ class RustWorkXGraph(BaseGraph):
         if isinstance(node_ids, int):
             return rx_graph.out_degree(node_ids)
         return [rx_graph.out_degree(node_id) for node_id in node_ids]
+
+    def contract_nodes(
+        self,
+        permanent_node_ids: Sequence[int],
+    ) -> "GraphView":
+        """
+        Contract the graph to only include the given `permanent_node_ids`.
+        Predecessor and sucessors of removed nodes are connected during contraction.
+
+        Example:
+
+        ```mermaid
+        graph TD
+            A((t=0)) --> B((t=1))
+            A --> C((t=1))
+            B --> D((t=2))
+            C --> E((t=2))
+            C --> F((t=2))
+        ```
+
+        After contraction only keeping nodes in `t=0` and `t=2`:
+        ```mermaid
+        graph TD
+            A((t=0)) --> B((t=2))
+            A --> C((t=2))
+            A --> D((t=2))
+        ```
+
+        Parameters
+        ----------
+        permanent_node_ids : Sequence[int]
+            The node ids to keep in the contracted graph.
+
+        Returns
+        -------
+        GraphView
+            A view of the contracted graph.
+        """
+        from tracksdata.graph._graph_view import GraphView
+
+        all_node_ids = np.asarray(self.node_ids())
+        selected_nodes_mask = np.isin(all_node_ids, permanent_node_ids)
+        missing_node_ids = all_node_ids[~selected_nodes_mask]
+
+        # must block multigraphs to avoid edge duplication
+        rx_graph = rx.PyDiGraph(multigraph=False)
+        new_indices = rx_graph.add_nodes_from(self.rx_graph.nodes())
+        rx_graph.add_edges_from(self.rx_graph.weighted_edge_list())
+
+        for node_id in missing_node_ids:
+            rx_graph.remove_node_retain_edges(
+                node_id,
+                use_outgoing=True,
+                condition=lambda *args: True,
+            )
+
+        node_map_to_root = dict(
+            zip(
+                np.asarray(new_indices)[selected_nodes_mask].tolist(),
+                permanent_node_ids,
+                strict=True,
+            )
+        )
+
+        # I'm a bit concerned with the internal booking of indices of rustworkx
+        # so I'm adding this sanity check
+        assert len(node_map_to_root) == rx_graph.num_nodes()
+
+        graph_view = GraphView(rx_graph, node_map_to_root=node_map_to_root, root=self)
+
+        return graph_view

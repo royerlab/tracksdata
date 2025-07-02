@@ -83,6 +83,8 @@ plugins:
             show_symbol_type_toc: true
             show_inheritance_diagram: true
             summary: true
+  - mermaid2
+
 
 markdown_extensions:
   - admonition
@@ -95,3 +97,9 @@ markdown_extensions:
       use_pygments: true
   - pymdownx.inlinehilite
   - pymdownx.superfences
+  - pymdownx.extra:
+      pymdownx.superfences:
+        custom_fences:
+          - name: mermaid
+            class: mermaid
+            format: !!python/name:pymdownx.superfences.fence_code_format  # noqa

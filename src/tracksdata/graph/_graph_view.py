@@ -1,5 +1,5 @@
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import Any, overload
 
 import polars as pl
 import rustworkx as rx
@@ -9,6 +9,14 @@ from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.functional._rx import _assign_track_ids
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.graph._rustworkx_graph import RustWorkXGraph
+
+
+@overload
+def map_ids(map: dict[int, int], indices: Sequence[int]) -> list[int]: ...
+
+
+@overload
+def map_ids(map: dict[int, int], indices: None) -> None: ...
 
 
 def map_ids(
@@ -150,13 +158,7 @@ class GraphView(RustWorkXGraph):
             edge_attr_keys=edge_attr_keys,
         )
 
-        subgraph._root = self._root
-
-        subgraph._node_map_to_root = {k: self._node_map_to_root[v] for k, v in subgraph._node_map_to_root.items()}
-        subgraph._node_map_from_root = {v: k for k, v in subgraph._node_map_to_root.items()}
-
-        subgraph._edge_map_to_root = {k: self._edge_map_to_root[v] for k, v in subgraph._edge_map_to_root.items()}
-        subgraph._edge_map_from_root = {v: k for k, v in subgraph._edge_map_to_root.items()}
+        subgraph._replace_parent_graph_with_root()
 
         return subgraph
 
@@ -449,3 +451,66 @@ class GraphView(RustWorkXGraph):
         if isinstance(node_ids, int):
             return rx_graph.out_degree(self._node_map_from_root[node_ids])
         return [rx_graph.out_degree(self._node_map_from_root[node_id]) for node_id in node_ids]
+
+    def _replace_parent_graph_with_root(self) -> None:
+        """
+        Replace the parent graph with it's own parent graph (the root graph)
+        This is internally called so every view of a graph maps to a single root, skipping intermediate views.
+        """
+        parent = self._root
+
+        if not isinstance(parent, GraphView):
+            raise ValueError(
+                f"Parent graph must be a GraphView to have its parent replaced with the root graph. Got {type(parent)}."
+            )
+
+        self._root = parent._root
+        self._node_map_to_root = {k: parent._node_map_to_root[v] for k, v in self._node_map_to_root.items()}
+        self._node_map_from_root = {v: k for k, v in self._node_map_to_root.items()}
+
+        self._edge_map_to_root = {k: parent._edge_map_to_root[v] for k, v in self._edge_map_to_root.items()}
+        self._edge_map_from_root = {v: k for k, v in self._edge_map_to_root.items()}
+
+    def contract_nodes(
+        self,
+        permanent_node_ids: Sequence[int],
+    ) -> "GraphView":
+        """
+        Contract the graph to only include the given `permanent_node_ids`.
+        Predecessor and sucessors of removed nodes are connected during contraction.
+
+        Example:
+
+        ```mermaid
+        graph TD
+            A((t=0)) --> B((t=1))
+            A --> C((t=1))
+            B --> D((t=2))
+            C --> E((t=2))
+            C --> F((t=2))
+        ```
+
+        After contraction only keeping nodes in `t=0` and `t=2`:
+        ```mermaid
+        graph TD
+            A((t=0)) --> B((t=2))
+            A --> C((t=2))
+            A --> D((t=2))
+        ```
+
+        Parameters
+        ----------
+        permanent_node_ids : Sequence[int]
+            The node ids to keep in the contracted graph.
+
+        Returns
+        -------
+        GraphView
+            A view of the contracted graph.
+        """
+        subgraph = super().contract_nodes(
+            permanent_node_ids=map_ids(self._node_map_from_root, permanent_node_ids),
+        )
+        subgraph._replace_parent_graph_with_root()
+
+        return subgraph

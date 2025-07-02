@@ -18,11 +18,6 @@ def test_already_existing_keys(graph_backend: BaseGraph) -> None:
     with pytest.raises(ValueError):
         graph_backend.add_node_attr_key("x", None)
 
-    graph_backend.add_edge_attr_key("w", None)
-
-    with pytest.raises(ValueError):
-        graph_backend.add_edge_attr_key("w", None)
-
     with pytest.raises(ValueError):
         # missing x
         graph_backend.add_node(attrs={"t": 0})

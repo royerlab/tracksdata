@@ -457,15 +457,19 @@ class BaseGraph(abc.ABC):
         load_ctc(data_dir, graph)
         return graph
 
+    @abc.abstractmethod
     @overload
     def in_degree(self, node_ids: int) -> int: ...
 
+    @abc.abstractmethod
     @overload
     def in_degree(self, node_ids: list[int] | None = None) -> list[int]: ...
 
+    @abc.abstractmethod
     @overload
     def out_degree(self, node_ids: int) -> int: ...
 
+    @abc.abstractmethod
     @overload
     def out_degree(self, node_ids: list[int] | None = None) -> list[int]: ...
 
