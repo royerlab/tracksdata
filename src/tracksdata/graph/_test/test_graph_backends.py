@@ -6,8 +6,9 @@ import pytest
 
 from tracksdata.attrs import EdgeAttr, NodeAttr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
-from tracksdata.graph import SQLGraph
+from tracksdata.graph import RustWorkXGraph, SQLGraph
 from tracksdata.graph._base_graph import BaseGraph
+from tracksdata.io._numpy_array import load_array
 from tracksdata.nodes._mask import Mask
 
 
@@ -531,7 +532,7 @@ def test_sucessors_and_degree(graph_backend: BaseGraph) -> None:
     graph_backend.add_edge(node1, node2, {"weight": 0.3})  # node1 -> node2
 
     # Test successors of node0 (should return node1 and node3)
-    successors_df = graph_backend.sucessors(node0)
+    successors_df = graph_backend.successors(node0)
     assert isinstance(successors_df, pl.DataFrame)
     assert len(successors_df) == 2  # node0 has 2 successors
     assert graph_backend.out_degree(node0) == 2
@@ -541,20 +542,20 @@ def test_sucessors_and_degree(graph_backend: BaseGraph) -> None:
     assert successor_nodes == {node1, node3}
 
     # Test successors of node1 (should return node2)
-    successors_df = graph_backend.sucessors(node1)
+    successors_df = graph_backend.successors(node1)
     assert isinstance(successors_df, pl.DataFrame)
     assert len(successors_df) == 1  # node1 has 1 successor
     assert successors_df[DEFAULT_ATTR_KEYS.NODE_ID].to_list()[0] == node2
     assert graph_backend.out_degree(node1) == 1
 
     # Test successors of node2 (should return empty - no successors)
-    successors_df = graph_backend.sucessors(node2)
+    successors_df = graph_backend.successors(node2)
     assert isinstance(successors_df, pl.DataFrame)
     assert len(successors_df) == 0  # node2 has no successors
     assert graph_backend.out_degree(node2) == 0
 
     # Test with multiple nodes
-    successors_dict = graph_backend.sucessors([node0, node1, node2])
+    successors_dict = graph_backend.successors([node0, node1, node2])
     assert isinstance(successors_dict, dict)
     assert len(successors_dict) == 3
 
@@ -655,7 +656,7 @@ def test_sucessors_with_attr_keys(graph_backend: BaseGraph) -> None:
     graph_backend.add_edge(node0, node2, {"weight": 0.7})
 
     # Test with single attribute key as string
-    successors_df = graph_backend.sucessors(node0, attr_keys="x")
+    successors_df = graph_backend.successors(node0, attr_keys="x")
     assert isinstance(successors_df, pl.DataFrame)
     assert "x" in successors_df.columns
     assert "y" not in successors_df.columns
@@ -666,7 +667,7 @@ def test_sucessors_with_attr_keys(graph_backend: BaseGraph) -> None:
     assert "x" in available_cols
 
     # Test with multiple attribute keys as list
-    successors_df = graph_backend.sucessors(node0, attr_keys=["x", "label"])
+    successors_df = graph_backend.successors(node0, attr_keys=["x", "label"])
     assert isinstance(successors_df, pl.DataFrame)
     assert "x" in successors_df.columns
     assert "label" in successors_df.columns
@@ -732,7 +733,7 @@ def test_sucessors_predecessors_edge_cases(graph_backend: BaseGraph) -> None:
     node1 = graph_backend.add_node({"t": 1, "x": 1.0})
 
     # Test successors/predecessors of isolated nodes
-    successors_df = graph_backend.sucessors(node0)
+    successors_df = graph_backend.successors(node0)
     assert isinstance(successors_df, pl.DataFrame)
     assert len(successors_df) == 0
 
@@ -741,7 +742,7 @@ def test_sucessors_predecessors_edge_cases(graph_backend: BaseGraph) -> None:
     assert len(predecessors_df) == 0
 
     # Test with empty list of nodes
-    successors_dict = graph_backend.sucessors([])
+    successors_dict = graph_backend.successors([])
     assert isinstance(successors_dict, dict)
     assert len(successors_dict) == 0
 
@@ -752,7 +753,7 @@ def test_sucessors_predecessors_edge_cases(graph_backend: BaseGraph) -> None:
     # Test with non-existent attribute keys (should work but return limited columns)
     # This depends on implementation - some might raise errors, others might ignore
     try:
-        successors_df = graph_backend.sucessors(node0, attr_keys=["nonexistent"])
+        successors_df = graph_backend.successors(node0, attr_keys=["nonexistent"])
         # If it doesn't raise an error, it should return empty or handle gracefully
         assert isinstance(successors_df, pl.DataFrame)
     except (KeyError, AttributeError):
@@ -923,3 +924,206 @@ def test_attrs_with_duplicated_attr_keys(graph_backend: BaseGraph) -> None:
     edges_df = graph_backend.edge_attrs(attr_keys=["weight", "weight", "weight"])
     assert "weight" in edges_df.columns
     assert edges_df["weight"].to_list() == [0.5]
+
+
+def test_add_overlap(graph_backend: BaseGraph) -> None:
+    """Test adding single overlaps to the graph."""
+    # Add nodes first
+    node1 = graph_backend.add_node({"t": 0})
+    node2 = graph_backend.add_node({"t": 0})
+    node3 = graph_backend.add_node({"t": 1})
+
+    # Add overlaps
+    graph_backend.add_overlap(node1, node2)
+    graph_backend.add_overlap(node2, node3)
+
+    # Verify overlaps were added
+    assert graph_backend.has_overlaps()
+    overlaps = graph_backend.overlaps()
+    assert len(overlaps) == 2
+    assert [node1, node2] in overlaps
+    assert [node2, node3] in overlaps
+
+
+def test_bulk_add_overlaps(graph_backend: BaseGraph) -> None:
+    """Test adding multiple overlaps efficiently."""
+    # Add nodes first
+    nodes = []
+    for i in range(5):
+        nodes.append(graph_backend.add_node({"t": i}))
+
+    # Create overlap pairs
+    overlap_pairs = [
+        [nodes[0], nodes[1]],
+        [nodes[1], nodes[2]],
+        [nodes[2], nodes[3]],
+        [nodes[3], nodes[4]],
+    ]
+
+    # Add overlaps in bulk
+    graph_backend.bulk_add_overlaps(overlap_pairs)
+
+    # Verify all overlaps were added
+    assert graph_backend.has_overlaps()
+    overlaps = graph_backend.overlaps()
+    assert len(overlaps) == 4
+    for pair in overlap_pairs:
+        assert pair in overlaps
+
+
+def test_overlaps_with_node_filtering(graph_backend: BaseGraph) -> None:
+    """Test retrieving overlaps filtered by specific node IDs."""
+    # Add nodes
+    nodes = []
+    for i in range(4):
+        nodes.append(graph_backend.add_node({"t": i}))
+
+    # Add overlaps
+    graph_backend.add_overlap(nodes[0], nodes[1])
+    graph_backend.add_overlap(nodes[1], nodes[2])
+    graph_backend.add_overlap(nodes[2], nodes[3])
+
+    # Test filtering by nodes that have multiple overlaps
+    filtered_overlaps = graph_backend.overlaps([nodes[1], nodes[2]])
+    assert len(filtered_overlaps) == 1
+    assert [nodes[1], nodes[2]] == filtered_overlaps[0]
+
+    # Test filtering by nodes with no overlaps
+    filtered_overlaps = graph_backend.overlaps([nodes[0], nodes[3]])
+    assert len(filtered_overlaps) == 0
+
+
+def test_overlaps_empty_graph(graph_backend: BaseGraph) -> None:
+    """Test overlap behavior on empty graphs."""
+    # Test on empty graph
+    assert not graph_backend.has_overlaps()
+    assert graph_backend.overlaps() == []
+    assert graph_backend.overlaps([1, 2, 3]) == []
+
+
+def test_overlaps_edge_cases(graph_backend: BaseGraph) -> None:
+    """Test overlap functionality with edge cases."""
+    # Add a single node
+    node = graph_backend.add_node({"t": 0})
+
+    # Test overlaps with single node (should be empty)
+    assert graph_backend.overlaps([node]) == []
+
+    # Test overlaps with non-existent nodes
+    assert graph_backend.overlaps([999, 1000]) == []
+
+    # Add overlap and test with mixed existing/non-existing nodes
+    node2 = graph_backend.add_node({"t": 0})
+    graph_backend.add_overlap(node, node2)
+
+    overlaps = graph_backend.overlaps([node, 999])
+    assert len(overlaps) == 0
+
+
+def test_from_numpy_array_basic(graph_backend: BaseGraph) -> None:
+    """Test basic functionality of from_numpy_array with 2D positions."""
+    # Test 2D positions (T, Y, X)
+    positions = np.array(
+        [
+            [0, 10, 20],  # t=0, y=10, x=20
+            [1, 15, 25],  # t=1, y=15, x=25
+            [2, 20, 30],  # t=2, y=20, x=30
+        ]
+    )
+
+    radius = 2
+
+    if isinstance(graph_backend, RustWorkXGraph):
+        # for RustWorkXGraph we validate if the OOP API is working
+        graph_backend = RustWorkXGraph.from_array(positions, radius=radius, rx_graph=None)
+    else:
+        load_array(positions, graph_backend, radius=radius)
+
+    assert graph_backend.num_nodes == 3
+    assert graph_backend.num_edges == 0  # No track_ids, so no edges
+
+    # Check node attributes
+    nodes_df = graph_backend.node_attrs(attr_keys=["t", "y", "x"])
+
+    np.testing.assert_array_equal(nodes_df.to_numpy(), positions)
+
+    # Check that mask attribute was added
+    assert DEFAULT_ATTR_KEYS.MASK in graph_backend.node_attr_keys
+
+
+def test_from_numpy_array_3d(graph_backend: BaseGraph) -> None:
+    """Test from_numpy_array with 3D positions (T, Z, Y, X)."""
+    # Test 3D positions (T, Z, Y, X)
+    positions = np.asarray(
+        [
+            [0, 5, 10, 20],  # t=0, z=5, y=10, x=20
+            [1, 6, 15, 25],  # t=1, z=6, y=15, x=25
+            [2, 7, 20, 30],  # t=2, z=7, y=20, x=30
+        ]
+    )
+
+    track_ids = np.asarray([1, 2, 3])
+    track_id_graph = {3: 1, 2: 1}
+
+    radius = np.asarray([1, 3, 5])
+
+    if isinstance(graph_backend, RustWorkXGraph):
+        # for RustWorkXGraph we validate if the OOP API is working
+        graph_backend = RustWorkXGraph.from_array(
+            positions,
+            track_ids=track_ids,
+            track_id_graph=track_id_graph,
+            radius=radius,
+            rx_graph=None,
+        )
+    else:
+        load_array(
+            positions,
+            graph_backend,
+            track_ids=track_ids,
+            track_id_graph=track_id_graph,
+            radius=radius,
+        )
+
+    assert graph_backend.num_nodes == 3
+    assert graph_backend.num_edges == 2
+
+    edges_df = graph_backend.edge_attrs()
+    assert len(edges_df) == 2
+
+    nodes_df = graph_backend.node_attrs()
+    node_ids = nodes_df[DEFAULT_ATTR_KEYS.NODE_ID].to_list()
+
+    edges = edges_df.select([DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET]).to_numpy().tolist()
+    assert [node_ids[0], node_ids[1]] in edges
+    assert [node_ids[0], node_ids[2]] in edges
+
+    np.testing.assert_array_equal(nodes_df.select(["t", "z", "y", "x"]).to_numpy(), positions)
+
+    masks = [m.bbox[3] - m.bbox[0] for m in nodes_df[DEFAULT_ATTR_KEYS.MASK].to_list()]
+    np.testing.assert_array_equal(masks, [r * 2 + 1 for r in radius])
+
+    np.testing.assert_array_equal(nodes_df[DEFAULT_ATTR_KEYS.TRACK_ID].to_list(), track_ids)
+
+
+def test_from_numpy_array_validation_errors() -> None:
+    """Test from_numpy_array validation errors."""
+    # Test invalid position dimensions
+    invalid_positions = np.array([[0, 10]])  # Only 2 columns, need 3 or 4
+    with pytest.raises(ValueError, match="Expected 4 or 5 dimensions"):
+        RustWorkXGraph.from_array(invalid_positions)
+
+    # Test radius length mismatch
+    positions = np.array([[0, 10, 20], [1, 15, 25]])
+    invalid_radius = np.array([1, 2, 3])  # Length 3, positions length 2
+    with pytest.raises(ValueError, match="must be a scalar or have the same length"):
+        RustWorkXGraph.from_array(positions, radius=invalid_radius)
+
+    # Test track_id_graph without track_ids
+    with pytest.raises(ValueError, match="must be provided if"):
+        RustWorkXGraph.from_array(positions, track_id_graph={2: 1})
+
+    # Test track_ids length mismatch
+    track_ids = np.array([1, 2, 3])  # Length 3, positions length 2
+    with pytest.raises(ValueError, match="must have the same length"):
+        RustWorkXGraph.from_array(positions, track_ids=track_ids)

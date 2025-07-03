@@ -619,3 +619,58 @@ def test_ilp_solver_solve_with_inf_edge_weight() -> None:
 
     assert not high_conf_edge
     assert low_conf_edge
+
+
+def test_ilp_solver_solve_with_overlaps() -> None:
+    """Test solving with overlapping nodes that should be mutually exclusive."""
+    graph = RustWorkXGraph()
+
+    # Register attribute keys
+    graph.add_node_attr_key("x", 0.0)
+    graph.add_node_attr_key("y", 0.0)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_WEIGHT, 0.0)
+
+    # Add nodes - overlapping pair at time t=1
+    node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
+    node1 = graph.add_node({DEFAULT_ATTR_KEYS.T: 1, "x": 1.0, "y": 1.0})  # Overlaps with node2
+    node2 = graph.add_node({DEFAULT_ATTR_KEYS.T: 1, "x": 1.1, "y": 1.1})  # Overlaps with node1
+    node3 = graph.add_node({DEFAULT_ATTR_KEYS.T: 2, "x": 2.0, "y": 2.0})
+
+    # Add overlap - mutually exclusive pair
+    graph.add_overlap(node1, node2)
+
+    # Add edges with different weights
+    # node0 -> node1 (better weight)
+    edge1 = graph.add_edge(node0, node1, {DEFAULT_ATTR_KEYS.EDGE_WEIGHT: -2.0})
+    # node0 -> node2 (worse weight)
+    edge2 = graph.add_edge(node0, node2, {DEFAULT_ATTR_KEYS.EDGE_WEIGHT: -1.0})
+    # node1 -> node3
+    edge3 = graph.add_edge(node1, node3, {DEFAULT_ATTR_KEYS.EDGE_WEIGHT: -2.0})
+    # node2 -> node3
+    edge4 = graph.add_edge(node2, node3, {DEFAULT_ATTR_KEYS.EDGE_WEIGHT: -2.0})
+
+    solver = ILPSolver()
+    solver.solve(graph)
+
+    # Check that solution respects overlap constraints
+    node_attrs = graph.node_attrs()
+    edge_attrs = graph.edge_attrs()
+
+    selected_nodes = node_attrs.filter(node_attrs[DEFAULT_ATTR_KEYS.SOLUTION])
+    selected_node_ids = selected_nodes[DEFAULT_ATTR_KEYS.NODE_ID].to_list()
+
+    # Verify overlap constraints are respected
+    # node1 and node2 should not both be selected
+    assert not (node1 in selected_node_ids and node2 in selected_node_ids)
+
+    # Verify that the better edge (node0 -> node1) is selected
+    # since node1 has better weight than node2
+    selected_edges = edge_attrs.filter(edge_attrs[DEFAULT_ATTR_KEYS.SOLUTION])
+    selected_edge_ids = selected_edges[DEFAULT_ATTR_KEYS.EDGE_ID].to_list()
+
+    # The solver should prefer the better edge (edge1: node0 -> node1)
+    # and reject the worse edge (edge2: node0 -> node2) due to overlap constraint
+    assert edge1 in selected_edge_ids
+    assert edge2 not in selected_edge_ids
+    assert edge3 in selected_edge_ids
+    assert edge4 not in selected_edge_ids

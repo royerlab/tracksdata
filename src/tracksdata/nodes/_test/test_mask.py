@@ -253,3 +253,41 @@ def test_mask_crop_with_shape() -> None:
     image = np.array([[0, 0, 0, 0], [0, 1, 2, 0], [0, 3, 4, 0], [0, 0, 0, 0]])
     cropped_image = mask.crop(image, shape=(2, 4))
     assert np.array_equal(cropped_image, image[1:3, 0:4])
+
+
+def test_mask_from_coordinates_2d_basic() -> None:
+    """Test 2D mask creation and bbox without cropping."""
+    center = np.asarray([5, 5])
+    radius = 2
+    mask = Mask.from_coordinates(center, radius)
+    # Should be a disk of radius 2, shape (5,5), centered at (5,5)
+    assert mask.mask.shape == (5, 5)
+    assert mask.mask[2, 2]  # center pixel is True
+    np.testing.assert_array_equal(mask.bbox, [3, 3, 8, 8])
+
+
+def test_mask_from_coordinates_3d_basic() -> None:
+    """Test 3D mask creation and bbox without cropping."""
+    center = np.asarray([4, 5, 6])
+    radius = 1
+    mask = Mask.from_coordinates(center, radius)
+    # Should be a ball of radius 1, shape (3,3,3), centered at (4,5,6)
+    assert mask.mask.shape == (3, 3, 3)
+    assert mask.mask[1, 1, 1]  # center voxel is True
+    np.testing.assert_array_equal(mask.bbox, [3, 4, 5, 6, 7, 8])
+
+
+def test_mask_from_coordinates_cropping() -> None:
+    """Test cropping when mask falls outside the image boundary."""
+    center = np.asarray([0, 0])
+    radius = 5
+    image_shape = (4, 3)
+
+    mask = Mask.from_coordinates(center, radius, image_shape=image_shape)
+
+    # Mask shape should match the bbox size
+    expected_shape = (4, 3)
+    assert mask.mask.shape == expected_shape
+
+    # Mask should be cropped to fit within image bounds
+    np.testing.assert_array_equal(mask.bbox, [0, 0, 4, 3])

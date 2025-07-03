@@ -24,6 +24,8 @@ def to_napari_format(
     - a tracks layer with the solution tracks
     - a graph with the parent-child relationships for the solution tracks
 
+    IMPORTANT: This function will reset the track ids if they already exist.
+
     Parameters
     ----------
     graph : BaseGraph

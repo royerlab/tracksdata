@@ -204,10 +204,17 @@ class SQLGraph(BaseGraph):
             source_id = sa.Column(sa.BigInteger, sa.ForeignKey("nodes.node_id"))
             target_id = sa.Column(sa.BigInteger, sa.ForeignKey("nodes.node_id"))
 
+        class Overlap(Base):
+            __tablename__ = "overlaps"
+            overlap_id = sa.Column(sa.Integer, primary_key=True, unique=True, autoincrement=True)
+            source_id = sa.Column(sa.BigInteger, sa.ForeignKey("nodes.node_id"))
+            target_id = sa.Column(sa.BigInteger, sa.ForeignKey("nodes.node_id"))
+
         # Assign to instance variables
         self.Base = Base
         self.Node = Node
         self.Edge = Edge
+        self.Overlap = Overlap
 
         self._boolean_columns: dict[type[DeclarativeBase], list[str]] = {self.Node: [], self.Edge: []}
 
@@ -321,17 +328,26 @@ class SQLGraph(BaseGraph):
         ]
         graph.bulk_add_nodes(nodes)
         ```
+
+        Returns
+        -------
+        list[int]
+            The IDs of the added nodes.
         """
+        node_ids = []
         for node in nodes:
             time = node["t"]
             default_node_id = (time * self.node_id_time_multiplier) - 1
             node_id = self._max_id_per_time.get(time, default_node_id) + 1
             node[DEFAULT_ATTR_KEYS.NODE_ID] = node_id
+            node_ids.append(node_id)
             self._max_id_per_time[time] = node_id
 
         with Session(self._engine) as session:
-            session.bulk_insert_mappings(self.Node, nodes)
+            session.execute(sa.insert(self.Node), nodes)
             session.commit()
+
+        return node_ids
 
     def add_edge(
         self,
@@ -424,8 +440,91 @@ class SQLGraph(BaseGraph):
             _data_numpy_to_native(edge)
 
         with Session(self._engine) as session:
-            session.bulk_insert_mappings(self.Edge, edges)
+            session.execute(sa.insert(self.Edge), edges)
             session.commit()
+
+    def add_overlap(
+        self,
+        source_id: int,
+        target_id: int,
+    ) -> int:
+        """
+        Add a new overlap to the graph.
+        Overlapping nodes are mutually exclusive.
+
+        Parameters
+        ----------
+        source_id : int
+            The ID of the source node.
+        target_id : int
+            The ID of the target node.
+
+        Returns
+        -------
+        int
+            The ID of the added overlap.
+        """
+        overlap = self.Overlap(
+            source_id=source_id,
+            target_id=target_id,
+        )
+        with Session(self._engine) as session:
+            session.add(overlap)
+            session.commit()
+
+    def bulk_add_overlaps(
+        self,
+        overlaps: list[list[int, 2]],
+    ) -> None:
+        """
+        Add multiple overlaps to the graph.
+        Overlapping nodes are mutually exclusive.
+
+        Parameters
+        ----------
+        overlaps : list[list[int, 2]]
+            The IDs of the nodes to add the overlaps for.
+
+        See Also
+        --------
+        [add_overlap][tracksdata.graph.SQLGraph.add_overlap]:
+            Add a single overlap to the graph.
+        """
+        if hasattr(overlaps, "tolist"):
+            overlaps = overlaps.tolist()
+
+        overlaps = [{"source_id": source_id, "target_id": target_id} for source_id, target_id in overlaps]
+        with Session(self._engine) as session:
+            session.execute(sa.insert(self.Overlap), overlaps)
+            session.commit()
+
+    def overlaps(
+        self,
+        node_ids: list[int] | None = None,
+    ) -> list[list[int, 2]]:
+        """
+        Get the overlaps between the nodes in `node_ids`.
+        """
+        if hasattr(node_ids, "tolist"):
+            node_ids = node_ids.tolist()
+
+        with Session(self._engine) as session:
+            query = session.query(self.Overlap.source_id, self.Overlap.target_id)
+
+            if node_ids is not None:
+                query = query.filter(
+                    self.Overlap.source_id.in_(node_ids),
+                    self.Overlap.target_id.in_(node_ids),
+                )
+
+            return [[source_id, target_id] for source_id, target_id in query.all()]
+
+    def has_overlaps(self) -> bool:
+        """
+        Check if the graph has any overlaps.
+        """
+        with Session(self._engine) as session:
+            return session.query(self.Overlap).count() > 0
 
     def _get_neighbors(
         self,
@@ -494,7 +593,7 @@ class SQLGraph(BaseGraph):
 
         return neighbors_dict
 
-    def sucessors(
+    def successors(
         self,
         node_ids: list[int] | int,
         attr_keys: Sequence[str] | str | None = None,
@@ -1001,8 +1100,7 @@ class SQLGraph(BaseGraph):
         LOG.info("update data sample: %s", update_data[:2])
 
         with Session(self._engine) as session:
-            # Use bulk_update_mappings for efficient bulk updates
-            session.bulk_update_mappings(table_class, update_data)
+            session.execute(sa.update(table_class), update_data)
             session.commit()
 
     def update_node_attrs(

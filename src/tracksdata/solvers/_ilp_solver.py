@@ -223,10 +223,6 @@ class ILPSolver(BaseSolver):
         ):
             weights = self._evaluate_expr(expr, nodes_df)
 
-            # TODO: setup some kind of filter to update weights, for example:
-            # - starting and ending frames
-            # - closeness to the image boundaries
-
             for node_id, weight in zip(node_ids, weights, strict=True):
                 variables[node_id] = Variable(f"{name}_{node_id}", index=self._count)
                 self._objective.set_coefficient(self._count, weight)
@@ -259,7 +255,7 @@ class ILPSolver(BaseSolver):
         ):
             self._constraints.add(self._edge_vars[edge_id] == 1)
 
-    def _add_constraints(
+    def _add_continuous_flow_constraints(
         self,
         node_ids: list[int],
         edges_df: pl.DataFrame,
@@ -305,6 +301,15 @@ class ILPSolver(BaseSolver):
         # existing division from nodes
         for node_id, node_var in self._node_vars.items():
             self._constraints.add(node_var >= self._division_vars[node_id])
+
+    def _add_overlap_constraints(
+        self,
+        overlaps: list[list[int, 2]],
+    ) -> None:
+        # this could be improved to avoid pairwise constraints by using
+        # mutual exclusivity set constraints for a easier ILP formulation
+        for source_id, target_id in overlaps:
+            self._constraints.add(self._node_vars[source_id] + self._node_vars[target_id] <= 1)
 
     def _solve(self) -> Solution:
         if self._count == 0:
@@ -361,7 +366,10 @@ class ILPSolver(BaseSolver):
         )
 
         self._add_objective_and_variables(nodes_df, edges_df)
-        self._add_constraints(nodes_df[DEFAULT_ATTR_KEYS.NODE_ID].to_list(), edges_df)
+        self._add_continuous_flow_constraints(nodes_df[DEFAULT_ATTR_KEYS.NODE_ID].to_list(), edges_df)
+
+        if graph.has_overlaps():
+            self._add_overlap_constraints(graph.overlaps())
 
         solution = self._solve()
 

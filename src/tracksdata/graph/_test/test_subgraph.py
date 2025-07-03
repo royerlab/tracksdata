@@ -700,6 +700,59 @@ def test_subgraph_attr_filter_error_condition(graph_backend: BaseGraph) -> None:
 
 
 @parametrize_subgraph_tests
+def test_subgraph_overlaps_basic(graph_backend: BaseGraph, use_subgraph: bool) -> None:
+    """Test basic overlap functionality in subgraphs."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+    nodes = graph_with_data._test_nodes  # type: ignore
+
+    # Original graph has 6 nodes: [node0, node1, node2, node3, node4, node5]
+    graph_with_data.add_overlap(nodes[0], nodes[1])
+    graph_with_data.add_overlap(nodes[1], nodes[2])
+
+    # Test basic overlap functionality
+    assert graph_with_data.has_overlaps()
+    overlaps = graph_with_data.overlaps()
+    assert len(overlaps) == 2
+    assert [nodes[0], nodes[1]] in overlaps
+    assert [nodes[1], nodes[2]] in overlaps
+
+    # Test filtering by specific nodes
+    filtered_overlaps = graph_with_data.overlaps([nodes[1], nodes[2]])
+    assert len(filtered_overlaps) == 1
+    assert [nodes[1], nodes[2]] == filtered_overlaps[0]
+
+
+def test_subgraph_overlaps_propagation(graph_backend: BaseGraph) -> None:
+    """Test that overlaps propagate correctly between original graph and subgraphs."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
+    original_nodes = graph_with_data._test_nodes  # type: ignore
+
+    # Add overlaps to original graph
+    graph_with_data.add_overlap(original_nodes[0], original_nodes[1])
+    graph_with_data.add_overlap(original_nodes[2], original_nodes[3])
+
+    # Create subgraph with subset of nodes
+    subgraph_nodes = [original_nodes[0], original_nodes[1], original_nodes[2]]
+    subgraph = graph_with_data.subgraph(node_ids=subgraph_nodes)
+
+    # Test that overlaps are accessible from subgraph
+    assert subgraph.has_overlaps()
+    subgraph_overlaps = subgraph.overlaps()
+
+    # Should only see overlaps involving nodes in the subgraph
+    expected_overlaps = [[original_nodes[0], original_nodes[1]]]
+    assert subgraph_overlaps == expected_overlaps
+
+    # Test that adding overlaps to subgraph affects original graph
+    subgraph.add_overlap(original_nodes[0], original_nodes[2])
+
+    # Check both graphs
+    for graph in [subgraph, graph_with_data]:
+        overlaps = graph.overlaps()
+        assert [original_nodes[0], original_nodes[2]] in overlaps
+
+
+@parametrize_subgraph_tests
 def test_sucessors_with_data(graph_backend: BaseGraph, use_subgraph: bool) -> None:
     """Test getting successors of nodes on both original graphs and subgraphs."""
     graph_with_data = create_test_graph(graph_backend, use_subgraph)
@@ -707,7 +760,7 @@ def test_sucessors_with_data(graph_backend: BaseGraph, use_subgraph: bool) -> No
 
     edges_df = graph_with_data.edge_attrs()
 
-    successors_dict = graph_with_data.sucessors(node_ids)
+    successors_dict = graph_with_data.successors(node_ids)
     out_degree = graph_with_data.out_degree(node_ids)
 
     for i, node_id in enumerate(node_ids):
@@ -725,7 +778,7 @@ def test_sucessors_with_data(graph_backend: BaseGraph, use_subgraph: bool) -> No
         assert graph_with_data._root is not None
         graph_with_data.add_node({"t": 0, "x": 0.0, "y": 0.0, "label": "test"})
         with pytest.raises(RuntimeError, match="Out of sync graph view cannot be used to get sucessors"):
-            graph_with_data.sucessors(node_ids)
+            graph_with_data.successors(node_ids)
 
 
 @parametrize_subgraph_tests

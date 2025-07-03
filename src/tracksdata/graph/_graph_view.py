@@ -126,6 +126,9 @@ class GraphView(RustWorkXGraph):
         self._node_attr_keys = None
         self._edge_attr_keys = None
 
+        # use parent graph overlaps
+        self._overlaps = None
+
     @property
     def sync(self) -> bool:
         return self._sync
@@ -161,6 +164,72 @@ class GraphView(RustWorkXGraph):
         subgraph._replace_parent_graph_with_root()
 
         return subgraph
+
+    def add_overlap(
+        self,
+        source_id: int,
+        target_id: int,
+    ) -> int:
+        """
+        Add a new overlap to the graph.
+        Overlapping nodes are mutually exclusive.
+
+        Parameters
+        ----------
+        source_id : int
+            The ID of the source node.
+        target_id : int
+            The ID of the target node.
+
+        Returns
+        -------
+        int
+            The ID of the added overlap.
+        """
+        return self._root.add_overlap(source_id, target_id)
+
+    def bulk_add_overlaps(
+        self,
+        overlaps: list[list[int, 2]],
+    ) -> None:
+        """
+        Add multiple overlaps to the graph.
+        Overlapping nodes are mutually exclusive.
+
+        Parameters
+        ----------
+        overlaps : list[list[int, 2]]
+            The IDs of the nodes to add the overlaps for.
+
+        See Also
+        --------
+        [add_overlap][tracksdata.graph.GraphView.add_overlap]:
+            Add a single overlap to the graph.
+        """
+        self._root.bulk_add_overlaps(overlaps)
+
+    def overlaps(
+        self,
+        node_ids: list[int] | None = None,
+    ) -> list[list[int, 2]]:
+        """
+        Get the overlaps between the nodes in `node_ids`.
+        If `node_ids` is None, all nodes are used.
+
+        Parameters
+        ----------
+        node_ids : list[int] | None
+            The IDs of the nodes to get the overlaps for.
+            If None, all nodes are used.
+
+        Returns
+        -------
+        list[list[int, 2]]
+            The overlaps between the nodes in `node_ids`.
+        """
+        if node_ids is None:
+            node_ids = self.node_ids()
+        return self._root.overlaps(node_ids)
 
     @property
     def node_attr_keys(self) -> list[str]:
@@ -266,14 +335,14 @@ class GraphView(RustWorkXGraph):
 
         return out_data
 
-    def sucessors(
+    def successors(
         self,
         node_ids: list[int] | int,
         attr_keys: Sequence[str] | str | None = None,
     ) -> dict[int, pl.DataFrame] | pl.DataFrame:
         if self._out_of_sync:
             raise RuntimeError("Out of sync graph view cannot be used to get sucessors")
-        return super().sucessors(node_ids, attr_keys)
+        return super().successors(node_ids, attr_keys)
 
     def predecessors(
         self,

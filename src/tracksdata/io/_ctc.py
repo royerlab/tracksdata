@@ -8,6 +8,7 @@ from tifffile import imread as tiff_imread
 
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph._base_graph import BaseGraph
+from tracksdata.io._numpy_array import _add_edges_from_track_ids
 from tracksdata.nodes import RegionPropsNodes
 from tracksdata.utils._logging import LOG
 
@@ -192,26 +193,12 @@ def load_ctc(
         ]
     )
 
-    nodes_by_label = nodes_df.group_by("label")
-
-    # reducing the nodes to the last node in each track
-    # to find the divisions relationships between tracks
-    if tracks_file_found:
-        last_nodes = nodes_by_label.map_groups(lambda group: group.sort(DEFAULT_ATTR_KEYS.T).tail(1))
-        track_id_to_last_node = dict(zip(last_nodes["label"], last_nodes[DEFAULT_ATTR_KEYS.NODE_ID], strict=True))
-    else:
-        track_id_to_last_node = {}  # for completeness, it won't be used if this is true
-
-    for (track_id,), group in nodes_by_label:
-        node_ids = group.sort(DEFAULT_ATTR_KEYS.T)[DEFAULT_ATTR_KEYS.NODE_ID].to_list()
-
-        first_node = node_ids[0]
-        if track_id in track_id_graph:
-            parent_node = track_id_to_last_node[track_id_graph[track_id]]
-            graph.add_edge(parent_node, first_node, {})
-
-        for i in range(len(node_ids) - 1):
-            graph.add_edge(node_ids[i], node_ids[i + 1], {})
+    _add_edges_from_track_ids(
+        graph,
+        nodes_df,
+        track_id_graph,
+        "label",
+    )
 
     # is duplicating an attribute that bad?
     graph.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACK_ID, -1)

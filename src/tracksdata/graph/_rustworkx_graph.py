@@ -139,6 +139,7 @@ class RustWorkXGraph(BaseGraph):
         self._time_to_nodes: dict[int, list[int]] = {}
         self._node_attr_keys: list[str] = [DEFAULT_ATTR_KEYS.T]
         self._edge_attr_keys: list[str] = []
+        self._overlaps: list[list[int, 2]] = []
 
     @property
     def rx_graph(self) -> rx.PyDiGraph:
@@ -207,6 +208,72 @@ class RustWorkXGraph(BaseGraph):
         attrs[DEFAULT_ATTR_KEYS.EDGE_ID] = edge_id
         return edge_id
 
+    def add_overlap(
+        self,
+        source_id: int,
+        target_id: int,
+    ) -> int:
+        """
+        Add a new overlap to the graph.
+        Overlapping nodes are mutually exclusive.
+
+        Parameters
+        ----------
+        source_id : int
+            The ID of the source node.
+        target_id : int
+            The ID of the target node.
+
+        Returns
+        -------
+        int
+            The ID of the added overlap.
+        """
+        self._overlaps.append([source_id, target_id])
+
+    def overlaps(
+        self,
+        node_ids: list[int] | None = None,
+    ) -> list[list[int, 2]]:
+        """
+        Get the overlaps between the nodes in `node_ids`.
+        If `node_ids` is None, all nodes are used.
+
+        Parameters
+        ----------
+        node_ids : list[int] | None
+            The IDs of the nodes to get the overlaps for.
+            If None, all nodes are used.
+
+        Returns
+        -------
+        list[list[int, 2]]
+            The overlaps between the nodes in `node_ids`.
+        """
+        if len(self._overlaps) == 0:
+            return []
+
+        if node_ids is None:
+            return self._overlaps
+
+        node_ids = np.asarray(node_ids, dtype=int)
+        overlaps_arr = np.asarray(self._overlaps, dtype=int)
+
+        is_in_source = np.isin(overlaps_arr[:, 0], node_ids)
+        is_in_target = np.isin(overlaps_arr[:, 1], node_ids)
+        return overlaps_arr[is_in_source & is_in_target].tolist()
+
+    def has_overlaps(self) -> bool:
+        """
+        Check if the graph has any overlaps.
+
+        Returns
+        -------
+        bool
+            True if the graph has any overlaps, False otherwise.
+        """
+        return len(self.overlaps()) > 0
+
     def _get_neighbors(
         self,
         neighbors_func: Callable[[rx.PyDiGraph, int], rx.NodeIndices],
@@ -264,7 +331,7 @@ class RustWorkXGraph(BaseGraph):
 
         return neighbors
 
-    def sucessors(
+    def successors(
         self,
         node_ids: list[int] | int,
         attr_keys: Sequence[str] | str | None = None,
