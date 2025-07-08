@@ -53,7 +53,8 @@ class GenericFuncEdgeAttrs(BaseEdgeAttrsOperator):
         """
         Initialize the edge attributes for the graph.
         """
-        graph.add_edge_attr_key(self.output_key, default_value=-99999.0)
+        if self.output_key not in graph.edge_attr_keys:
+            graph.add_edge_attr_key(self.output_key, default_value=-99999.0)
 
     def _edge_attrs_per_time(
         self,
