@@ -5,11 +5,13 @@ from typing import Any, Protocol
 
 from tqdm import tqdm
 
+from tracksdata.attrs import NodeAttr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
-from tracksdata.edges._generic_edges import GenericNodeFunctionEdgeAttrs
+from tracksdata.edges._generic_edges import GenericFuncEdgeAttrs
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.nodes._base_nodes import BaseNodesOperator
-from tracksdata.nodes._mask import bbox_interpolation_offset
+from tracksdata.nodes._mask import Mask, bbox_interpolation_offset
+from tracksdata.options import get_options
 from tracksdata.utils._logging import LOG
 
 
@@ -193,16 +195,17 @@ class NodeInterpolator(BaseNodesOperator):
     def __init__(
         self,
         delta_t_key: str = "delta_t",
-        show_progress: bool = True,
         node_interpolation_func: NodeInterpolationFunc = default_node_interpolation,
         edge_attrs_func: NodeInterpolationEdgeAttrs = default_node_interpolation_edge_attrs,
         validate_keys: bool = False,
+        iou_threshold: float = 0.5,
     ):
-        super().__init__(show_progress=show_progress)
+        super().__init__()
         self.delta_t_key = delta_t_key
         self.node_interpolation_func = node_interpolation_func
         self.edge_attrs_func = edge_attrs_func
         self.validate_keys = validate_keys
+        self.iou_threshold = iou_threshold
 
     def add_nodes(self, graph: BaseGraph, *, t: None = None) -> None:
         if t is not None:
@@ -215,15 +218,14 @@ class NodeInterpolator(BaseNodesOperator):
                 graph.edge_attr_keys,
                 DEFAULT_ATTR_KEYS.T,
             )
-            GenericNodeFunctionEdgeAttrs(
+            GenericFuncEdgeAttrs(
                 func=lambda x, y: abs(x - y),
                 attr_keys=DEFAULT_ATTR_KEYS.T,
                 output_key=self.delta_t_key,
-                show_progress=self.show_progress,
             ).add_edge_attrs(graph)
 
         edge_attrs = graph.edge_attrs()
-        long_edges = edge_attrs.filter(edge_attrs[self.delta_t_key] > 1)
+        long_edges = edge_attrs.filter(edge_attrs[self.delta_t_key] > 1).sort(self.delta_t_key)
 
         selected_node_ids = set(long_edges[DEFAULT_ATTR_KEYS.EDGE_SOURCE]) | set(
             long_edges[DEFAULT_ATTR_KEYS.EDGE_TARGET]
@@ -234,9 +236,11 @@ class NodeInterpolator(BaseNodesOperator):
         )
         nodes_by_id = {node[DEFAULT_ATTR_KEYS.NODE_ID]: node for node in nodes.iter_rows(named=True)}
 
+        count = 0
+
         for long_edge in tqdm(
             list(long_edges.iter_rows(named=True)),
-            disable=not self.show_progress,
+            disable=not get_options().show_progress,
             desc="Interpolating and adding nodes",
         ):
             delta_t = long_edge[self.delta_t_key]
@@ -255,7 +259,26 @@ class NodeInterpolator(BaseNodesOperator):
                     delta_t=delta_t,
                 )
 
+                masks_in_t = graph.node_attrs(
+                    node_ids=graph.filter_nodes_by_attrs(
+                        NodeAttr(DEFAULT_ATTR_KEYS.T) == new_node_attrs[DEFAULT_ATTR_KEYS.T]
+                    ),
+                    attr_keys=[DEFAULT_ATTR_KEYS.MASK],
+                )[DEFAULT_ATTR_KEYS.MASK]
+                new_mask: Mask = new_node_attrs[DEFAULT_ATTR_KEYS.MASK]
+
+                found_collision = False
+                for mask in masks_in_t:
+                    iou = new_mask.iou(mask)
+                    if iou > self.iou_threshold:
+                        found_collision = True
+                        break
+
+                if found_collision:
+                    break
+
                 new_node_id = graph.add_node(new_node_attrs, validate_keys=self.validate_keys)
+                count += 1
                 nodes_by_id[new_node_id] = new_node_attrs
 
                 src_to_new_edge_attrs, new_to_tgt_edge_attrs = self.edge_attrs_func(
@@ -303,3 +326,6 @@ class NodeInterpolator(BaseNodesOperator):
                 tgt_id = new_node_id
                 # replacing long_edge by new shorter but still long edge
                 long_edge = src_to_new_edge_attrs.copy()
+
+        LOG.info("Number of nodes added: %s", count)
+        print(f"Number of nodes added: {count}")
