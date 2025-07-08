@@ -12,8 +12,10 @@ from tracksdata.graph import RustWorkXGraph
 from tracksdata.metrics import evaluate_ctc_metrics
 from tracksdata.metrics._ctc_metrics import compute_ctc_metrics_data
 from tracksdata.nodes import RegionPropsNodes
+from tracksdata.options import options_context
 
 
+@options_context(n_workers=4)
 def test_replicating_ctc_metrics_test(pytestconfig: pytest.Config) -> None:
     ctc_data_dir = pytestconfig.cache._cachedir / "test_dataset_ctc/train/BF-C2DL-HSC"
     if not ctc_data_dir.exists():

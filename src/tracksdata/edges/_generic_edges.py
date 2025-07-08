@@ -10,7 +10,7 @@ from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.utils._logging import LOG
 
 
-class GenericNodeFunctionEdgeAttrs(BaseEdgeAttrsOperator):
+class GenericFuncEdgeAttrs(BaseEdgeAttrsOperator):
     """
     Add weights to the edges of the graph based on the output of a function.
 
@@ -35,44 +35,49 @@ class GenericNodeFunctionEdgeAttrs(BaseEdgeAttrsOperator):
         The keys of the attributes to pass to the function.
     output_key : str
         The key to store the output of the function.
-    show_progress : bool
-        Whether to show a progress bar.
     """
+
+    output_key: str
 
     def __init__(
         self,
         func: Callable[[dict[str, Any] | Any, dict[str, Any] | Any], Any],
         attr_keys: Sequence[str] | str,
         output_key: str,
-        show_progress: bool = True,
     ) -> None:
-        super().__init__(output_key=output_key, show_progress=show_progress)
+        super().__init__(output_key=output_key)
         self.attr_keys = attr_keys
         self.func = func
 
-    def _add_edge_attrs_per_time(
+    def _init_edge_attrs(self, graph: BaseGraph) -> None:
+        """
+        Initialize the edge attributes for the graph.
+        """
+        graph.add_edge_attr_key(self.output_key, default_value=-99999.0)
+
+    def _edge_attrs_per_time(
         self,
-        graph: BaseGraph,
-        *,
         t: int,
-    ) -> None:
+        *,
+        graph: BaseGraph,
+    ) -> tuple[list[int], dict[str, list[Any]]]:
         """
         Add weights to the edges of the graph based on the output of a function
         for a specific time point.
 
         Parameters
         ----------
-        graph : BaseGraph
-            The graph to add weights to.
         t : int
             The time point to add weights for.
+        graph : BaseGraph
+            The graph to add weights to.
         """
         source_ids = graph.filter_nodes_by_attrs(NodeAttr(DEFAULT_ATTR_KEYS.T) == t)
         edges_df = graph.edge_attrs(node_ids=source_ids, include_targets=True)
 
         if len(edges_df) == 0:
             LOG.warning(f"No edges found for time point {t} to sucessors")
-            return
+            return [], {}
 
         source_df = graph.node_attrs(
             node_ids=edges_df[DEFAULT_ATTR_KEYS.EDGE_SOURCE].to_numpy(),
@@ -106,10 +111,4 @@ class GenericNodeFunctionEdgeAttrs(BaseEdgeAttrsOperator):
             ):
                 weights[i] = self.func(source_attr, target_attr)
 
-        if self.output_key not in graph.edge_attr_keys:
-            graph.add_edge_attr_key(self.output_key, -99999.0)
-
-        graph.update_edge_attrs(
-            edge_ids=edges_df[DEFAULT_ATTR_KEYS.EDGE_ID].to_numpy(),
-            attrs={self.output_key: weights},
-        )
+        return edges_df[DEFAULT_ATTR_KEYS.EDGE_ID].to_list(), {self.output_key: weights}

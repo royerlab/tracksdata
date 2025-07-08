@@ -4,7 +4,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 from skimage.measure._regionprops import RegionProperties, regionprops
-from tqdm import tqdm
+from toolz import curry
 from typing_extensions import override
 
 from tracksdata.constants import DEFAULT_ATTR_KEYS
@@ -12,6 +12,7 @@ from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.nodes._base_nodes import BaseNodesOperator
 from tracksdata.nodes._mask import Mask
 from tracksdata.utils._logging import LOG
+from tracksdata.utils._multiprocessing import multiprocessing_apply
 
 
 class RegionPropsNodes(BaseNodesOperator):
@@ -34,8 +35,6 @@ class RegionPropsNodes(BaseNodesOperator):
         Physical spacing between pixels. If provided, affects distance-based
         measurements. Should be (row_spacing, col_spacing) for 2D or
         (depth_spacing, row_spacing, col_spacing) for 3D.
-    show_progress : bool, default True
-        Whether to display progress bars during node addition.
 
     Attributes
     ----------
@@ -91,11 +90,43 @@ class RegionPropsNodes(BaseNodesOperator):
         self,
         extra_properties: list[str | Callable[[RegionProperties], Any]] | None = None,
         spacing: tuple[float, float] | None = None,
-        show_progress: bool = True,
     ):
-        super().__init__(show_progress=show_progress)
+        super().__init__()
         self._extra_properties = extra_properties or []
         self._spacing = spacing
+
+    def _axis_names(self, labels: NDArray[np.integer]) -> list[str]:
+        """
+        Get the names of the axes of the labels.
+
+        Parameters
+        ----------
+        labels : NDArray[np.integer]
+            The (t + nD) labels to get the axis names for.
+
+        Returns
+        -------
+        list[str]
+            The names of the axes of the labels.
+        """
+        if labels.ndim == 3:
+            return ["y", "x"]
+        elif labels.ndim == 4:
+            return ["z", "y", "x"]
+        else:
+            raise ValueError(f"`labels` must be 't + 2D' or 't + 3D', got '{labels.ndim}' dimensions.")
+
+    def _init_node_attrs(self, graph: BaseGraph, axis_names: list[str]) -> None:
+        """
+        Initialize the node attributes for the graph.
+        """
+        if DEFAULT_ATTR_KEYS.MASK not in graph.node_attr_keys:
+            graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
+
+        # initialize the attribute keys
+        for attr_key in axis_names + self.attrs_keys():
+            if attr_key not in graph.node_attr_keys:
+                graph.add_node_attr_key(attr_key, -1.0)
 
     def attrs_keys(self) -> list[str]:
         """
@@ -144,11 +175,9 @@ class RegionPropsNodes(BaseNodesOperator):
         labels : NDArray[np.integer]
             Labeled image(s) where each unique positive integer represents
             a different region/object. Can be:
-            - 2D array (height, width) for single time point
-            - 3D array (depth, height, width) for single 3D volume
             - 3D array (time, height, width) for 2D time series
             - 4D array (time, depth, height, width) for 3D time series
-            `t` must be provided if the labels does not have a time dimension.
+            When `t` is provided, it should be padded to include the time dimension.
         t : int | None, optional
             Time point for the nodes. If None, labels are treated as a time
             series where the first axis represents time.
@@ -184,37 +213,29 @@ class RegionPropsNodes(BaseNodesOperator):
         node_op.add_nodes(graph, labels=labels, t=0, intensity_image=fluorescence_image)
         ```
         """
-        if t is None:
-            for t in tqdm(range(labels.shape[0]), disable=not self.show_progress, desc="Adding nodes"):
-                if intensity_image is not None:
-                    self._add_nodes_per_time(
-                        graph=graph,
-                        labels=labels[t],
-                        t=t,
-                        intensity_image=intensity_image[t],
-                    )
-                else:
-                    self._add_nodes_per_time(
-                        graph=graph,
-                        labels=labels[t],
-                        t=t,
-                    )
-        else:
-            self._add_nodes_per_time(
-                graph=graph,
-                labels=labels,
-                t=t,
-                intensity_image=intensity_image,
-            )
+        axis_names = self._axis_names(labels)
+        self._init_node_attrs(graph, axis_names)
 
-    def _add_nodes_per_time(
+        if t is None:
+            time_points = range(labels.shape[0])
+        else:
+            time_points = [t]
+
+        node_ids = []
+        for nodes_data in multiprocessing_apply(
+            func=curry(self._nodes_per_time, labels=labels, intensity_image=intensity_image),
+            sequence=time_points,
+            desc="Adding region properties nodes",
+        ):
+            node_ids.extend(graph.bulk_add_nodes(nodes_data))
+
+    def _nodes_per_time(
         self,
-        graph: BaseGraph,
+        t: int,
         *,
         labels: NDArray[np.integer],
-        t: int,
         intensity_image: NDArray | None = None,
-    ) -> None:
+    ) -> list[dict[str, Any]]:
         """
         Add nodes for a specific time point using region properties.
 
@@ -226,36 +247,29 @@ class RegionPropsNodes(BaseNodesOperator):
 
         Parameters
         ----------
-        graph : BaseGraph
-            The graph to add nodes to.
-        labels : NDArray[np.integer]
-            2D or 3D labeled image for a single time point.
         t : int
             The time point to assign to the created nodes.
+        labels : NDArray[np.integer]
+            2D or 3D labeled image for a single time point.
         intensity_image : NDArray | None, optional
             Corresponding intensity image for computing intensity-based properties.
+
+        Returns
+        -------
+        list[dict[str, Any]]
+            The nodes to add to the graph.
 
         Raises
         ------
         ValueError
             If labels is not 2D or 3D.
         """
-        if labels.ndim == 2:
-            axis_names = ["y", "x"]
-        elif labels.ndim == 3:
-            axis_names = ["z", "y", "x"]
-        else:
-            raise ValueError(f"`labels` must be 2D or 3D, got {labels.ndim} dimensions.")
+        axis_names = self._axis_names(labels)
 
-        if DEFAULT_ATTR_KEYS.MASK not in graph.node_attr_keys:
-            graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
+        labels = np.asarray(labels[t])
 
-        # initialize the attribute keys
-        for attr_key in axis_names + [p.__name__ if callable(p) else p for p in self._extra_properties]:
-            if attr_key not in graph.node_attr_keys:
-                graph.add_node_attr_key(attr_key, -1.0)
-
-        labels = np.asarray(labels)
+        if intensity_image is not None:
+            intensity_image = np.asarray(intensity_image[t])
 
         nodes_data = []
 
@@ -279,7 +293,7 @@ class RegionPropsNodes(BaseNodesOperator):
             nodes_data.append(attrs)
             obj._cache.clear()  # clearing to reduce memory footprint
 
-        if len(nodes_data) > 0:
-            graph.bulk_add_nodes(nodes_data)
-        else:
+        if len(nodes_data) == 0:
             LOG.warning("No valid nodes found for time point %d", t)
+
+        return nodes_data

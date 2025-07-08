@@ -1,10 +1,11 @@
 from typing import Any, Literal
 
 import numpy as np
-from tqdm import tqdm
+from toolz import curry
 
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.nodes._base_nodes import BaseNodesOperator
+from tracksdata.utils._multiprocessing import multiprocessing_apply
 
 
 class RandomNodes(BaseNodesOperator):
@@ -30,8 +31,6 @@ class RandomNodes(BaseNodesOperator):
         - 3: generates (x, y, z) coordinates
     random_state : int, default 0
         Random seed for reproducible results.
-    show_progress : bool, default False
-        Whether to display progress bars during node generation.
 
     Attributes
     ----------
@@ -91,9 +90,8 @@ class RandomNodes(BaseNodesOperator):
         n_nodes_per_tp: tuple[int, int],
         n_dim: Literal[2, 3] = 3,
         random_state: int = 0,
-        show_progress: bool = False,
     ):
-        super().__init__(show_progress=show_progress)
+        super().__init__()
         if isinstance(n_nodes_per_tp, int):
             raise ValueError("`n_nodes_per_tp` must be a tuple of two integers")
 
@@ -122,44 +120,44 @@ class RandomNodes(BaseNodesOperator):
         When t=None, iterates over range(n_time_points) instead of graph.time_points().
         When t is specified, uses the base implementation.
         """
-        if t is None:
-            for t in tqdm(range(self.n_time_points), disable=not self.show_progress, desc="Adding nodes"):
-                self._add_nodes_per_time(
-                    graph,
-                    t=t,
-                    **kwargs,
-                )
-        else:
-            self._add_nodes_per_time(
-                graph,
-                t=t,
-                **kwargs,
-            )
+        # Register each spatial column individually
+        for col in self.spatial_cols:
+            if col not in graph.node_attr_keys:
+                graph.add_node_attr_key(col, -999999.0)
 
-    def _add_nodes_per_time(
+        if t is None:
+            time_points = range(self.n_time_points)
+        else:
+            time_points = [t]
+
+        _add_nodes_per_time = curry(self._nodes_per_time, **kwargs)
+        for node_attrs in multiprocessing_apply(
+            _add_nodes_per_time,
+            time_points,
+            desc="Adding nodes",
+        ):
+            graph.bulk_add_nodes(node_attrs)
+
+    def _nodes_per_time(
         self,
-        graph: BaseGraph,
-        *,
         t: int,
         **kwargs: Any,
-    ) -> None:
+    ) -> list[dict[str, Any]]:
         """
         Add nodes for a specific time point.
 
         Parameters
         ----------
-        graph : BaseGraph
-            The graph to add nodes to.
         t : int
             The time point to add nodes for.
         **kwargs : Any
             Additional keyword arguments to pass to add_node.
-        """
-        # Register each spatial column individually
-        for col in self.spatial_cols:
-            if col not in graph.node_attr_keys:
-                graph.add_node_attr_key(col, None)
 
+        Returns
+        -------
+        list[dict[str, Any]]
+            The nodes to add to the graph.
+        """
         n_nodes_at_t = self.rng.integers(
             self.n_nodes[0],
             self.n_nodes[1],
@@ -169,8 +167,6 @@ class RandomNodes(BaseNodesOperator):
             low=0,
             high=1,
             size=(n_nodes_at_t, len(self.spatial_cols)),
-        )
+        ).tolist()
 
-        graph.bulk_add_nodes(
-            [{"t": t, **dict(zip(self.spatial_cols, c.tolist(), strict=True)), **kwargs} for c in coords]
-        )
+        return [{"t": t, **dict(zip(self.spatial_cols, c, strict=True)), **kwargs} for c in coords]

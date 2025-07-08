@@ -5,6 +5,7 @@ from skimage.measure._regionprops import RegionProperties
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph import RustWorkXGraph
 from tracksdata.nodes import Mask, RegionPropsNodes
+from tracksdata.options import get_options, options_context
 
 
 def test_regionprops_init_default() -> None:
@@ -13,16 +14,14 @@ def test_regionprops_init_default() -> None:
 
     assert operator._extra_properties == []
     assert operator._spacing is None
-    assert operator.show_progress is True
 
 
 def test_regionprops_init_custom() -> None:
     """Test RegionPropsNodes initialization with custom parameters."""
-    operator = RegionPropsNodes(extra_properties=["area", "perimeter"], spacing=(1.0, 2.0), show_progress=False)
+    operator = RegionPropsNodes(extra_properties=["area", "perimeter"], spacing=(1.0, 2.0))
 
     assert operator._extra_properties == ["area", "perimeter"]
     assert operator._spacing == (1.0, 2.0)
-    assert operator.show_progress is False
 
 
 def test_regionprops_attrs_keys() -> None:
@@ -50,7 +49,7 @@ def test_regionprops_add_nodes_2d() -> None:
     # Create simple 2D labels
     labels = np.array([[[1, 1, 0], [1, 0, 2], [0, 2, 2]]], dtype=np.int32)
 
-    operator = RegionPropsNodes(extra_properties=["area"], show_progress=False)
+    operator = RegionPropsNodes(extra_properties=["area"])
 
     operator.add_nodes(graph, labels=labels)
 
@@ -83,7 +82,7 @@ def test_regionprops_add_nodes_3d() -> None:
 
     assert labels.shape == (2, 1, 3, 3)
 
-    operator = RegionPropsNodes(extra_properties=["area"], show_progress=False)
+    operator = RegionPropsNodes(extra_properties=["area"])
 
     operator.add_nodes(graph, labels=labels)
 
@@ -114,7 +113,7 @@ def test_regionprops_add_nodes_with_intensity() -> None:
 
     assert intensity.ndim == 3
 
-    operator = RegionPropsNodes(extra_properties=["mean_intensity"], show_progress=False)
+    operator = RegionPropsNodes(extra_properties=["mean_intensity"])
 
     operator.add_nodes(graph, labels=labels, intensity_image=intensity)
 
@@ -130,8 +129,9 @@ def test_regionprops_add_nodes_with_intensity() -> None:
     assert abs(mean_intensities[1] - 50.0) < 1e-6
 
 
-def test_regionprops_add_nodes_timelapse() -> None:
-    """Test adding nodes from timelapse (t=None)."""
+@pytest.mark.parametrize("n_workers", [1, 2])
+def test_regionprops_add_nodes_timelapse(n_workers: int) -> None:
+    """Test adding nodes from timelapse (t=None) with different worker counts."""
     graph = RustWorkXGraph()
 
     # Create timelapse labels (time x height x width)
@@ -139,9 +139,10 @@ def test_regionprops_add_nodes_timelapse() -> None:
 
     assert labels.ndim == 3
 
-    operator = RegionPropsNodes(extra_properties=["area"], show_progress=False)
+    operator = RegionPropsNodes(extra_properties=["area"])
 
-    operator.add_nodes(graph, labels=labels)
+    with options_context(n_workers=n_workers):
+        operator.add_nodes(graph, labels=labels)
 
     # Check that nodes were added for both time points
     nodes_df = graph.node_attrs()
@@ -163,7 +164,7 @@ def test_regionprops_add_nodes_timelapse_with_intensity() -> None:
 
     intensity = np.array([[[10, 20], [0, 0]], [[0, 30], [40, 50]]], dtype=np.float32)  # t=0  # t=1
 
-    operator = RegionPropsNodes(extra_properties=["mean_intensity"], show_progress=False)
+    operator = RegionPropsNodes(extra_properties=["mean_intensity"])
 
     operator.add_nodes(graph, labels=labels, intensity_image=intensity)
 
@@ -182,13 +183,13 @@ def test_regionprops_custom_properties() -> None:
     graph = RustWorkXGraph()
 
     # Create simple labels
-    labels = np.array([[1, 1, 0], [1, 0, 0], [0, 0, 0]], dtype=np.int32)
+    labels = np.array([[[1, 1, 0], [1, 0, 0], [0, 0, 0]]], dtype=np.int32)
 
     # Define custom property function
     def double_area(region: RegionProperties) -> float:
         return region.area * 2
 
-    operator = RegionPropsNodes(extra_properties=[double_area, "area"], show_progress=False)
+    operator = RegionPropsNodes(extra_properties=[double_area, "area"])
 
     operator.add_nodes(graph, labels=labels, t=0)
 
@@ -207,12 +208,12 @@ def test_regionprops_invalid_dimensions() -> None:
     """Test error handling for invalid label dimensions."""
     graph = RustWorkXGraph()
 
-    # Create 1D labels (invalid)
-    labels = np.array([1, 2, 3], dtype=np.int32)
+    # Create 2D labels (invalid)
+    labels = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
 
-    operator = RegionPropsNodes(show_progress=False)
+    operator = RegionPropsNodes()
 
-    with pytest.raises(ValueError, match="`labels` must be 2D or 3D"):
+    with pytest.raises(ValueError, match=r"`labels` must be 't \+ 2D' or 't \+ 3D'"):
         operator.add_nodes(graph, labels=labels)
 
 
@@ -221,9 +222,9 @@ def test_regionprops_mask_creation() -> None:
     graph = RustWorkXGraph()
 
     # Create simple labels
-    labels = np.array([[1, 1, 0], [1, 0, 0], [0, 0, 2]], dtype=np.int32)
+    labels = np.array([[[1, 1, 0], [1, 0, 0], [0, 0, 2]]], dtype=np.int32)
 
-    operator = RegionPropsNodes(show_progress=False)
+    operator = RegionPropsNodes()
 
     operator.add_nodes(graph, labels=labels, t=0)
 
@@ -243,9 +244,9 @@ def test_regionprops_spacing() -> None:
     graph = RustWorkXGraph()
 
     # Create simple labels
-    labels = np.array([[1, 1], [1, 1]], dtype=np.int32)
+    labels = np.array([[[1, 1], [1, 1]]], dtype=np.int32)
 
-    operator = RegionPropsNodes(extra_properties=["area"], spacing=(2.0, 3.0), show_progress=False)  # Custom spacing
+    operator = RegionPropsNodes(extra_properties=["area"], spacing=(2.0, 3.0))  # Custom spacing
 
     operator.add_nodes(graph, labels=labels, t=0)
 
@@ -261,11 +262,17 @@ def test_regionprops_empty_labels() -> None:
     graph = RustWorkXGraph()
 
     # Create labels with no regions
-    labels = np.zeros((3, 3), dtype=np.int32)
+    labels = np.zeros((1, 3, 3), dtype=np.int32)
 
-    operator = RegionPropsNodes(show_progress=False)
+    operator = RegionPropsNodes()
 
     operator.add_nodes(graph, labels=labels, t=0)
 
     # No nodes should be added
     assert graph.num_nodes == 0
+
+
+def test_regionprops_multiprocessing_isolation() -> None:
+    """Test that multiprocessing options don't affect subsequent tests."""
+    # Verify default n_workers is 1
+    assert get_options().n_workers == 1

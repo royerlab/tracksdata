@@ -10,9 +10,6 @@ class BaseNodesOperator(abc.ABC):
     It will interact with a `BaseGraph` to do so.
     """
 
-    def __init__(self, show_progress: bool = True):
-        self.show_progress = show_progress
-
     @abc.abstractmethod
     def add_nodes(
         self,

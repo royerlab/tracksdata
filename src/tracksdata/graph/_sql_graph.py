@@ -153,9 +153,6 @@ class SQLGraph(BaseGraph):
         engine_kwargs: dict[str, Any] | None = None,
         overwrite: bool = False,
     ):
-        # Create unique classes for this instance
-        self._define_schema()
-
         self._url = sa.engine.URL.create(
             drivername,
             username=username,
@@ -164,10 +161,12 @@ class SQLGraph(BaseGraph):
             port=port,
             database=database,
         )
-        if engine_kwargs is None:
-            self._engine = sa.create_engine(self._url)
-        else:
-            self._engine = sa.create_engine(self._url, **engine_kwargs)
+        self._engine_kwargs = engine_kwargs if engine_kwargs is not None else {}
+        self._engine = sa.create_engine(self._url, **self._engine_kwargs)
+
+        # Create unique classes for this instance
+        self._define_schema(overwrite=overwrite)
+        self._boolean_columns: dict[str, list[str]] = {self.Node.__tablename__: [], self.Edge.__tablename__: []}
 
         if overwrite:
             self.Base.metadata.drop_all(self._engine)
@@ -177,19 +176,35 @@ class SQLGraph(BaseGraph):
         self._max_id_per_time = {}
         self._update_max_id_per_time()
 
-    def _define_schema(self) -> None:
+    def _define_schema(self, overwrite: bool) -> None:
         """
         Define the database schema classes for this SQLGraph instance.
 
         Creates unique SQLAlchemy model classes for this graph instance to
         avoid conflicts between multiple SQLGraph instances.
         """
+        metadata = sa.MetaData()
+        metadata.reflect(bind=self._engine)
 
         class Base(DeclarativeBase):
             pass
 
+        if len(metadata.tables) > 0 and not overwrite:
+            for table_name, table in metadata.tables.items():
+                cls = type(
+                    table_name,
+                    (Base,),
+                    {
+                        "__table__": table,
+                        "__tablename__": table_name,
+                    },
+                )
+                setattr(self, table_name, cls)
+            self.Base = Base
+            return
+
         class Node(Base):
-            __tablename__ = "nodes"
+            __tablename__ = "Node"
 
             # Use node_id as sole primary key for simpler updates
             node_id = sa.Column(sa.BigInteger, primary_key=True, unique=True)
@@ -198,17 +213,19 @@ class SQLGraph(BaseGraph):
             # NOTE might want to use as index for fast time-based queries
             t = sa.Column(sa.Integer, nullable=False)
 
+        node_tb_name = Node.__tablename__
+
         class Edge(Base):
-            __tablename__ = "edges"
+            __tablename__ = "Edge"
             edge_id = sa.Column(sa.Integer, primary_key=True, unique=True, autoincrement=True)
-            source_id = sa.Column(sa.BigInteger, sa.ForeignKey("nodes.node_id"))
-            target_id = sa.Column(sa.BigInteger, sa.ForeignKey("nodes.node_id"))
+            source_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"))
+            target_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"))
 
         class Overlap(Base):
-            __tablename__ = "overlaps"
+            __tablename__ = "Overlap"
             overlap_id = sa.Column(sa.Integer, primary_key=True, unique=True, autoincrement=True)
-            source_id = sa.Column(sa.BigInteger, sa.ForeignKey("nodes.node_id"))
-            target_id = sa.Column(sa.BigInteger, sa.ForeignKey("nodes.node_id"))
+            source_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"))
+            target_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"))
 
         # Assign to instance variables
         self.Base = Base
@@ -216,13 +233,11 @@ class SQLGraph(BaseGraph):
         self.Edge = Edge
         self.Overlap = Overlap
 
-        self._boolean_columns: dict[type[DeclarativeBase], list[str]] = {self.Node: [], self.Edge: []}
-
     def _cast_boolean_columns(self, table_class: type[DeclarativeBase], df: pl.DataFrame) -> pl.DataFrame:
         """
         This is required because polars bypasses the boolean type and converts it to integer.
         """
-        for col in self._boolean_columns[table_class]:
+        for col in self._boolean_columns[table_class.__tablename__]:
             if col in df.columns:
                 df = df.with_columns(pl.col(col).cast(pl.Boolean))
         return df
@@ -334,6 +349,9 @@ class SQLGraph(BaseGraph):
         list[int]
             The IDs of the added nodes.
         """
+        if len(nodes) == 0:
+            return []
+
         node_ids = []
         for node in nodes:
             time = node["t"]
@@ -413,7 +431,8 @@ class SQLGraph(BaseGraph):
     def bulk_add_edges(
         self,
         edges: list[dict[str, Any]],
-    ) -> None:
+        return_ids: bool = False,
+    ) -> list[int] | None:
         """
         Add multiple edges to the graph efficiently.
 
@@ -425,6 +444,9 @@ class SQLGraph(BaseGraph):
         edges : list[dict[str, Any]]
             List of edge attribute dictionaries. Each dictionary must contain
             "source_id" and "target_id" keys, plus any additional feature keys.
+        return_ids : bool
+            Whether to return the IDs of the added edges.
+            If False, the edges are added and the method returns None.
 
         Examples
         --------
@@ -435,13 +457,28 @@ class SQLGraph(BaseGraph):
         ]
         graph.bulk_add_edges(edges)
         ```
+
+        Return
+        ------
+        list[int] | None
+            The IDs of the added edges.
         """
+        if len(edges) == 0:
+            if return_ids:
+                return []
+            return None
+
         for edge in edges:
             _data_numpy_to_native(edge)
 
         with Session(self._engine) as session:
-            session.execute(sa.insert(self.Edge), edges)
-            session.commit()
+            if return_ids:
+                result = session.execute(sa.insert(self.Edge).returning(self.Edge.edge_id), edges)
+                session.commit()
+                return list(result.scalars().all())
+            else:
+                session.execute(sa.insert(self.Edge), edges)
+                session.commit()
 
     def add_overlap(
         self,
@@ -998,7 +1035,7 @@ class SQLGraph(BaseGraph):
         sa_type = self._sqlalchemy_type_inference(default_value)
 
         if sa_type == sa.Boolean:
-            self._boolean_columns[table_class].append(key)
+            self._boolean_columns[table_class.__tablename__].append(key)
 
         sa_column = sa.Column(key, sa_type, default=default_value)
 
@@ -1163,3 +1200,15 @@ class SQLGraph(BaseGraph):
         Get the out-degree of a list of nodes.
         """
         return self._get_degree(node_ids, DEFAULT_ATTR_KEYS.EDGE_SOURCE)
+
+    def __getstate__(self) -> dict:
+        data_dict = self.__dict__.copy()
+        for k in ["Base", "Node", "Edge", "Overlap", "_engine"]:
+            del data_dict[k]
+        return data_dict
+
+    def __setstate__(self, state: dict) -> None:
+        self.__dict__.update(state)
+        # recreate deleted objects
+        self._engine = sa.create_engine(self._url, **self._engine_kwargs)
+        self._define_schema(overwrite=False)

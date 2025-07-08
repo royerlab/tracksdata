@@ -2,9 +2,10 @@ import abc
 from collections.abc import Sequence
 from typing import Any
 
-from tqdm import tqdm
+from toolz import curry
 
 from tracksdata.graph._base_graph import BaseGraph
+from tracksdata.utils._multiprocessing import multiprocessing_apply
 
 
 class BaseEdgesOperator(abc.ABC):
@@ -13,9 +14,14 @@ class BaseEdgesOperator(abc.ABC):
     It will interact with a `BaseGraph` to do so.
     """
 
-    def __init__(self, output_key: Sequence[str] | str, show_progress: bool = True):
+    def __init__(self, output_key: Sequence[str] | str):
         self.output_key = output_key
-        self.show_progress = show_progress
+
+    @abc.abstractmethod
+    def _init_edge_attrs(self, graph: BaseGraph) -> None:
+        """
+        Initialize the edge attributes for the graph.
+        """
 
     def add_edges(
         self,
@@ -37,26 +43,26 @@ class BaseEdgesOperator(abc.ABC):
         **kwargs: Any
             Additional keyword arguments to pass to the `add_edges` method.
         """
+        self._init_edge_attrs(graph)
+
         if t is None:
-            for t in tqdm(graph.time_points(), disable=not self.show_progress, desc="Adding edges"):
-                self._add_edges_per_time(
-                    graph,
-                    t=t,
-                    **kwargs,
-                )
+            time_points = graph.time_points()
         else:
-            self._add_edges_per_time(
-                graph,
-                t=t,
-                **kwargs,
-            )
+            time_points = [t]
+
+        for edge_attrs in multiprocessing_apply(
+            curry(self._add_edges_per_time, graph=graph, **kwargs),
+            time_points,
+            desc="Adding edges",
+        ):
+            graph.bulk_add_edges(edge_attrs)
 
     @abc.abstractmethod
     def _add_edges_per_time(
         self,
-        graph: BaseGraph,
-        *,
         t: int,
+        *,
+        graph: BaseGraph,
         **kwargs: Any,
     ) -> None:
         """
@@ -64,10 +70,10 @@ class BaseEdgesOperator(abc.ABC):
 
         Parameters
         ----------
-        graph : BaseGraph
-            The graph to add edges to.
         t : int
             The time point to add edges for.
+        graph : BaseGraph
+            The graph to add edges to.
         **kwargs : Any
             Additional keyword arguments to pass to the `_add_edges_per_time` method.
         """

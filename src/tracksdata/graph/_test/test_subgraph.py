@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from copy import deepcopy
 
 import polars as pl
 import pytest
@@ -806,3 +807,117 @@ def test_predecessors_with_data(graph_backend: BaseGraph, use_subgraph: bool) ->
         graph_with_data.add_node({"t": 0, "x": 0.0, "y": 0.0, "label": "test"})
         with pytest.raises(RuntimeError, match="Out of sync graph view cannot be used to get predecessors"):
             graph_with_data.predecessors(node_ids)
+
+
+@parametrize_subgraph_tests
+def test_bulk_add_nodes_returned_ids(graph_backend: BaseGraph, use_subgraph: bool) -> None:
+    """Test that bulk_add_nodes returns correct node IDs on both original graphs and subgraphs."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+
+    # Add attribute keys for the new nodes
+    graph_with_data.add_node_attr_key("z", 0.0)
+
+    # Test bulk adding nodes
+    nodes_to_add = [
+        {"t": 10, "x": 10.0, "y": 10.0, "z": 1.0, "label": "bulk1"},
+        {"t": 11, "x": 11.0, "y": 11.0, "z": 2.0, "label": "bulk2"},
+        {"t": 12, "x": 12.0, "y": 12.0, "z": 3.0, "label": "bulk3"},
+    ]
+
+    initial_node_count = graph_with_data.num_nodes
+    returned_ids = graph_with_data.bulk_add_nodes(nodes_to_add)
+
+    # Test return type and length
+    assert isinstance(returned_ids, list)
+    assert len(returned_ids) == len(nodes_to_add)
+    assert all(isinstance(node_id, int) for node_id in returned_ids)
+
+    # Test uniqueness of returned IDs
+    assert len(set(returned_ids)) == len(returned_ids)
+
+    # Test that node count increased correctly
+    assert graph_with_data.num_nodes == initial_node_count + len(nodes_to_add)
+
+    # Test that all returned IDs correspond to actual nodes in the graph
+    actual_node_ids = set(graph_with_data.node_ids())
+    for node_id in returned_ids:
+        assert node_id in actual_node_ids
+
+    # Test that nodes have correct attributes
+    for i, node_id in enumerate(returned_ids):
+        node_attrs = graph_with_data.node_attrs(node_ids=[node_id])
+        expected_attrs = nodes_to_add[i]
+
+        assert node_attrs["t"].to_list()[0] == expected_attrs["t"]
+        assert node_attrs["x"].to_list()[0] == expected_attrs["x"]
+        assert node_attrs["y"].to_list()[0] == expected_attrs["y"]
+        assert node_attrs["z"].to_list()[0] == expected_attrs["z"]
+        assert node_attrs["label"].to_list()[0] == expected_attrs["label"]
+
+    # Test empty input
+    empty_result = graph_with_data.bulk_add_nodes([])
+    assert empty_result == []
+    assert graph_with_data.num_nodes == initial_node_count + len(nodes_to_add)  # No change
+
+
+@parametrize_subgraph_tests
+def test_bulk_add_edges_returned_ids(graph_backend: BaseGraph, use_subgraph: bool) -> None:
+    """Test that bulk_add_edges returns correct edge IDs on both original graphs and subgraphs."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+
+    # Add attribute keys for the new edges
+    graph_with_data.add_edge_attr_key("strength", 0.0)
+
+    # Get some existing nodes to create edges between
+    existing_nodes = graph_with_data._test_nodes  # type: ignore
+
+    # Test bulk adding edges
+    edges_to_add = [
+        {
+            "source_id": existing_nodes[0],
+            "target_id": existing_nodes[1],
+            "weight": 0.8,
+            "strength": 1.5,
+            "new_attribute": 10.0,
+        },
+        {
+            "source_id": existing_nodes[1],
+            "target_id": existing_nodes[2],  # if len(existing_nodes) > 2 else existing_nodes[0],
+            "weight": 0.9,
+            "strength": 2.0,
+            "new_attribute": 20.0,
+        },
+    ]
+
+    initial_edge_count = graph_with_data.num_edges
+    returned_ids = graph_with_data.bulk_add_edges(deepcopy(edges_to_add), return_ids=True)
+
+    # Test return type and length
+    assert isinstance(returned_ids, list)
+    assert len(returned_ids) == len(edges_to_add)
+    assert all(isinstance(edge_id, int) for edge_id in returned_ids)
+
+    # Test uniqueness of returned IDs
+    assert len(set(returned_ids)) == len(returned_ids)
+
+    # Test that edge count increased correctly
+    assert graph_with_data.num_edges == initial_edge_count + len(edges_to_add)
+
+    edge_attrs = graph_with_data.edge_attrs()
+    edge_attr_0 = edge_attrs.filter(pl.col(DEFAULT_ATTR_KEYS.EDGE_ID) == returned_ids[0]).rows(named=True)[0]
+    del edge_attr_0[DEFAULT_ATTR_KEYS.EDGE_ID]
+    assert edge_attr_0 == edges_to_add[0]
+    edge_attr_1 = edge_attrs.filter(pl.col(DEFAULT_ATTR_KEYS.EDGE_ID) == returned_ids[1]).rows(named=True)[0]
+    del edge_attr_1[DEFAULT_ATTR_KEYS.EDGE_ID]
+    assert edge_attr_1 == edges_to_add[1]
+
+    # Test that returned IDs are valid integers (main requirement)
+    # We validate that the IDs are non-negative integers
+    for edge_id in returned_ids:
+        assert isinstance(edge_id, int)
+        assert edge_id >= 0
+
+    # Test empty input
+    empty_result = graph_with_data.bulk_add_edges([], return_ids=True)
+    assert empty_result == []
+    assert graph_with_data.num_edges == initial_edge_count + len(edges_to_add)  # No change

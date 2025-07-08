@@ -178,6 +178,27 @@ class RustWorkXGraph(BaseGraph):
         self._time_to_nodes.setdefault(attrs["t"], []).append(node_id)
         return node_id
 
+    def bulk_add_nodes(self, nodes: list[dict[str, Any]]) -> list[int]:
+        """
+        Faster method to add multiple nodes to the graph with less overhead and fewer checks.
+
+        Parameters
+        ----------
+        nodes : list[dict[str, Any]]
+            The data of the nodes to be added.
+            The keys of the data will be used as the attributes of the nodes.
+            Must have "t" key.
+
+        Returns
+        -------
+        list[int]
+            The IDs of the added nodes.
+        """
+        indices = list(self.rx_graph.add_nodes_from(nodes))
+        for node, index in zip(nodes, indices, strict=True):
+            self._time_to_nodes.setdefault(node["t"], []).append(index)
+        return indices
+
     def add_edge(
         self,
         source_id: int,
@@ -207,6 +228,43 @@ class RustWorkXGraph(BaseGraph):
         edge_id = self.rx_graph.add_edge(source_id, target_id, attrs)
         attrs[DEFAULT_ATTR_KEYS.EDGE_ID] = edge_id
         return edge_id
+
+    def bulk_add_edges(self, edges: list[dict[str, Any]], return_ids: bool = False) -> list[int] | None:
+        """
+        Faster method to add multiple edges to the graph with less overhead and fewer checks.
+
+        Parameters
+        ----------
+        edges : list[dict[str, Any]]
+            The data of the edges to be added.
+            The keys of the data will be used as the attributes of the edges.
+            Must have "source_id" and "target_id" keys.
+        return_ids : bool
+            Whether to return the IDs of the added edges.
+            If False, the edges are added and the method returns None.
+
+        Examples
+        --------
+        ```python
+        edges = [
+            {"source_id": 1, "target_id": 2, "weight": 0.8},
+            {"source_id": 2, "target_id": 3, "weight": 0.9"},
+        ]
+        graph.bulk_add_edges(edges)
+        ```
+
+        Returns
+        -------
+        list[int] | None
+            The IDs of the added edges.
+        """
+        # saving for historical reasons, iterating over edges is faster than using rx.add_edges_from
+        # edges_data = [(d.pop(DEFAULT_ATTR_KEYS.EDGE_SOURCE), d.pop(DEFAULT_ATTR_KEYS.EDGE_TARGET), d) for d in edges]
+        # indices = self.rx_graph.add_edges_from(edges_data)
+        # for i, d in zip(indices, edges, strict=True):
+        #     d[DEFAULT_ATTR_KEYS.EDGE_ID] = i
+        # return indices
+        return super().bulk_add_edges(edges, return_ids=return_ids)
 
     def add_overlap(
         self,

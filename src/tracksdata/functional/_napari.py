@@ -1,9 +1,13 @@
+from typing import TYPE_CHECKING
+
 import polars as pl
 
-from tracksdata.array._graph_array import GraphArrayView
 from tracksdata.attrs import EdgeAttr, NodeAttr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph._base_graph import BaseGraph
+
+if TYPE_CHECKING:
+    from tracksdata.array._graph_array import GraphArrayView
 
 
 def to_napari_format(
@@ -12,7 +16,7 @@ def to_napari_format(
     solution_key: str = DEFAULT_ATTR_KEYS.SOLUTION,
     output_track_id_key: str = DEFAULT_ATTR_KEYS.TRACK_ID,
 ) -> tuple[
-    GraphArrayView,
+    "GraphArrayView",
     pl.DataFrame,
     dict[int, int],
 ]:
@@ -54,6 +58,8 @@ def to_napari_format(
     tracks_data = solution_graph.node_attrs(
         attr_keys=[output_track_id_key, DEFAULT_ATTR_KEYS.T, *spatial_cols],
     )
+
+    from tracksdata.array._graph_array import GraphArrayView
 
     array_view = GraphArrayView(
         solution_graph,

@@ -2,9 +2,10 @@ import abc
 from collections.abc import Sequence
 from typing import Any
 
-from tqdm import tqdm
+from toolz import curry
 
 from tracksdata.graph._base_graph import BaseGraph
+from tracksdata.utils._multiprocessing import multiprocessing_apply
 
 
 class BaseEdgeAttrsOperator(abc.ABC):
@@ -13,9 +14,19 @@ class BaseEdgeAttrsOperator(abc.ABC):
     It will interact with a `BaseGraph` to do so.
     """
 
-    def __init__(self, output_key: Sequence[str] | str, show_progress: bool = True):
+    def __init__(self, output_key: Sequence[str] | str):
         self.output_key = output_key
-        self.show_progress = show_progress
+
+    @abc.abstractmethod
+    def _init_edge_attrs(self, graph: BaseGraph) -> None:
+        """
+        Initialize the edge attributes for the graph.
+
+        Parameters
+        ----------
+        graph : BaseGraph
+            The graph to add attributes to.
+        """
 
     def add_edge_attrs(
         self,
@@ -36,37 +47,37 @@ class BaseEdgeAttrsOperator(abc.ABC):
         **kwargs : Any
             Additional keyword arguments to pass to the `_add_edge_attrs_per_time` method.
         """
+        self._init_edge_attrs(graph)
+
         if t is None:
-            for t in tqdm(graph.time_points(), disable=not self.show_progress, desc="Adding edge attributes"):
-                self._add_edge_attrs_per_time(
-                    graph,
-                    t=t,
-                    **kwargs,
-                )
+            time_points = graph.time_points()
         else:
-            self._add_edge_attrs_per_time(
-                graph,
-                t=t,
-                **kwargs,
-            )
+            time_points = [t]
+
+        for edge_ids, edge_attrs in multiprocessing_apply(
+            func=curry(self._edge_attrs_per_time, graph=graph, **kwargs),
+            sequence=time_points,
+            desc="Adding edge attributes",
+        ):
+            graph.update_edge_attrs(edge_ids=edge_ids, attrs=edge_attrs)
 
     @abc.abstractmethod
-    def _add_edge_attrs_per_time(
+    def _edge_attrs_per_time(
         self,
-        graph: BaseGraph,
-        *,
         t: int,
+        *,
+        graph: BaseGraph,
         **kwargs: Any,
-    ) -> None:
+    ) -> tuple[list[int], dict[str, list[Any]]]:
         """
         Add attributes to edges of a graph at a given time point.
 
         Parameters
         ----------
-        graph : BaseGraph
-            The graph to add attributes to.
         t : int
             The time point to add attributes for.
+        graph : BaseGraph
+            The graph to add attributes to.
         **kwargs : Any
             Additional keyword arguments.
         """

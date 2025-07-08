@@ -1,4 +1,6 @@
 import numpy as np
+import polars as pl
+from cloudpickle import dumps, loads
 from polars.datatypes.classes import (
     Boolean,
     DataType,
@@ -52,3 +54,42 @@ def polars_dtype_to_numpy_dtype(polars_dtype: DataType) -> np.dtype:
         raise ValueError(
             f"Invalid polars dtype: {polars_dtype}. Expected one of {_POLARS_DTYPE_TO_NUMPY_DTYPE.keys()}"
         ) from e
+
+
+def column_to_bytes(df: pl.DataFrame, column: str) -> pl.DataFrame:
+    """
+    Convert a column of a DataFrame to bytes.
+    Used to serialize columns for multiprocessing.
+
+    Parameters
+    ----------
+    df : pl.DataFrame
+        The DataFrame to convert.
+    column : str
+        The column to convert.
+
+    Returns
+    -------
+    pl.DataFrame
+        The converted DataFrame.
+    """
+    return df.with_columns(pl.col(column).map_elements(dumps, return_dtype=pl.Binary))
+
+
+def column_from_bytes(df: pl.DataFrame, column: str) -> pl.DataFrame:
+    """
+    Convert a column of a DataFrame from bytes.
+
+    Parameters
+    ----------
+    df : pl.DataFrame
+        The DataFrame to convert.
+    column : str
+        The column to convert.
+
+    Returns
+    -------
+    pl.DataFrame
+        The converted DataFrame.
+    """
+    return df.with_columns(pl.col(column).map_elements(loads, return_dtype=pl.Object))

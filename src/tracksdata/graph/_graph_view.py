@@ -282,6 +282,17 @@ class GraphView(RustWorkXGraph):
 
         return parent_node_id
 
+    def bulk_add_nodes(self, nodes: list[dict[str, Any]]) -> list[int]:
+        parent_node_ids = self._root.bulk_add_nodes(nodes)
+        if self.sync:
+            node_ids = super().bulk_add_nodes(nodes)
+            for node_id, parent_node_id in zip(node_ids, parent_node_ids, strict=True):
+                self._node_map_to_root[node_id] = parent_node_id
+                self._node_map_from_root[parent_node_id] = node_id
+        else:
+            self._out_of_sync = True
+        return parent_node_ids
+
     def add_edge(
         self,
         source_id: int,
@@ -310,6 +321,9 @@ class GraphView(RustWorkXGraph):
             self._out_of_sync = True
 
         return parent_edge_id
+
+    def bulk_add_edges(self, edges: list[dict[str, Any]], return_ids: bool = False) -> list[int] | None:
+        return BaseGraph.bulk_add_edges(self, edges, return_ids=return_ids)
 
     def _get_neighbors(
         self,
@@ -583,3 +597,10 @@ class GraphView(RustWorkXGraph):
         subgraph._replace_parent_graph_with_root()
 
         return subgraph
+
+    def detach(self) -> RustWorkXGraph:
+        """
+        Detach the graph view from the root graph, returning a new graph with the same nodes and edges
+        without the view's mapping and indenpendent ids.
+        """
+        return RustWorkXGraph.from_other(self)

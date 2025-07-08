@@ -3,8 +3,9 @@ import functools
 import operator
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar, overload
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, overload
 
+import numpy as np
 import polars as pl
 from numpy.typing import ArrayLike
 
@@ -104,6 +105,9 @@ class BaseGraph(abc.ABC):
         list[int]
             The IDs of the added nodes.
         """
+        if len(nodes) == 0:
+            return []
+
         # this method benefits the SQLGraph backend
         return [self.add_node(node, validate_keys=False) for node in nodes]
 
@@ -137,10 +141,25 @@ class BaseGraph(abc.ABC):
             The ID of the added edge.
         """
 
+    @overload
     def bulk_add_edges(
         self,
         edges: list[dict[str, Any]],
-    ) -> None:
+        return_ids: Literal[False],
+    ) -> None: ...
+
+    @overload
+    def bulk_add_edges(
+        self,
+        edges: list[dict[str, Any]],
+        return_ids: Literal[True],
+    ) -> list[int]: ...
+
+    def bulk_add_edges(
+        self,
+        edges: list[dict[str, Any]],
+        return_ids: bool = False,
+    ) -> list[int] | None:
         """
         Faster method to add multiple edges to the graph with less overhead and fewer checks.
 
@@ -150,16 +169,44 @@ class BaseGraph(abc.ABC):
             The data of the edges to be added.
             The keys of the data will be used as the attributes of the edges.
             Must have "source_id" and "target_id" keys.
-            For example:
-            ```python
-            graph.bulk_add_edges([dict(source_id=0, target_id=1, weight=1.0)])
-            ```
+        return_ids : bool
+            Whether to return the IDs of the added edges.
+            If False, the edges are added and the method returns None.
+
+        Examples
+        --------
+        ```python
+        edges = [
+            {"source_id": 1, "target_id": 2, "weight": 0.8},
+            {"source_id": 2, "target_id": 3, "weight": 0.9"},
+        ]
+        graph.bulk_add_edges(edges)
+        ```
+
+        Returns
+        -------
+        list[int] | None
+            The IDs of the added edges.
         """
         # this method benefits the SQLGraph backend
+        if return_ids:
+            edge_ids = []
+            for edge in edges:
+                edge_ids.append(
+                    self.add_edge(
+                        edge.pop(DEFAULT_ATTR_KEYS.EDGE_SOURCE),
+                        edge.pop(DEFAULT_ATTR_KEYS.EDGE_TARGET),
+                        edge,
+                        validate_keys=False,
+                    )
+                )
+            return edge_ids
+
+        # avoiding many ifs and appends
         for edge in edges:
             self.add_edge(
-                edge.pop("source_id"),
-                edge.pop("target_id"),
+                edge.pop(DEFAULT_ATTR_KEYS.EDGE_SOURCE),
+                edge.pop(DEFAULT_ATTR_KEYS.EDGE_TARGET),
                 edge,
                 validate_keys=False,
             )
@@ -692,3 +739,56 @@ class BaseGraph(abc.ABC):
             edge_ids=edge_ids,
             attrs={matched_edge_mask_key: True},
         )
+
+    @classmethod
+    def from_other(cls: type[T], other: "BaseGraph", **kwargs) -> T:
+        """
+        Create a graph from another graph.
+
+        Parameters
+        ----------
+        other : BaseGraph
+            The other graph to create a new graph from.
+        **kwargs : Any
+            Additional arguments to pass to the graph constructor.
+
+        Returns
+        -------
+        BaseGraph
+            A graph with the nodes and edges from the other graph.
+        """
+        # add node attributes
+        node_attrs = other.node_attrs()
+        other_node_ids = node_attrs[DEFAULT_ATTR_KEYS.NODE_ID]
+        node_attrs = node_attrs.drop(DEFAULT_ATTR_KEYS.NODE_ID)
+
+        graph = cls(**kwargs)
+
+        for col in node_attrs.columns:
+            if col != DEFAULT_ATTR_KEYS.T:
+                graph.add_node_attr_key(col, node_attrs[col].first())
+
+        new_node_ids = graph.bulk_add_nodes(list(node_attrs.rows(named=True)))
+        # mapping from old node ids to new node ids
+        node_map = dict(zip(other_node_ids, new_node_ids, strict=True))
+
+        # add edge attributes
+        edge_attrs = other.edge_attrs()
+        edge_attrs = edge_attrs.drop(DEFAULT_ATTR_KEYS.EDGE_ID)
+
+        for col in edge_attrs.columns:
+            if col not in [DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET]:
+                graph.add_edge_attr_key(col, edge_attrs[col].first())
+
+        edge_attrs = edge_attrs.with_columns(
+            edge_attrs[col].map_elements(node_map.get, return_dtype=pl.Int64).alias(col)
+            for col in [DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET]
+        )
+        graph.bulk_add_edges(list(edge_attrs.rows(named=True)))
+
+        if other.has_overlaps():
+            overlaps = other.overlaps()
+            overlaps = np.vectorize(node_map.get)(np.asarray(overlaps, dtype=int))
+            graph.bulk_add_overlaps(overlaps.tolist())
+
+        return graph

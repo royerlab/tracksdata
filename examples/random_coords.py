@@ -14,9 +14,8 @@ def main() -> None:
         n_time_points=50,
         n_nodes_per_tp=(int(n_nodes * 0.95), int(n_nodes * 1.05)),
         n_dim=3,
-        show_progress=False,
     )
-    dist_operator = DistanceEdges(distance_threshold=30.0, n_neighbors=5, show_progress=False)
+    dist_operator = DistanceEdges(distance_threshold=30.0, n_neighbors=5)
 
     solver = NearestNeighborsSolver(
         edge_weight=EdgeAttr("weight"),

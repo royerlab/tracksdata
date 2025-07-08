@@ -1,29 +1,35 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
 name = "tracksdata"
 dynamic = ["version"]
-description = ''
+description = 'A Python library for multi-object tracking data structures and algorithms'
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
-keywords = []
+keywords = ["cell-tracking", "tracking", "multi-object-tracking", "computer-vision", "graph", "machine-learning"]
 authors = [
   { name = "Jordao Bragantini", email = "jordao.bragantini@czbiohub.org" },
+  { name = "Ilan Theodoro", email = "ilan.silva@czbiohub.org" },
+  { name = "Alexander Nguyen", email = "nguyencalex3@gmail.com" },
   { name = "Teun Huijben", email = "teun.huijben@czbiohub.org" },
   { name = "Caroline Malin-Mayor", email = "malinmayorc@janelia.hhmi.org" },
   { name = "Anniek Stokkermans", email = "a.stokkermans@hubrecht.eu" },
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
   "Programming Language :: Python",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: Implementation :: CPython",
-  "Programming Language :: Python :: Implementation :: PyPy",
+  "Topic :: Scientific/Engineering",
+  "Topic :: Scientific/Engineering :: Image Processing",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
   "dask",
@@ -69,7 +75,10 @@ Source = "https://github.com/jookuma/tracksdata"
 allow-direct-references = true
 
 [tool.hatch.version]
-path = "src/tracksdata/__about__.py"
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/tracksdata/__about__.py"
 
 # https://docs.astral.sh/ruff
 [tool.ruff]

@@ -2,9 +2,10 @@ import abc
 from collections.abc import Sequence
 from typing import Any
 
-from tqdm import tqdm
+from toolz import curry
 
 from tracksdata.graph._base_graph import BaseGraph
+from tracksdata.utils._multiprocessing import multiprocessing_apply
 
 
 class BaseNodeAttrsOperator(abc.ABC):
@@ -16,10 +17,14 @@ class BaseNodeAttrsOperator(abc.ABC):
     def __init__(
         self,
         output_key: Sequence[str] | str,
-        show_progress: bool = True,
     ) -> None:
         self.output_key = output_key
-        self.show_progress = show_progress
+
+    @abc.abstractmethod
+    def _init_node_attrs(self, graph: BaseGraph) -> None:
+        """
+        Initialize the node attributes for the graph.
+        """
 
     def add_node_attrs(
         self,
@@ -40,37 +45,42 @@ class BaseNodeAttrsOperator(abc.ABC):
         **kwargs : Any
             Additional keyword arguments to pass to the `_add_node_attrs_per_time` method.
         """
+        self._init_node_attrs(graph)
+
         if t is None:
-            for t in tqdm(graph.time_points(), disable=not self.show_progress, desc="Adding node attributes"):
-                self._add_node_attrs_per_time(
-                    graph,
-                    t=t,
-                    **kwargs,
-                )
+            time_points = graph.time_points()
         else:
-            self._add_node_attrs_per_time(
-                graph,
-                t=t,
-                **kwargs,
-            )
+            time_points = [t]
+
+        for node_ids, node_attrs in multiprocessing_apply(
+            func=curry(self._node_attrs_per_time, graph=graph, **kwargs),
+            sequence=time_points,
+            desc="Adding node attributes",
+        ):
+            graph.update_node_attrs(node_ids=node_ids, attrs=node_attrs)
 
     @abc.abstractmethod
-    def _add_node_attrs_per_time(
+    def _node_attrs_per_time(
         self,
-        graph: BaseGraph,
-        *,
         t: int,
+        *,
+        graph: BaseGraph,
         **kwargs: Any,
-    ) -> None:
+    ) -> tuple[list[int], dict[str, list[Any]]]:
         """
         Add attributes to nodes of a graph at a given time point.
 
         Parameters
         ----------
-        graph : BaseGraph
-            The graph to add attributes to.
         t : int
             The time point to add attributes for. If None, add attributes for all time points.
+        graph : BaseGraph
+            The graph to add attributes to.
         **kwargs : Any
             Additional keyword arguments to pass to the `_add_node_attrs_per_time` method.
+
+        Returns
+        -------
+        tuple[list[int], dict[str, list[Any]]]
+            The node ids and the attributes to add to the graph.
         """

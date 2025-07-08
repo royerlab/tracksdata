@@ -1127,3 +1127,57 @@ def test_from_numpy_array_validation_errors() -> None:
     track_ids = np.array([1, 2, 3])  # Length 3, positions length 2
     with pytest.raises(ValueError, match="must have the same length"):
         RustWorkXGraph.from_array(positions, track_ids=track_ids)
+
+
+def test_from_other_with_edges(graph_backend: BaseGraph) -> None:
+    """Test from_other method with edges and edge attributes."""
+    # Create source graph with nodes, edges, and attributes
+    graph_backend.add_node_attr_key("x", 0.0)
+    graph_backend.add_edge_attr_key("weight", 0.0)
+    graph_backend.add_edge_attr_key("type", "forward")
+
+    node1 = graph_backend.add_node({"t": 0, "x": 1.0})
+    node2 = graph_backend.add_node({"t": 1, "x": 2.0})
+    node3 = graph_backend.add_node({"t": 2, "x": 3.0})
+
+    graph_backend.add_edge(node1, node2, {"weight": 0.5, "type": "forward"})
+    graph_backend.add_edge(node2, node3, {"weight": 0.8, "type": "forward"})
+    graph_backend.add_edge(node1, node3, {"weight": 0.3, "type": "skip"})
+
+    graph_backend.add_overlap(node1, node3)
+
+    new_graph = RustWorkXGraph.from_other(graph_backend)
+
+    # Verify the new graph has the same structure
+    assert new_graph.num_nodes == 3
+    assert new_graph.num_edges == 3
+
+    # Verify edge attributes are copied correctly
+    source_edges = graph_backend.edge_attrs(attr_keys=["weight", "type"])
+    new_edges = new_graph.edge_attrs(attr_keys=["weight", "type"])
+
+    # Edge IDs and node IDs will be different, but edge attributes should be the same
+    assert len(source_edges) == len(new_edges)
+
+    # Sort by weight to ensure consistent comparison
+    source_sorted = source_edges.sort("weight")
+    new_sorted = new_edges.sort("weight")
+
+    assert source_sorted.select(["weight", "type"]).equals(new_sorted.select(["weight", "type"]))
+
+    # Verify attribute keys are preserved
+    assert set(new_graph.edge_attr_keys) == set(graph_backend.edge_attr_keys)
+
+    # Verify graph connectivity is preserved by checking degrees
+    source_out_degrees = sorted(graph_backend.out_degree())
+    new_out_degrees = sorted(new_graph.out_degree())
+    assert source_out_degrees == new_out_degrees
+
+    source_in_degrees = sorted(graph_backend.in_degree())
+    new_in_degrees = sorted(new_graph.in_degree())
+    assert source_in_degrees == new_in_degrees
+
+    new_node_ids = new_graph.node_ids()
+
+    assert len(new_graph.overlaps()) == len(graph_backend.overlaps())
+    assert new_graph.overlaps()[0] == [new_node_ids[0], new_node_ids[2]]
