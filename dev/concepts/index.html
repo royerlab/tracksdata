@@ -475,6 +475,28 @@
   
   
     <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Examples
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../faq/" class="md-nav__link">
         
   
@@ -527,10 +549,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
         
           
-          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
             
   
   
@@ -543,8 +565,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_7">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
             <span class="md-nav__icon md-icon"></span>
             API Reference
           </label>
@@ -565,10 +587,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7_1" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8_1" >
         
           
-          <label class="md-nav__link" for="__nav_7_1" id="__nav_7_1_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_8_1" id="__nav_8_1_label" tabindex="0">
             
   
   
@@ -581,8 +603,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_7_1_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_7_1">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_8_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8_1">
             <span class="md-nav__icon md-icon"></span>
             <code class="doc-symbol doc-symbol-nav doc-symbol-module"></code>tracksdata
           </label>
@@ -1107,17 +1129,17 @@
 </ul>
 <h3 id="attribute-expressions">Attribute Expressions</h3>
 <p>Attributes are used to filter nodes or edges, or to formulate the objective function for solvers.</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">tracksdata.attrs</span><span class="w"> </span><span class="kn">import</span> <span class="n">NodeAttr</span><span class="p">,</span> <span class="n">EdgeAttr</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">tracksdata</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">td</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="c1"># Simple attribute access</span>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">x_coords</span> <span class="o">=</span> <span class="n">NodeAttr</span><span class="p">(</span><span class="s2">&quot;x&quot;</span><span class="p">)</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">x_coords</span> <span class="o">=</span> <span class="n">td</span><span class="o">.</span><span class="n">NodeAttr</span><span class="p">(</span><span class="s2">&quot;x&quot;</span><span class="p">)</span>
 </span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
 </span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="c1"># Mathematical expressions</span>
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="n">distance_cost</span> <span class="o">=</span> <span class="n">EdgeAttr</span><span class="p">(</span><span class="s2">&quot;distance&quot;</span><span class="p">)</span> <span class="o">+</span> <span class="mf">0.1</span> <span class="o">*</span> <span class="n">EdgeAttr</span><span class="p">(</span><span class="s2">&quot;angle_change&quot;</span><span class="p">)</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="n">distance_cost</span> <span class="o">=</span> <span class="n">td</span><span class="o">.</span><span class="n">EdgeAttr</span><span class="p">(</span><span class="s2">&quot;distance&quot;</span><span class="p">)</span> <span class="o">+</span> <span class="mf">0.1</span> <span class="o">*</span> <span class="n">td</span><span class="o">.</span><span class="n">EdgeAttr</span><span class="p">(</span><span class="s2">&quot;angle_change&quot;</span><span class="p">)</span>
 </span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
 </span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="c1"># Comparison operations for filtering</span>
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="n">recent_nodes</span> <span class="o">=</span> <span class="n">NodeAttr</span><span class="p">(</span><span class="s2">&quot;t&quot;</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">10</span>
-</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="n">large_objects</span> <span class="o">=</span> <span class="n">NodeAttr</span><span class="p">(</span><span class="s2">&quot;area&quot;</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">100</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="n">recent_nodes</span> <span class="o">=</span> <span class="n">td</span><span class="o">.</span><span class="n">NodeAttr</span><span class="p">(</span><span class="s2">&quot;t&quot;</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">10</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="n">large_objects</span> <span class="o">=</span> <span class="n">td</span><span class="o">.</span><span class="n">NodeAttr</span><span class="p">(</span><span class="s2">&quot;area&quot;</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">100</span>
 </span></code></pre></div>
 <h2 id="data-flow">Data Flow</h2>
 <p>A typical TracksData workflow:</p>
