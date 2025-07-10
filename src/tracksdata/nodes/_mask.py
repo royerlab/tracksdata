@@ -3,9 +3,59 @@ from functools import cached_property, lru_cache
 import blosc2
 import numpy as np
 import skimage.morphology as morph
+from numba import njit
 from numpy.typing import ArrayLike, NDArray
 
 from tracksdata.functional._iou import fast_intersection_with_bbox, fast_iou_with_bbox
+
+
+@njit
+def bbox_interpolation_offset(
+    tgt_bbox: np.ndarray,
+    src_bbox: np.ndarray,
+    w: float,
+) -> np.ndarray:
+    """
+    Interpolate the bounding box between two masks.
+    The reference is the target mask and w is relative distance to it:
+    ```python
+    (target_value - new_value) / (target_value - source_value) = w
+    ```
+
+    Parameters
+    ----------
+    tgt_bbox : np.ndarray
+        The target bounding box.
+    src_bbox : np.ndarray
+        The source bounding box.
+    w : float
+        The weight of the interpolation.
+
+    Returns
+    -------
+    np.ndarray
+        The offset to add to the bounding box.
+    """
+    if w < 0 or w > 1:
+        raise ValueError(f"w = {w} is not between 0 and 1")
+
+    ndim = tgt_bbox.shape[0] // 2
+    tgt_center = tgt_bbox[ndim:] - tgt_bbox[:ndim] // 2
+    src_center = src_bbox[ndim:] - src_bbox[:ndim] // 2
+    signed_dist = tgt_center - src_center
+    offset = -np.round((1 - w) * signed_dist).astype(np.int32)
+
+    for i in range(ndim):
+        if offset[i] > 0:
+            new_value = tgt_bbox[ndim + i] - offset[i]
+            dist_to_border = min(new_value - tgt_bbox[ndim + i], 0)
+            offset[i] += dist_to_border
+        else:
+            new_value = tgt_bbox[i] + offset[i]
+            dist_to_border = max(tgt_bbox[i] - new_value, 0)
+            offset[i] += dist_to_border
+
+    return offset
 
 
 @lru_cache(maxsize=5)
@@ -109,13 +159,19 @@ class Mask:
             slicing = tuple(slice(self._bbox[i], self._bbox[i + ndim]) for i in range(ndim))
 
         else:
-            center = (self._bbox[: self._mask.ndim] + self._bbox[self._mask.ndim :]) // 2
+            center = self.bbox_center()
             half_shape = np.asarray(shape) // 2
             start = np.maximum(center - half_shape, 0)
             end = np.minimum(center + half_shape, image.shape)
             slicing = tuple(slice(s, e) for s, e in zip(start, end, strict=True))
 
         return image[slicing]
+
+    def bbox_center(self) -> NDArray[np.integer]:
+        """
+        Get the center of the bounding box.
+        """
+        return (self._bbox[: self._mask.ndim] + self._bbox[self._mask.ndim :]) // 2
 
     def mask_indices(
         self,
