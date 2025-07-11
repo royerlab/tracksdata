@@ -63,6 +63,8 @@ class BaseGraph(abc.ABC):
         self,
         attrs: dict[str, Any],
         validate_keys: bool = True,
+        *args: Any,
+        **kwargs: Any,
     ) -> int:
         """
         Add a node to the graph at time t.
@@ -80,6 +82,10 @@ class BaseGraph(abc.ABC):
             Whether to check if the attributes keys are valid.
             If False, the attributes keys will not be checked,
             useful to speed up the operation when doing bulk insertions.
+        *args: Any
+            Unused arguments, included for compatibility with the child classes.
+        **kwargs: Any
+            Unused keyword arguments, included for compatibility with the child classes.
 
         Returns
         -------
@@ -90,6 +96,8 @@ class BaseGraph(abc.ABC):
     def bulk_add_nodes(
         self,
         nodes: list[dict[str, Any]],
+        *args: Any,
+        **kwargs: Any,
     ) -> list[int]:
         """
         Faster method to add multiple nodes to the graph with less overhead and fewer checks.
@@ -100,6 +108,10 @@ class BaseGraph(abc.ABC):
             The data of the nodes to be added.
             The keys of the data will be used as the attributes of the nodes.
             Must have "t" key.
+        *args: Any
+            Unused arguments, included for compatibility with the child classes.
+        **kwargs: Any
+            Unused keyword arguments, included for compatibility with the child classes.
 
         Returns
         -------

@@ -1,6 +1,6 @@
 import operator
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, overload
 
 import numpy as np
 import polars as pl
@@ -149,6 +149,8 @@ class RustWorkXGraph(BaseGraph):
         self,
         attrs: dict[str, Any],
         validate_keys: bool = True,
+        *args: Any,
+        **kwargs: Any,
     ) -> int:
         """
         Add a node to the graph at time t.
@@ -166,6 +168,10 @@ class RustWorkXGraph(BaseGraph):
             Whether to check if the attributes keys are valid.
             If False, the attributes keys will not be checked,
             useful to speed up the operation when doing bulk insertions.
+        *args: Any
+            Unused arguments, included for compatibility with the child classes.
+        **kwargs: Any
+            Unused keyword arguments, included for compatibility with the child classes.
         """
         # avoiding copying attributes on purpose, it could be a problem in the future
         if validate_keys:
@@ -178,7 +184,7 @@ class RustWorkXGraph(BaseGraph):
         self._time_to_nodes.setdefault(attrs["t"], []).append(node_id)
         return node_id
 
-    def bulk_add_nodes(self, nodes: list[dict[str, Any]]) -> list[int]:
+    def bulk_add_nodes(self, nodes: list[dict[str, Any]], *args: Any, **kwargs: Any) -> list[int]:
         """
         Faster method to add multiple nodes to the graph with less overhead and fewer checks.
 
@@ -188,6 +194,10 @@ class RustWorkXGraph(BaseGraph):
             The data of the nodes to be added.
             The keys of the data will be used as the attributes of the nodes.
             Must have "t" key.
+        *args: Any
+            Unused arguments, included for compatibility with the child classes.
+        **kwargs: Any
+            Unused keyword arguments, included for compatibility with the child classes.
 
         Returns
         -------
@@ -495,6 +505,12 @@ class RustWorkXGraph(BaseGraph):
         """
         return [int(i) for i in self.rx_graph.edge_indices()]
 
+    def _rx_subgraph_with_nodemap(
+        self,
+        node_ids: Sequence[int] | None = None,
+    ) -> tuple[rx.PyDiGraph, rx.NodeMap]:
+        return self.rx_graph.subgraph_with_nodemap(node_ids)
+
     def subgraph(
         self,
         *attr_filters: AttrComparison,
@@ -548,7 +564,7 @@ class RustWorkXGraph(BaseGraph):
                 .to_numpy()
             )
 
-        rx_graph, node_map = self.rx_graph.subgraph_with_nodemap(node_ids)
+        rx_graph, node_map = self._rx_subgraph_with_nodemap(node_ids)
 
         if edge_attr_comps:
             LOG.info("Removing edges without attributes %s", edge_attr_comps)
@@ -987,3 +1003,221 @@ class RustWorkXGraph(BaseGraph):
         graph_view = GraphView(rx_graph, node_map_to_root=node_map_to_root, root=self)
 
         return graph_view
+
+
+class UniqueDict(dict):
+    """
+    A dictionary that ensures that the keys are unique.
+    """
+
+    def __setitem__(self, key: Any, value: Any) -> None:
+        if key in self:
+            raise ValueError(f"Index '{key}' already exists")
+        super().__setitem__(key, value)
+
+
+class IndexedRXGraph(RustWorkXGraph):
+    """
+    A graph that is indexed by node ids.
+    """
+
+    def __init__(
+        self,
+        rx_graph: rx.PyDiGraph | None = None,
+        node_id_map: dict[int, int] | None = None,
+    ) -> None:
+        if rx_graph is not None and node_id_map is None:
+            raise ValueError("`node_id_map` must be provided when `rx_graph` is provided")
+
+        if rx_graph is None and node_id_map is not None:
+            raise ValueError("`rx_graph` must be provided when `node_id_map` is provided")
+
+        if rx_graph is None:
+            self._graph = rx.PyDiGraph()
+        else:
+            self._graph = rx_graph
+
+        if node_id_map is not None:
+            self._world_to_graph_id = UniqueDict(node_id_map)
+            self._graph_to_world_id = UniqueDict()
+            for world_id, graph_id in self._world_to_graph_id.items():
+                self._graph_to_world_id[graph_id] = world_id
+
+        else:
+            self._world_to_graph_id = UniqueDict()
+            self._graph_to_world_id = UniqueDict()
+
+        super().__init__()
+
+    @overload
+    def _from_world_id(self, world_id: None) -> list[int]: ...
+
+    @overload
+    def _from_world_id(self, world_id: int) -> int: ...
+
+    @overload
+    def _from_world_id(self, world_id: list[int]) -> list[int]: ...
+
+    def _from_world_id(self, world_id: int | list[int] | None) -> int | list[int]:
+        if world_id is None:
+            return list(self.rx_graph.node_indices())
+        vec_map = np.vectorize(self._world_to_graph_id.__getitem__, otypes=[int])
+        return vec_map(np.asarray(world_id, dtype=int)).tolist()
+
+    @overload
+    def _to_world_id(self, graph_id: None) -> None: ...
+
+    @overload
+    def _to_world_id(self, graph_id: int) -> int: ...
+
+    @overload
+    def _to_world_id(self, graph_id: list[int]) -> list[int]: ...
+
+    def _to_world_id(self, graph_id: int | list[int] | None) -> int | list[int] | None:
+        if graph_id is None:
+            return None
+        vec_map = np.vectorize(self._graph_to_world_id.__getitem__, otypes=[int])
+        return vec_map(np.asarray(graph_id, dtype=int)).tolist()
+
+    def _df_to_world_id(self, df: pl.DataFrame, columns: Sequence[str]) -> pl.DataFrame:
+        for col in columns:
+            if col in df.columns:
+                df = df.with_columns(
+                    pl.col(col).map_elements(self._graph_to_world_id.get, return_dtype=pl.Int64),
+                )
+        return df
+
+    def add_node(
+        self,
+        attrs: dict[str, Any],
+        validate_keys: bool = True,
+        index: int | None = None,
+    ) -> int:
+        node_id = super().add_node(attrs, validate_keys)
+        if index is None:
+            index = node_id
+        self._world_to_graph_id[index] = node_id
+        self._graph_to_world_id[node_id] = index
+        return index
+
+    def bulk_add_nodes(
+        self,
+        nodes: list[dict[str, Any]],
+        indices: list[int] | None = None,
+    ) -> list[int]:
+        graph_ids = super().bulk_add_nodes(nodes)
+
+        if indices is None:
+            indices = graph_ids
+
+        for node_id, index in zip(graph_ids, indices, strict=True):
+            self._world_to_graph_id[index] = node_id
+            self._graph_to_world_id[node_id] = index
+
+        return indices
+
+    def _rx_subgraph_with_nodemap(
+        self,
+        node_ids: Sequence[int] | None = None,
+    ) -> tuple[rx.PyDiGraph, rx.NodeMap]:
+        node_ids = self._from_world_id(node_ids)
+        rx_graph, node_map = super()._rx_subgraph_with_nodemap(node_ids)
+        node_map = {k: self._graph_to_world_id[v] for k, v in node_map.items()}
+        return rx_graph, node_map
+
+    def node_ids(self) -> list[int]:
+        return list(self._world_to_graph_id.keys())
+
+    def node_attrs(
+        self,
+        *,
+        node_ids: Sequence[int] | None = None,
+        attr_keys: Sequence[str] | str | None = None,
+        unpack: bool = False,
+    ) -> pl.DataFrame:
+        node_ids = self._from_world_id(node_ids)
+        df = super().node_attrs(node_ids=node_ids, attr_keys=attr_keys, unpack=unpack)
+        df = self._df_to_world_id(df, [DEFAULT_ATTR_KEYS.NODE_ID])
+        return df
+
+    def edge_attrs(
+        self,
+        *,
+        node_ids: Sequence[int] | None = None,
+        attr_keys: Sequence[str] | str | None = None,
+        include_targets: bool = False,
+        unpack: bool = False,
+    ) -> pl.DataFrame:
+        node_ids = self._from_world_id(node_ids)
+        df = super().edge_attrs(node_ids=node_ids, attr_keys=attr_keys, include_targets=include_targets, unpack=unpack)
+        df = self._df_to_world_id(df, [DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET])
+        return df
+
+    def in_degree(self, node_ids: list[int] | int | None = None) -> list[int] | int:
+        node_ids = self._from_world_id(node_ids)
+        return super().in_degree(node_ids)
+
+    def out_degree(self, node_ids: list[int] | int | None = None) -> list[int] | int:
+        node_ids = self._from_world_id(node_ids)
+        return super().out_degree(node_ids)
+
+    def add_edge(
+        self,
+        source_id: int,
+        target_id: int,
+        attrs: dict[str, Any],
+        validate_keys: bool = True,
+    ) -> int:
+        try:
+            source_id = self._world_to_graph_id[source_id]
+            target_id = self._world_to_graph_id[target_id]
+        except KeyError as e:
+            raise ValueError(f"`source_id` {source_id} or `target_id` {target_id} not found in index map.") from e
+        return super().add_edge(source_id, target_id, attrs, validate_keys)
+
+    def add_overlap(self, source_id: int, target_id: int) -> int:
+        try:
+            source_id = self._world_to_graph_id[source_id]
+            target_id = self._world_to_graph_id[target_id]
+        except KeyError as e:
+            raise ValueError(f"`source_id` {source_id} or `target_id` {target_id} not found in index map.") from e
+        return super().add_overlap(source_id, target_id)
+
+    def overlaps(self, node_ids: list[int] | int | None = None) -> list[list[int, 2]]:
+        try:
+            node_ids = self._from_world_id(node_ids)
+        except KeyError:
+            LOG.warning(f"`node_ids` {node_ids} not found in index map.")
+            return []
+        overlaps = self._to_world_id(super().overlaps(node_ids))
+        return overlaps
+
+    def _get_neighbors(
+        self,
+        neighbors_func: Callable[[rx.PyDiGraph, int], rx.NodeIndices],
+        node_ids: list[int] | int | None = None,
+        attr_keys: Sequence[str] | str | None = None,
+    ) -> dict[int, pl.DataFrame] | pl.DataFrame:
+        node_ids = self._from_world_id(node_ids)
+        dfs = super()._get_neighbors(neighbors_func, node_ids, attr_keys)
+        if isinstance(dfs, pl.DataFrame):
+            dfs = self._df_to_world_id(dfs, [DEFAULT_ATTR_KEYS.NODE_ID])
+        else:
+            dfs = {
+                self._graph_to_world_id[node_id]: self._df_to_world_id(df, [DEFAULT_ATTR_KEYS.NODE_ID])
+                for node_id, df in dfs.items()
+            }
+        return dfs
+
+    def update_node_attrs(
+        self,
+        *,
+        attrs: dict[str, Any],
+        node_ids: Sequence[int] | None = None,
+    ) -> None:
+        node_ids = self._from_world_id(node_ids)
+        super().update_node_attrs(attrs=attrs, node_ids=node_ids)
+
+    def filter_nodes_by_attrs(self, *attrs: AttrComparison) -> list[int]:
+        node_ids = super().filter_nodes_by_attrs(*attrs)
+        return self._to_world_id(node_ids)

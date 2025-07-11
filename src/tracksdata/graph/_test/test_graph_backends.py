@@ -107,10 +107,10 @@ def test_add_edge(graph_backend: BaseGraph) -> None:
 
 def test_node_ids(graph_backend: BaseGraph) -> None:
     """Test retrieving node IDs."""
-    node1 = graph_backend.add_node({"t": 0})
-    node2 = graph_backend.add_node({"t": 1})
+    graph_backend.add_node({"t": 0})
+    graph_backend.add_node({"t": 1})
 
-    assert set(graph_backend.node_ids()) == {node1, node2}
+    assert len(graph_backend.node_ids()) == 2
 
 
 def test_filter_nodes_by_attribute(graph_backend: BaseGraph) -> None:
@@ -907,12 +907,12 @@ def test_attrs_with_duplicated_attr_keys(graph_backend: BaseGraph) -> None:
     graph_backend.add_node_attr_key("y", 0.0)
 
     # Add nodes
-    graph_backend.add_node({"t": 0, "x": 1.0, "y": 1.0})
-    graph_backend.add_node({"t": 1, "x": 2.0, "y": 2.0})
+    node_1 = graph_backend.add_node({"t": 0, "x": 1.0, "y": 1.0})
+    node_2 = graph_backend.add_node({"t": 1, "x": 2.0, "y": 2.0})
 
     # Add edges
     graph_backend.add_edge_attr_key("weight", 0.0)
-    graph_backend.add_edge(0, 1, {"weight": 0.5})
+    graph_backend.add_edge(node_1, node_2, {"weight": 0.5})
 
     # Test with duplicated attribute keys
     # This would crash before

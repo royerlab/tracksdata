@@ -1,15 +1,19 @@
 import os
 import zipfile
 from pathlib import Path
+from types import MethodType
+from typing import Any
 
+import numpy as np
 import pytest
 import requests
 
 from tracksdata.graph import RustWorkXGraph, SQLGraph
 from tracksdata.graph._base_graph import BaseGraph
+from tracksdata.graph._rustworkx_graph import IndexedRXGraph
 
 
-@pytest.fixture(params=[RustWorkXGraph, SQLGraph])
+@pytest.fixture(params=[RustWorkXGraph, SQLGraph, IndexedRXGraph])
 def graph_backend(request) -> BaseGraph:
     """Fixture that provides all implementations of BaseGraph."""
     graph_class: BaseGraph = request.param
@@ -20,6 +24,36 @@ def graph_backend(request) -> BaseGraph:
             database=":memory:",
             engine_kwargs={"connect_args": {"check_same_thread": False}},
         )
+    elif graph_class == IndexedRXGraph:
+        #  we hack the IndexedRXGraph to have a non-trivial index map
+        rng = np.random.default_rng(42)
+        max_index = 2**32
+        orig_add_node = graph_class.add_node
+        orig_bulk_add_nodes = graph_class.bulk_add_nodes
+        obj = graph_class()
+
+        def _add_node_with_index(
+            self,
+            attrs: dict[str, Any],
+            validate_keys: bool = True,
+        ) -> int:
+            while True:
+                new_index = rng.integers(0, max_index).item()
+                if new_index not in self._world_to_graph_id:
+                    break
+            return orig_add_node(self, attrs, validate_keys, new_index)
+
+        def _bulk_add_nodes_with_index(
+            self,
+            nodes: list[dict[str, Any]],
+        ) -> list[int]:
+            current_max = max(self.node_ids()) + 1
+            indices = (rng.integers(current_max, max_index) + np.arange(len(nodes))).tolist()
+            return orig_bulk_add_nodes(self, nodes, indices)
+
+        obj.add_node = MethodType(_add_node_with_index, obj)
+        obj.bulk_add_nodes = MethodType(_bulk_add_nodes_with_index, obj)
+        return obj
     else:
         return graph_class()
 
