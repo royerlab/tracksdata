@@ -15,6 +15,7 @@ from tracksdata.utils._logging import LOG
 from tracksdata.utils._multiprocessing import multiprocessing_apply
 
 if TYPE_CHECKING:
+    from tracksdata.graph._base_filter import BaseFilter
     from tracksdata.graph._graph_view import GraphView
 
 
@@ -375,6 +376,33 @@ class BaseGraph(abc.ABC):
     def edge_ids(self) -> list[int]:
         """
         Get the IDs of all edges in the graph.
+        """
+
+    @abc.abstractmethod
+    def filter(
+        self,
+        *attr_filters: AttrComparison,
+        include_targets: bool = False,
+        include_sources: bool = False,
+    ) -> "BaseFilter":
+        """
+        Filter the graph by the given attributes.
+
+        Parameters
+        ----------
+        *attr_filters : AttrComparison
+            The attributes to filter the nodes by.
+        include_targets : bool
+            Whether to include edges out-going from the given node_ids even
+            if the target node is not in the given node_ids.
+        include_sources : bool
+            Whether to include edges incoming to the given node_ids even
+            if the source node is not in the given node_ids.
+
+        Returns
+        -------
+        BaseFilter
+            A filter object that can be used to create a subgraph or query attributes.
         """
 
     @abc.abstractmethod

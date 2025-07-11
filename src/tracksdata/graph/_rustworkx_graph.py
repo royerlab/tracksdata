@@ -14,6 +14,7 @@ from tracksdata.attrs import (
 )
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.functional._rx import _assign_track_ids
+from tracksdata.graph._base_filter import BaseFilter, cache_method
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.utils._dataframe import unpack_array_attrs
 from tracksdata.utils._logging import LOG
@@ -55,6 +56,8 @@ def _pop_time_eq(
 def _create_filter_func(
     attr_comps: Sequence[AttrComparison],
 ) -> Callable[[dict[str, Any]], bool]:
+    LOG.info(f"Creating filter function for {attr_comps}")
+
     def _filter(attrs: dict[str, Any]) -> bool:
         for attr_op in attr_comps:
             if not attr_op.op(attrs[str(attr_op.column)], attr_op.other):
@@ -62,6 +65,154 @@ def _create_filter_func(
         return True
 
     return _filter
+
+
+class RXFilter(BaseFilter):
+    def __init__(
+        self,
+        graph: "RustWorkXGraph",
+        *attr_comps: AttrComparison,
+        include_targets: bool = False,
+        include_sources: bool = False,
+    ) -> None:
+        super().__init__()
+        self._graph = graph
+        self._attr_comps = attr_comps
+        self._include_targets = include_targets
+        self._include_sources = include_sources
+        self._node_attr_comps, self._edge_attr_comps = split_attr_comps(attr_comps)
+
+    @cache_method
+    def _edge_attrs(self) -> pl.DataFrame:
+        return self._graph.edge_attrs()
+
+    @cache_method
+    def _current_node_ids(self) -> list[int]:
+        """
+        Get the node IDs without considering their `source` or `target` neighbors.
+        """
+        if len(self._node_attr_comps) == 0:
+            node_ids = self._graph.rx_graph.node_indices()
+        else:
+            # only nodes are filtered return nodes that pass node filters
+            node_ids = self._graph.filter_nodes_by_attrs(*self._node_attr_comps)
+
+        return node_ids
+
+    @cache_method
+    def node_ids(self) -> list[int]:
+        # no nodes outside of the filtered nodes are allowed
+        if len(self._edge_attr_comps) == 0 and (not self._include_targets and not self._include_sources):
+            return self._current_node_ids()
+
+        # find nodes that are connected to edges that pass the edge filters
+        edge_node_ids = (
+            self._edge_attrs()
+            .select(
+                DEFAULT_ATTR_KEYS.EDGE_SOURCE,
+                DEFAULT_ATTR_KEYS.EDGE_TARGET,
+            )
+            .to_numpy()
+            .ravel()
+        )
+        node_ids = np.unique(np.concatenate([edge_node_ids, self._current_node_ids()]))
+        return np.unique(node_ids).tolist()
+
+    @cache_method
+    def _edge_attrs(self) -> pl.DataFrame:
+        node_ids = self._current_node_ids()
+
+        _filter_func = _create_filter_func(self._edge_attr_comps)
+        neigh_funcs = []
+        if self._include_targets:
+            neigh_funcs.append(self._graph.rx_graph.out_edges)
+
+        if self._include_sources:
+            neigh_funcs.append(self._graph.rx_graph.in_edges)
+
+        # only edges are filtered return nodes that pass edge filters
+        sources = []
+        targets = []
+        data = {k: [] for k in self._graph.edge_attr_keys}
+        data[DEFAULT_ATTR_KEYS.EDGE_ID] = []
+
+        for node_id in node_ids:
+            for nf in neigh_funcs:
+                for src, tgt, attr in nf(node_id):
+                    if _filter_func(attr):
+                        sources.append(src)
+                        targets.append(tgt)
+                        for k in data.keys():
+                            data[k].append(attr[k])
+
+        df = pl.DataFrame(data).with_columns(
+            pl.Series(sources, dtype=pl.Int64).alias(DEFAULT_ATTR_KEYS.EDGE_SOURCE),
+            pl.Series(targets, dtype=pl.Int64).alias(DEFAULT_ATTR_KEYS.EDGE_TARGET),
+        )
+        return df
+
+    @cache_method
+    def edge_ids(self) -> list[int]:
+        return self._edge_attrs()[DEFAULT_ATTR_KEYS.EDGE_ID].to_list()
+
+    @cache_method
+    def node_attrs(
+        self,
+        attr_keys: list[str] | None = None,
+        unpack: bool = False,
+    ) -> pl.DataFrame:
+        return self._graph.node_attrs(node_ids=self.node_ids(), attr_keys=attr_keys, unpack=unpack)
+
+    @cache_method
+    def edge_attrs(
+        self,
+        attr_keys: list[str] | None = None,
+        unpack: bool = False,
+    ) -> pl.DataFrame:
+        df = self._edge_attrs()
+        if df.is_empty():
+            return df
+
+        if attr_keys is None:
+            attr_keys = self._graph.edge_attr_keys
+
+        attr_keys = [
+            DEFAULT_ATTR_KEYS.EDGE_ID,
+            DEFAULT_ATTR_KEYS.EDGE_SOURCE,
+            DEFAULT_ATTR_KEYS.EDGE_TARGET,
+            *attr_keys,
+        ]
+        attr_keys = list(dict.fromkeys(attr_keys))
+
+        df = df.select(attr_keys)
+        if unpack:
+            df = unpack_array_attrs(df, attr_keys, unpack_array_attrs)
+        return df
+
+    @cache_method
+    def subgraph(
+        self,
+        node_attr_keys: Sequence[str] | str | None = None,
+        edge_attr_keys: Sequence[str] | str | None = None,
+    ) -> "GraphView":
+        from tracksdata.graph._graph_view import GraphView
+
+        node_ids = self.node_ids()
+
+        rx_graph, node_map = self._graph.rx_graph.subgraph_with_nodemap(node_ids)
+        if self._edge_attr_comps:
+            _filter_func = _create_filter_func(self._edge_attr_comps)
+            for src, tgt, attr in rx_graph.weighted_edge_list():
+                if not _filter_func(attr):
+                    rx_graph.remove_edge(src, tgt)
+
+        graph_view = GraphView(
+            rx_graph,
+            node_map_to_root=dict(node_map.items()),
+            root=self._graph,
+        )
+
+        return graph_view
 
 
 class RustWorkXGraph(BaseGraph):
@@ -144,6 +295,19 @@ class RustWorkXGraph(BaseGraph):
     @property
     def rx_graph(self) -> rx.PyDiGraph:
         return self._graph
+
+    def filter(
+        self,
+        *attr_filters: AttrComparison,
+        include_targets: bool = False,
+        include_sources: bool = False,
+    ) -> RXFilter:
+        return RXFilter(
+            self,
+            *attr_filters,
+            include_targets=include_targets,
+            include_sources=include_sources,
+        )
 
     def add_node(
         self,

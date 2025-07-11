@@ -154,14 +154,14 @@ class GenericFuncNodeAttrs(BaseNodeAttrsOperator):
             Such that, when provided, `frames[t]` will be passed to the `func` function.
         """
         # Get node IDs for the specified time point
-        node_ids = graph.filter_nodes_by_attrs(NodeAttr(DEFAULT_ATTR_KEYS.T) == t)
+        graph_filter = graph.filter(NodeAttr(DEFAULT_ATTR_KEYS.T) == t)
 
-        if len(node_ids) == 0:
+        if graph_filter.is_empty():
             LOG.warning(f"No nodes at time point {t}")
             return []
 
         # Get attributes for these nodes
-        node_attrs = graph.node_attrs(node_ids=node_ids, attr_keys=self.attr_keys)
+        node_attrs = graph_filter.node_attrs(attr_keys=self.attr_keys)
 
         args = []
         if frames is not None:
@@ -180,4 +180,4 @@ class GenericFuncNodeAttrs(BaseNodeAttrsOperator):
                 result = self.func(*args, **data_dict)
                 results.append(result)
 
-        return node_ids, {self.output_key: results}
+        return graph_filter.node_ids(), {self.output_key: results}

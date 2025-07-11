@@ -59,8 +59,8 @@ node_op = td.nodes.RegionPropsNodes(extra_properties=["area", "eccentricity"])
 node_op.add_nodes(graph, labels=labels)
 
 # Filter nodes by time
-t0_nodes = graph.filter_nodes_by_attrs(td.NodeAttr("t") == 0)
-node_data = graph.node_attrs(node_ids=t0_nodes)
+graph_filter = graph.filter(td.NodeAttr("t") == 0)
+node_data = graph_filter.node_attrs()
 print(node_data)
 ```
 
