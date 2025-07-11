@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 import rustworkx as rx
 
+from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.functional._rx import _assign_track_ids
 
 
@@ -17,7 +18,7 @@ def test_single_path() -> None:
     graph = rx.PyDiGraph()
 
     # Add nodes 0->1->2 (single parent, single child)
-    nodes = [graph.add_node(None) for _ in range(3)]
+    nodes = [graph.add_node({DEFAULT_ATTR_KEYS.T: t}) for t in range(3)]
     graph.add_edge(nodes[0], nodes[1], None)
     graph.add_edge(nodes[1], nodes[2], None)
 
@@ -37,7 +38,11 @@ def test_branching_path() -> None:
     #     0
     #    / \
     #   1   2
-    nodes = [graph.add_node(None) for _ in range(3)]
+    nodes = [
+        graph.add_node({DEFAULT_ATTR_KEYS.T: 0}),
+        graph.add_node({DEFAULT_ATTR_KEYS.T: 1}),
+        graph.add_node({DEFAULT_ATTR_KEYS.T: 1}),
+    ]
     graph.add_edge(nodes[0], nodes[1], None)
     graph.add_edge(nodes[0], nodes[2], None)
 
@@ -59,7 +64,11 @@ def test_invalid_multiple_parents() -> None:
     #   0   1
     #    \ /
     #     2
-    nodes = [graph.add_node(None) for _ in range(3)]
+    nodes = [
+        graph.add_node({DEFAULT_ATTR_KEYS.T: 0}),
+        graph.add_node({DEFAULT_ATTR_KEYS.T: 0}),
+        graph.add_node({DEFAULT_ATTR_KEYS.T: 1}),
+    ]
     graph.add_edge(nodes[0], nodes[2], None)
     graph.add_edge(nodes[1], nodes[2], None)
 
@@ -72,24 +81,43 @@ def test_complex_valid_branching() -> None:
     graph = rx.PyDiGraph()
 
     # Add nodes:
-    #     0
-    #    / \
-    #   1   2
-    #  /     \
-    # 3       4
-    nodes = [graph.add_node(None) for _ in range(5)]
+    #       0
+    #      / \
+    #     1   2
+    #    /     \
+    #   3      |
+    #    \     /
+    #     4   5
+    nodes = [
+        graph.add_node({DEFAULT_ATTR_KEYS.T: 0}),
+        graph.add_node({DEFAULT_ATTR_KEYS.T: 1}),
+        graph.add_node({DEFAULT_ATTR_KEYS.T: 1}),
+        graph.add_node({DEFAULT_ATTR_KEYS.T: 2}),
+        graph.add_node({DEFAULT_ATTR_KEYS.T: 3}),
+        graph.add_node({DEFAULT_ATTR_KEYS.T: 3}),
+    ]
     graph.add_edge(nodes[0], nodes[1], None)
     graph.add_edge(nodes[0], nodes[2], None)
     graph.add_edge(nodes[1], nodes[3], None)
-    graph.add_edge(nodes[2], nodes[4], None)
+    graph.add_edge(nodes[3], nodes[4], None)
+    graph.add_edge(nodes[2], nodes[5], None)
 
     node_ids, track_ids, tracks_graph = _assign_track_ids(graph)
 
-    assert len(node_ids) == 5
-    assert len(track_ids) == 5
-    assert len(np.unique(track_ids)) == 3  # Five unique track IDs
+    # this order is an implementation detail, it could change
+    # then the track ids should change accordingly
+    np.testing.assert_array_equal(node_ids, [0, 2, 1, 3, 4, 5])
+    np.testing.assert_array_equal(track_ids, [1, 2, 3, 3, 3, 4])
+
+    assert set(tracks_graph.successor_indices(1)) == {2, 3}
+    assert set(tracks_graph.successor_indices(2)) == {4}
+    assert tracks_graph.num_edges() == 3
+
+    assert len(node_ids) == 6
+    assert len(track_ids) == 6
+    assert len(np.unique(track_ids)) == 4  # {0, {1, 3, 4}, 2, 5}
     assert isinstance(tracks_graph, rx.PyDiGraph)
-    assert tracks_graph.num_nodes() == 3 + 1  # Five tracks (includes null node (0))
+    assert tracks_graph.num_nodes() == 4 + 1  # Five tracks (includes null node (0))
 
 
 def test_three_children() -> None:
@@ -100,7 +128,12 @@ def test_three_children() -> None:
     #     0
     #   / | \
     #  1  2  3
-    nodes = [graph.add_node(None) for _ in range(4)]
+    nodes = [
+        graph.add_node({DEFAULT_ATTR_KEYS.T: 0}),
+        graph.add_node({DEFAULT_ATTR_KEYS.T: 1}),
+        graph.add_node({DEFAULT_ATTR_KEYS.T: 1}),
+        graph.add_node({DEFAULT_ATTR_KEYS.T: 1}),
+    ]
     graph.add_edge(nodes[0], nodes[1], None)
     graph.add_edge(nodes[0], nodes[2], None)
     graph.add_edge(nodes[0], nodes[3], None)
@@ -115,7 +148,7 @@ def test_multiple_roots() -> None:
 
     # Add nodes:
     # 0->1  2->3
-    nodes = [graph.add_node(None) for _ in range(4)]
+    nodes = [graph.add_node({DEFAULT_ATTR_KEYS.T: t % 2}) for t in range(4)]
     graph.add_edge(nodes[0], nodes[1], None)
     graph.add_edge(nodes[2], nodes[3], None)
 

@@ -3,6 +3,7 @@ import polars as pl
 import rustworkx as rx
 from numba import njit, typed, types
 
+from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.utils._logging import LOG
 
 NO_PARENT = -1
@@ -59,7 +60,7 @@ def _fast_path_transverse(
 def _fast_dag_transverse(
     roots: list[int],
     dag: dict[int, list[int]],
-) -> tuple[list[list[int]], list[int], list[int], list[int]]:
+) -> tuple[list[list[int]], list[int], list[int], list[int], dict[int, int], dict[int, int]]:
     """
     Transverse the tracks DAG creating a distinct id to each path.
 
@@ -72,14 +73,21 @@ def _fast_dag_transverse(
 
     Returns
     -------
-    tuple[list[list[int]], list[int], list[int], list[int]]
-        Sequence of paths, their respective track_id, parent_track_id and length.
+    tuple[list[list[int]], list[int], list[int], list[int], dict[int, int], dict[int, int]]
+        - sequence of paths
+        - their respective track_id
+        - parent_track_id
+        - length
+        - last_to_track_id: last node -> track_id
+        - first_to_track_id: first node -> track_id
     """
     track_id = 1
     paths = []
     track_ids = []  # equivalent to arange
     parent_track_ids = []
     lengths = []
+    last_to_track_id = {}
+    first_to_track_id = {}
 
     for root in roots:
         queue = [(root, NO_PARENT)]
@@ -91,9 +99,11 @@ def _fast_dag_transverse(
             track_ids.append(track_id)
             parent_track_ids.append(parent_track_id)
             lengths.append(len(path))
+            last_to_track_id[path[-1]] = track_id
+            first_to_track_id[path[0]] = track_id
             track_id += 1
 
-    return paths, track_ids, parent_track_ids, lengths
+    return paths, track_ids, parent_track_ids, lengths, last_to_track_id, first_to_track_id
 
 
 @njit
@@ -123,7 +133,7 @@ def _numba_dag(node_ids: np.ndarray, parent_ids: np.ndarray) -> dict[int, list[i
     return dag
 
 
-def _rx_graph_to_dict_dag(graph: rx.PyDiGraph) -> dict[int, list[int]]:
+def _rx_graph_to_dict_dag(graph: rx.PyDiGraph) -> tuple[dict[int, list[int]], pl.DataFrame]:
     """Creates the DAG of track lineages
 
     Parameters
@@ -133,36 +143,65 @@ def _rx_graph_to_dict_dag(graph: rx.PyDiGraph) -> dict[int, list[int]]:
 
     Returns
     -------
-    dict[int, list[int]]
-        DAG where parent maps to their children (parent -> children)
+    tuple[dict[int, list[int]], pl.DataFrame]
+        - DAG where parent maps to their children (parent -> children)
+        - Long edges (source, target)
     """
     # target are the children
     # source are the parents
     node_indices = np.asarray(graph.node_indices(), dtype=np.int64)
-    graph_df = pl.DataFrame({"target": node_indices})
-    edge_list = pl.from_numpy(
+    times = [n[DEFAULT_ATTR_KEYS.T] for n in graph.nodes()]
+    nodes_df = pl.DataFrame(
+        {"node_id": node_indices, DEFAULT_ATTR_KEYS.T: times},
+    )
+    edges_df = pl.from_numpy(
         np.asarray(graph.edge_list(), dtype=np.int64),
         schema=["source", "target"],
     )
     try:
-        graph_df = (
-            graph_df.join(edge_list, on="target", how="left", validate="1:1")
-            .with_columns(pl.col("source").fill_null(NO_PARENT))
-            .select(pl.col("target"), pl.col("source"))
-            .to_numpy(order="fortran")
-            .T
+        edges_df = (
+            edges_df.join(
+                nodes_df,
+                left_on="target",
+                right_on="node_id",
+                how="left",
+                validate="1:1",
+            )
+            .with_columns(pl.col("t").alias("t_target"))
+            .join(
+                nodes_df,
+                left_on="source",
+                right_on="node_id",
+                how="left",
+                validate="m:1",
+                suffix="_source",
+            )
         )
+
     except pl.exceptions.ComputeError as e:
         if "join keys did not fulfill 1:1" in str(e):
             raise RuntimeError("Invalid graph structure, found node with multiple parents") from e
         else:
             raise e
 
+    long_edges = (edges_df["t_target"] - edges_df["t_source"]).abs() > 1
+    long_edges_df = edges_df.filter(long_edges)
+
+    edges_df = edges_df.filter(~long_edges)
+    nodes_df = (
+        nodes_df.with_columns(pl.col("node_id").alias("target"))
+        .join(edges_df, on="target", how="left", validate="1:1")
+        .with_columns(pl.col("source").fill_null(NO_PARENT))
+        .select("target", "source")
+        .to_numpy(order="fortran")
+        .T
+    )
+
     # above we convert to numpy representation and then create numba dict
     # inside a njit function, otherwise it's very slow
-    forest = _numba_dag(graph_df[0], graph_df[1])
+    forest = _numba_dag(nodes_df[0], nodes_df[1])
 
-    return forest
+    return forest, long_edges_df
 
 
 def _assign_track_ids(
@@ -190,10 +229,10 @@ def _assign_track_ids(
     LOG.info(f"Graph has {graph.num_nodes()} nodes and {graph.num_edges()} edges")
 
     # was it better (faster) when using a numpy array for the digraph as in ultrack?
-    dag = _rx_graph_to_dict_dag(graph)
+    dag, long_edges_df = _rx_graph_to_dict_dag(graph)
     roots = dag.pop(NO_PARENT)
 
-    paths, track_ids, parent_track_ids, lengths = _fast_dag_transverse(roots, dag)
+    paths, track_ids, parent_track_ids, lengths, last_to_track_id, first_to_track_id = _fast_dag_transverse(roots, dag)
 
     n_tracks = len(track_ids)
 
@@ -202,6 +241,13 @@ def _assign_track_ids(
     tracks_graph.add_edges_from_no_data(
         [(p, c) for p, c in zip(parent_track_ids, track_ids, strict=True) if p != NO_PARENT]
     )
+
+    if len(long_edges_df) > 0:
+        # assign long edges
+        for src, tgt in zip(long_edges_df["source"].to_list(), long_edges_df["target"].to_list(), strict=True):
+            child_track_id = first_to_track_id[tgt]
+            parent_track_id = last_to_track_id[src]
+            tracks_graph.add_edge(parent_track_id, child_track_id, None)
 
     paths = np.concatenate(paths)
     nodes_track_ids = np.repeat(track_ids, lengths)
