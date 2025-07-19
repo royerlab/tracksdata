@@ -79,7 +79,7 @@ class GraphView(RustWorkXGraph):
     ```python
     from tracksdata.attrs import NodeAttr
 
-    view = graph.subgraph(NodeAttr("t") == 5)
+    view = graph.filter(NodeAttr("t") == 5).subgraph()
     ```
 
     Access nodes in the view:

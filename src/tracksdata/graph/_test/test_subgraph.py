@@ -581,7 +581,7 @@ def test_subgraph_node_attr_filter(graph_backend: BaseGraph) -> None:
     graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
 
     # Test filtering by time point
-    subgraph_t2 = graph_with_data.subgraph(NodeAttr("t") == 2)
+    subgraph_t2 = graph_with_data.filter(NodeAttr("t") == 2).subgraph()
 
     # Should contain nodes with t=2 (nodes 2 and 3 from create_test_graph)
     expected_nodes = graph_with_data.filter_nodes_by_attrs(NodeAttr("t") == 2)
@@ -597,12 +597,12 @@ def test_subgraph_node_attr_filter(graph_backend: BaseGraph) -> None:
             assert original_attrs[col].to_list() == subgraph_attrs[col].to_list()
 
     # Test filtering by label
-    subgraph_label_a = graph_with_data.subgraph(NodeAttr("label") == "A")
+    subgraph_label_a = graph_with_data.filter(NodeAttr("label") == "A").subgraph()
     expected_label_a_nodes = graph_with_data.filter_nodes_by_attrs(NodeAttr("label") == "A")
     assert set(subgraph_label_a.node_ids()) == set(expected_label_a_nodes)
 
     # Test filtering with multiple attributes
-    subgraph_multi = graph_with_data.subgraph(NodeAttr("t") == 2, NodeAttr("label") == "A")
+    subgraph_multi = graph_with_data.filter(NodeAttr("t") == 2, NodeAttr("label") == "A").subgraph()
     expected_multi_nodes = graph_with_data.filter_nodes_by_attrs(NodeAttr("t") == 2, NodeAttr("label") == "A")
     assert set(subgraph_multi.node_ids()) == set(expected_multi_nodes)
 
@@ -612,7 +612,7 @@ def test_subgraph_edge_attr_filter(graph_backend: BaseGraph) -> None:
     graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
 
     # Test filtering by edge weight
-    subgraph_weight_05 = graph_with_data.subgraph(EdgeAttr("weight") == 0.5)
+    subgraph_weight_05 = graph_with_data.filter(EdgeAttr("weight") == 0.5).subgraph()
 
     # Verify the subgraph contains nodes connected by edges with weight=0.5
     edges = subgraph_weight_05.edge_attrs()
@@ -625,17 +625,20 @@ def test_subgraph_edge_attr_filter(graph_backend: BaseGraph) -> None:
     targets = set(edges[DEFAULT_ATTR_KEYS.EDGE_TARGET].to_list())
     expected_nodes = sources | targets
 
+    print(edges)
+    print(subgraph_weight_05.node_ids())
+
     assert set(subgraph_weight_05.node_ids()) == expected_nodes
 
     # Test filtering by new_attribute
-    subgraph_attr_2 = graph_with_data.subgraph(EdgeAttr("new_attribute") == 2.0)
+    subgraph_attr_2 = graph_with_data.filter(EdgeAttr("new_attribute") == 2.0).subgraph()
     edges_attr_2 = subgraph_attr_2.edge_attrs()
 
     # All edges should have new_attribute=2.0
     assert all(f == 2.0 for f in edges_attr_2["new_attribute"].to_list())
 
     # Test filtering with multiple edge attributes
-    subgraph_multi_edge = graph_with_data.subgraph(EdgeAttr("weight") == 0.7, EdgeAttr("new_attribute") == 2.0)
+    subgraph_multi_edge = graph_with_data.filter(EdgeAttr("weight") == 0.7, EdgeAttr("new_attribute") == 2.0).subgraph()
     edges_multi = subgraph_multi_edge.edge_attrs()
 
     # All edges should match both criteria
@@ -649,7 +652,7 @@ def test_subgraph_attr_filter_edge_preservation(graph_backend: BaseGraph) -> Non
     graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
 
     # Create subgraph with edge filter that should include specific edges
-    subgraph = graph_with_data.subgraph(EdgeAttr("weight") == 0.9)
+    subgraph = graph_with_data.filter(EdgeAttr("weight") == 0.9).subgraph()
 
     # Get original edges matching the filter
     original_edges = graph_with_data.edge_attrs()
@@ -677,17 +680,17 @@ def test_subgraph_attr_filter_empty_results(graph_backend: BaseGraph) -> None:
     graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
 
     # Test node filter with non-existent value
-    empty_subgraph_node = graph_with_data.subgraph(NodeAttr("t") == 999)
+    empty_subgraph_node = graph_with_data.filter(NodeAttr("t") == 999).subgraph()
     assert empty_subgraph_node.num_nodes == 0
     assert empty_subgraph_node.num_edges == 0
 
     # Test edge filter with non-existent value
-    empty_subgraph_edge = graph_with_data.subgraph(EdgeAttr("weight") == 999.0)
+    empty_subgraph_edge = graph_with_data.filter(EdgeAttr("weight") == 999.0).subgraph()
     assert empty_subgraph_edge.num_nodes == 0
     assert empty_subgraph_edge.num_edges == 0
 
     # Test node filter with impossible combination
-    empty_subgraph_multi = graph_with_data.subgraph(NodeAttr("t") == 0, NodeAttr("label") == "NONEXISTENT")
+    empty_subgraph_multi = graph_with_data.filter(NodeAttr("t") == 0, NodeAttr("label") == "NONEXISTENT").subgraph()
     assert empty_subgraph_multi.num_nodes == 0
     assert empty_subgraph_multi.num_edges == 0
 

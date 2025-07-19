@@ -73,21 +73,33 @@ class GenericFuncEdgeAttrs(BaseEdgeAttrsOperator):
         graph : BaseGraph
             The graph to add weights to.
         """
-        source_ids = graph.filter_nodes_by_attrs(NodeAttr(DEFAULT_ATTR_KEYS.T) == t)
-        edges_df = graph.edge_attrs(node_ids=source_ids, include_targets=True)
+        graph_filter = graph.filter(NodeAttr(DEFAULT_ATTR_KEYS.T) == t, include_targets=True)
+        edges_df = graph_filter.edge_attrs(attr_keys=[])
 
         if len(edges_df) == 0:
-            LOG.warning(f"No edges found for time point {t} to sucessors")
+            LOG.warning(f"No edges found for time point {t} to successors")
             return [], {}
 
-        source_df = graph.node_attrs(
-            node_ids=edges_df[DEFAULT_ATTR_KEYS.EDGE_SOURCE].to_numpy(),
-            attr_keys=self.attr_keys,
+        att_keys_list = self.attr_keys if isinstance(self.attr_keys, list) else [self.attr_keys]
+        nodes_df = graph_filter.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, *att_keys_list])
+
+        source_df = edges_df.rename({DEFAULT_ATTR_KEYS.EDGE_SOURCE: DEFAULT_ATTR_KEYS.NODE_ID}).join(
+            nodes_df,
+            on=DEFAULT_ATTR_KEYS.NODE_ID,
+            how="left",
         )
-        target_df = graph.node_attrs(
-            node_ids=edges_df[DEFAULT_ATTR_KEYS.EDGE_TARGET].to_numpy(),
-            attr_keys=self.attr_keys,
+
+        target_df = edges_df.rename({DEFAULT_ATTR_KEYS.EDGE_TARGET: DEFAULT_ATTR_KEYS.NODE_ID}).join(
+            nodes_df,
+            on=DEFAULT_ATTR_KEYS.NODE_ID,
+            how="left",
         )
+
+        for df in [source_df, target_df]:
+            if len(df) != len(edges_df):
+                raise ValueError(
+                    f"Number of edges ({len(edges_df)}) and nodes ({len(df)}) do not match. Something went wrong."
+                )
 
         weights = np.zeros(len(edges_df), dtype=np.float32)
 

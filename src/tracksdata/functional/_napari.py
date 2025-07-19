@@ -77,7 +77,10 @@ def to_napari_format(
         - dict_graph: A dictionary of parent -> child relationships.
         - array_view: The array view of the solution graph if `mask_key` is provided.
     """
-    solution_graph = graph.subgraph(NodeAttr(solution_key) == True, EdgeAttr(solution_key) == True)
+    solution_graph = graph.filter(
+        NodeAttr(solution_key) == True,
+        EdgeAttr(solution_key) == True,
+    ).subgraph()
 
     tracks_graph = solution_graph.assign_track_ids(output_track_id_key)
     dict_graph = {child: parent for parent, child in tracks_graph.edge_list()}

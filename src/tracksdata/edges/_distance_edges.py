@@ -143,15 +143,14 @@ class DistanceEdges(BaseEdgesOperator):
 
         if self.delta_t == 1:
             # faster than the range filter
-            prev_node_ids = graph.filter_nodes_by_attrs(NodeAttr(DEFAULT_ATTR_KEYS.T) == t - 1)
+            prev_filter = graph.filter(NodeAttr(DEFAULT_ATTR_KEYS.T) == t - 1)
         else:
-            prev_node_ids = graph.filter_nodes_by_attrs(
+            prev_filter = graph.filter(
                 NodeAttr(DEFAULT_ATTR_KEYS.T) >= t - self.delta_t,
                 NodeAttr(DEFAULT_ATTR_KEYS.T) < t,
             )
-        cur_node_ids = graph.filter_nodes_by_attrs(NodeAttr(DEFAULT_ATTR_KEYS.T) == t)
 
-        if len(prev_node_ids) == 0:
+        if prev_filter.is_empty():
             LOG.warning(
                 "No nodes found for time point in range (%d <= t < %d)",
                 t - self.delta_t,
@@ -159,15 +158,17 @@ class DistanceEdges(BaseEdgesOperator):
             )
             return []
 
-        if len(cur_node_ids) == 0:
+        current_filter = graph.filter(NodeAttr(DEFAULT_ATTR_KEYS.T) == t)
+
+        if current_filter.is_empty():
             LOG.warning(
                 "No nodes found for time point %d",
                 t,
             )
             return []
 
-        prev_attrs = graph.node_attrs(node_ids=prev_node_ids, attr_keys=attr_keys)
-        cur_attrs = graph.node_attrs(node_ids=cur_node_ids, attr_keys=attr_keys)
+        prev_attrs = prev_filter.node_attrs(attr_keys=attr_keys)
+        cur_attrs = current_filter.node_attrs(attr_keys=attr_keys)
 
         prev_kdtree = KDTree(prev_attrs.to_numpy())
 
@@ -178,14 +179,14 @@ class DistanceEdges(BaseEdgesOperator):
         )
         is_valid = ~np.isinf(distances)
 
-        prev_node_ids = np.asarray(prev_node_ids)
+        prev_node_ids = np.asarray(prev_filter.node_ids())
         # kdtree return from 0 to n-1
         # converting back to arbitrary indexing
         prev_neigh_ids[is_valid] = prev_node_ids[prev_neigh_ids[is_valid]]
 
         edges_data = []
         for cur_id, neigh_ids, neigh_dist, neigh_valid in zip(
-            cur_node_ids, prev_neigh_ids, distances, is_valid, strict=True
+            current_filter.node_ids(), prev_neigh_ids, distances, is_valid, strict=True
         ):
             for neigh_id, dist in zip(neigh_ids[neigh_valid].tolist(), neigh_dist[neigh_valid].tolist(), strict=True):
                 edges_data.append(

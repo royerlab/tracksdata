@@ -9,7 +9,7 @@ in ambiguous cases.
 
 They can be used to filter elements in the graph as:
 ```python
-graph.subgraph(NodeAttr("t") == 1)
+graph.filter(NodeAttr("t") == 1).subgraph()
 ```
 
 Or to create complex expression when solving the tracking problem:

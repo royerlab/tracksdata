@@ -137,10 +137,10 @@ def _build_pipeline(
         ),
         (
             "subgraph",
-            lambda graph: graph.subgraph(
+            lambda graph: graph.filter(
                 NodeAttr(DEFAULT_ATTR_KEYS.SOLUTION) == True,
                 EdgeAttr(DEFAULT_ATTR_KEYS.SOLUTION) == True,
-            ),
+            ).subgraph(),
         ),
         ("assing_tracks", lambda graph: graph.assign_track_ids()),
     ]

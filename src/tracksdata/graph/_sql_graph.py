@@ -2,18 +2,18 @@ from collections.abc import Sequence
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-import cloudpickle
 import numpy as np
 import polars as pl
 import rustworkx as rx
 import sqlalchemy as sa
-from sqlalchemy.orm import DeclarativeBase, Query, Session, aliased, load_only
+from sqlalchemy.orm import DeclarativeBase, Session, aliased, load_only
 from sqlalchemy.sql.type_api import TypeEngine
 
 from tracksdata.attrs import AttrComparison, split_attr_comps
 from tracksdata.constants import DEFAULT_ATTR_KEYS
+from tracksdata.graph._base_filter import BaseFilter, cache_method
 from tracksdata.graph._base_graph import BaseGraph
-from tracksdata.utils._dataframe import unpack_array_attrs
+from tracksdata.utils._dataframe import unpack_array_attrs, unpickle_bytes_columns
 from tracksdata.utils._logging import LOG
 
 if TYPE_CHECKING:
@@ -40,16 +40,16 @@ def _data_numpy_to_native(data: dict[str, Any]) -> None:
 
 
 def _filter_query(
-    query: Query,
+    query: sa.Select,
     table: type[DeclarativeBase],
     attr_filters: list[AttrComparison],
-) -> Query:
+) -> sa.Select:
     """
     Filter a query by a list of attribute filters.
 
     Parameters
     ----------
-    query : Query
+    query : sa.Select
         The query to filter.
     table : type[DeclarativeBase]
         The table to filter.
@@ -58,13 +58,253 @@ def _filter_query(
 
     Returns
     -------
-    Query
+    sa.Select
         The filtered query.
     """
+    LOG.info("Filter query:\n%s", attr_filters)
     query = query.filter(
         *[attr_filter.op(getattr(table, str(attr_filter.column)), attr_filter.other) for attr_filter in attr_filters]
     )
     return query
+
+
+class SQLFilter(BaseFilter):
+    def __init__(
+        self,
+        graph: "SQLGraph",
+        *attr_filters: AttrComparison,
+        include_targets: bool = False,
+        include_sources: bool = False,
+    ):
+        super().__init__()
+        self._graph = graph
+        self._node_attr_comps, self._edge_attr_comps = split_attr_comps(attr_filters)
+        self._include_targets = include_targets
+        self._include_sources = include_sources
+
+        # creating initial query
+        self._node_query: sa.Select = sa.select(self._graph.Node)
+        self._edge_query: sa.Select = sa.select(self._graph.Edge)
+
+        if self._node_attr_comps:
+            # filtering nodes by attributes
+            self._node_query = _filter_query(self._node_query, self._graph.Node, self._node_attr_comps)
+
+            # if both node and edge attributes are filtered
+            # we need to select subset of edges that belong to the filtered nodes
+            SourceNode = aliased(self._graph.Node)
+            TargetNode = aliased(self._graph.Node)
+
+            # if the user specified include_targets or include_sources
+            # we do not filter the edges to include only the selected nodes
+            include_none = not self._include_targets and not self._include_sources
+
+            if self._include_targets or include_none:
+                self._edge_query = self._edge_query.join(
+                    SourceNode,
+                    self._graph.Edge.source_id == SourceNode.node_id,
+                )
+                self._edge_query = _filter_query(self._edge_query, SourceNode, self._node_attr_comps)
+
+            if self._include_sources or include_none:
+                self._edge_query = self._edge_query.join(
+                    TargetNode,
+                    self._graph.Edge.target_id == TargetNode.node_id,
+                )
+                self._edge_query = _filter_query(self._edge_query, TargetNode, self._node_attr_comps)
+
+        if self._edge_attr_comps:
+            self._edge_query = _filter_query(self._edge_query, self._graph.Edge, self._edge_attr_comps)
+
+            # we haven't filtered the nodes by attributes
+            # so we only return the nodes that are in the edges
+            if not self._node_attr_comps:
+                self._node_query = self._node_query.filter(
+                    sa.or_(
+                        self._graph.Node.node_id.in_(sa.select(self._edge_query.subquery().c.source_id)),
+                        self._graph.Node.node_id.in_(sa.select(self._edge_query.subquery().c.target_id)),
+                    )
+                )
+
+        if self._include_targets or self._include_sources:
+            nodes_query = [self._node_query]
+
+            edge_subq = self._edge_query.subquery()
+
+            subq_ids = []
+            if self._include_targets:
+                subq_ids.append(edge_subq.c.target_id)
+            if self._include_sources:
+                subq_ids.append(edge_subq.c.source_id)
+
+            for subq_id in subq_ids:
+                nodes_query.append(
+                    sa.select(self._graph.Node).join(
+                        edge_subq,
+                        self._graph.Node.node_id == subq_id,
+                    )
+                )
+
+            self._node_query = sa.union(*nodes_query)
+
+    def __enter__(self) -> "SQLFilter":
+        return self
+
+    @cache_method
+    def node_ids(self) -> list[int]:
+        """
+        Get the ids of the nodes resulting from the filter.
+        """
+        with Session(self._graph._engine) as session:
+            return session.execute(self._node_query.with_only_columns(self._graph.Node.node_id)).scalars().all()
+
+    @cache_method
+    def edge_ids(self) -> list[int]:
+        """
+        Get the ids of the edges resulting from the filter.
+        """
+        with Session(self._graph._engine) as session:
+            return session.execute(self._edge_query.with_only_columns(self._graph.Edge.edge_id)).scalars().all()
+
+    @cache_method
+    def node_attrs(
+        self,
+        *,
+        attr_keys: list[str] | None = None,
+        unpack: bool = False,
+    ) -> pl.DataFrame:
+        query = self._query_from_attr_keys(
+            query=self._node_query,
+            table=self._graph.Node,
+            attr_keys=attr_keys,
+        )
+
+        with Session(self._graph._engine) as session:
+            nodes_attrs = pl.read_database(
+                self._graph._raw_query(query),
+                connection=session.connection(),
+            )
+
+        if attr_keys is not None:
+            nodes_attrs = nodes_attrs.select(attr_keys)
+
+        nodes_attrs = self._graph._cast_boolean_columns(self._graph.Node, nodes_attrs)
+        nodes_attrs = unpickle_bytes_columns(nodes_attrs)
+
+        if unpack:
+            nodes_attrs = unpack_array_attrs(nodes_attrs)
+
+        return nodes_attrs
+
+    @staticmethod
+    def _query_from_attr_keys(
+        query: sa.Select,
+        table: type[DeclarativeBase],
+        attr_keys: list[str] | None = None,
+        extra_columns: list[str] | None = None,
+    ) -> sa.Select:
+        if attr_keys is not None:
+            attr_keys = list(dict.fromkeys(attr_keys))
+
+            if extra_columns is not None:
+                attr_keys.extend(extra_columns)
+
+            LOG.info("Query attr_keys: %s", attr_keys)
+
+            if isinstance(query, sa.CompoundSelect):
+                union_query = query.alias("u")
+                query = sa.select(
+                    *[getattr(union_query.c, key) for key in attr_keys],
+                )
+            else:
+                query = query.with_only_columns(
+                    *[getattr(table, key) for key in attr_keys],
+                )
+
+        LOG.info("Query after attr_keys selection:\n%s", query)
+
+        return query
+
+    @cache_method
+    def edge_attrs(self, attr_keys: list[str] | None = None, unpack: bool = False) -> pl.DataFrame:
+        query = self._query_from_attr_keys(
+            query=self._edge_query,
+            table=self._graph.Edge,
+            attr_keys=attr_keys,
+            extra_columns=[
+                DEFAULT_ATTR_KEYS.EDGE_ID,
+                DEFAULT_ATTR_KEYS.EDGE_SOURCE,
+                DEFAULT_ATTR_KEYS.EDGE_TARGET,
+            ],
+        )
+
+        with Session(self._graph._engine) as session:
+            edges_df = pl.read_database(
+                self._graph._raw_query(query),
+                connection=session.connection(),
+            )
+
+        edges_df = self._graph._cast_boolean_columns(self._graph.Edge, edges_df)
+        edges_df = unpickle_bytes_columns(edges_df)
+
+        if unpack:
+            edges_df = unpack_array_attrs(edges_df)
+
+        return edges_df
+
+    @cache_method
+    def subgraph(
+        self,
+        node_attr_keys: Sequence[str] | str | None = None,
+        edge_attr_keys: Sequence[str] | str | None = None,
+    ) -> "GraphView":
+        from tracksdata.graph._graph_view import GraphView
+
+        node_query = self._query_from_attr_keys(
+            query=self._node_query,
+            table=self._graph.Node,
+            attr_keys=node_attr_keys,
+        )
+
+        edge_query = self._query_from_attr_keys(
+            query=self._edge_query,
+            table=self._graph.Edge,
+            attr_keys=edge_attr_keys,
+            extra_columns=[
+                DEFAULT_ATTR_KEYS.EDGE_ID,
+                DEFAULT_ATTR_KEYS.EDGE_SOURCE,
+                DEFAULT_ATTR_KEYS.EDGE_TARGET,
+            ],
+        )
+
+        with Session(self._graph._engine) as session:
+            node_query = session.execute(node_query)
+            edge_query = session.execute(edge_query)
+
+            node_map_to_root = {}
+            node_map_from_root = {}
+            rx_graph = rx.PyDiGraph()
+
+            for row in node_query.scalars().all():
+                data = {k: v for k, v in row.__dict__.items() if not k.startswith("_")}
+                root_node_id = data.pop(DEFAULT_ATTR_KEYS.NODE_ID)
+                node_id = rx_graph.add_node(data)
+                node_map_to_root[node_id] = root_node_id
+                node_map_from_root[root_node_id] = node_id
+
+            for row in edge_query.scalars().all():
+                data = {k: v for k, v in row.__dict__.items() if not k.startswith("_")}
+                source_id = node_map_from_root[data.pop(DEFAULT_ATTR_KEYS.EDGE_SOURCE)]
+                target_id = node_map_from_root[data.pop(DEFAULT_ATTR_KEYS.EDGE_TARGET)]
+                rx_graph.add_edge(source_id, target_id, data)
+
+        graph = GraphView(
+            rx_graph=rx_graph,
+            node_map_to_root=node_map_to_root,
+            root=self._graph,
+        )
+
+        return graph
 
 
 class SQLGraph(BaseGraph):
@@ -238,29 +478,11 @@ class SQLGraph(BaseGraph):
         """
         This is required because polars bypasses the boolean type and converts it to integer.
         """
-        for col in self._boolean_columns[table_class.__tablename__]:
-            if col in df.columns:
-                df = df.with_columns(pl.col(col).cast(pl.Boolean))
-        return df
-
-    def _unpickle_bytes_columns(
-        self,
-        df: pl.DataFrame,
-    ) -> pl.DataFrame:
-        """
-        Unpickle bytes columns from the database.
-
-        Parameters
-        ----------
-        df : pl.DataFrame
-            The DataFrame to unpickle the bytes columns from.
-
-        Returns
-        -------
-        pl.DataFrame
-            The DataFrame with the bytes columns unpickled.
-        """
-        df = df.with_columns(pl.col(pl.Binary).map_elements(cloudpickle.loads, return_dtype=pl.Object))
+        df = df.with_columns(
+            pl.col(col).cast(pl.Boolean)
+            for col in self._boolean_columns[table_class.__tablename__]
+            if col in df.columns
+        )
         return df
 
     def _update_max_id_per_time(self) -> None:
@@ -274,6 +496,19 @@ class SQLGraph(BaseGraph):
         with Session(self._engine) as session:
             for t in session.query(self.Node.t).distinct():
                 self._max_id_per_time[t] = int(session.query(sa.func.max(self.Node.node_id)).scalar())
+
+    def filter(
+        self,
+        *attr_filters: AttrComparison,
+        include_targets: bool = False,
+        include_sources: bool = False,
+    ) -> "SQLFilter":
+        return SQLFilter(
+            self,
+            *attr_filters,
+            include_targets=include_targets,
+            include_sources=include_sources,
+        )
 
     def add_node(
         self,
@@ -640,7 +875,7 @@ class SQLGraph(BaseGraph):
                 connection=session.connection(),
             )
             node_df = self._cast_boolean_columns(self.Node, node_df)
-            node_df = self._unpickle_bytes_columns(node_df)
+            node_df = unpickle_bytes_columns(node_df)
 
         if single_node:
             return node_df
@@ -806,8 +1041,8 @@ class SQLGraph(BaseGraph):
             node_ids = node_ids.tolist()
 
         with Session(self._engine) as session:
-            node_query = session.query(self.Node)
-            edge_query = session.query(self.Edge)
+            node_query = sa.select(self.Node)
+            edge_query = sa.select(self.Edge)
 
             node_filtered = False
 
@@ -822,7 +1057,8 @@ class SQLGraph(BaseGraph):
 
             if node_attr_comps:
                 node_query = _filter_query(node_query, self.Node, node_attr_comps)
-                node_ids = [i for (i,) in node_query.with_entities(self.Node.node_id).all()]
+
+                node_ids = list(session.execute(node_query.with_only_columns(self.Node.node_id)).scalars().all())
                 node_filtered = True
 
                 SourceNode = aliased(self.Node)
@@ -842,7 +1078,11 @@ class SQLGraph(BaseGraph):
                 edge_query = _filter_query(edge_query, self.Edge, edge_attr_comps)
 
                 if not node_filtered:
-                    node_ids = edge_query.with_entities(self.Edge.source_id, self.Edge.target_id).all()
+                    node_ids = (
+                        session.execute(edge_query.with_only_columns(self.Edge.source_id, self.Edge.target_id))
+                        .scalars()
+                        .all()
+                    )
                     node_ids = np.unique(node_ids).tolist()
                     node_query = node_query.filter(self.Node.node_id.in_(node_ids))
 
@@ -874,14 +1114,17 @@ class SQLGraph(BaseGraph):
         node_map_from_root = {}
         rx_graph = rx.PyDiGraph()
 
-        for row in node_query.all():
+        node_query = session.execute(node_query)
+        edge_query = session.execute(edge_query)
+
+        for row in node_query.scalars().all():
             data = {k: v for k, v in row.__dict__.items() if not k.startswith("_")}
             root_node_id = data.pop(DEFAULT_ATTR_KEYS.NODE_ID)
             node_id = rx_graph.add_node(data)
             node_map_to_root[node_id] = root_node_id
             node_map_from_root[root_node_id] = node_id
 
-        for row in edge_query.all():
+        for row in edge_query.scalars().all():
             data = {k: v for k, v in row.__dict__.items() if not k.startswith("_")}
             source_id = node_map_from_root[data.pop(DEFAULT_ATTR_KEYS.EDGE_SOURCE)]
             target_id = node_map_from_root[data.pop(DEFAULT_ATTR_KEYS.EDGE_TARGET)]
@@ -911,9 +1154,11 @@ class SQLGraph(BaseGraph):
         )
         return order_df.join(df, on=id_key, how="left").drop("order")
 
-    def _raw_query(self, query: sa.sql.Select) -> str:
+    def _raw_query(self, query: sa.Select) -> str:
         # for some reason, the query.statement is not working with polars
-        return str(query.statement.compile(dialect=self._engine.dialect, compile_kwargs={"literal_binds": True}))
+        raw_query = str(query.compile(dialect=self._engine.dialect, compile_kwargs={"literal_binds": True}))
+        LOG.info("Raw query:\n%s", raw_query)
+        return raw_query
 
     def node_attrs(
         self,
@@ -951,7 +1196,7 @@ class SQLGraph(BaseGraph):
             connection=session.connection(),
         )
         nodes_df = self._cast_boolean_columns(self.Node, nodes_df)
-        nodes_df = self._unpickle_bytes_columns(nodes_df)
+        nodes_df = unpickle_bytes_columns(nodes_df)
 
         # match node_ids ordering
         if node_ids is not None and not nodes_df.is_empty():
@@ -978,7 +1223,7 @@ class SQLGraph(BaseGraph):
             attr_keys = [attr_keys]
 
         with Session(self._engine) as session:
-            query = session.query(self.Edge)
+            query = sa.select(self.Edge)
 
             if node_ids is not None:
                 if hasattr(node_ids, "tolist"):
@@ -995,26 +1240,23 @@ class SQLGraph(BaseGraph):
             if attr_keys is not None:
                 attr_keys = set(attr_keys)
                 # we always return the source and target id by default
+                attr_keys.add(DEFAULT_ATTR_KEYS.EDGE_ID)
                 attr_keys.add(DEFAULT_ATTR_KEYS.EDGE_SOURCE)
                 attr_keys.add(DEFAULT_ATTR_KEYS.EDGE_TARGET)
                 attr_keys = list(attr_keys)
 
                 LOG.info("Edge attribute keys: %s", attr_keys)
 
-                query = query.options(
-                    load_only(
-                        *[getattr(self.Edge, key) for key in attr_keys],
-                    ),
+                query = query.with_only_columns(
+                    *[getattr(self.Edge, key) for key in attr_keys],
                 )
 
-            LOG.info("Query: %s", query.statement)
-            # for some reason, the query.statement is not working with polars
             edges_df = pl.read_database(
                 self._raw_query(query),
                 connection=session.connection(),
             )
             edges_df = self._cast_boolean_columns(self.Edge, edges_df)
-            edges_df = self._unpickle_bytes_columns(edges_df)
+            edges_df = unpickle_bytes_columns(edges_df)
 
         if unpack:
             edges_df = unpack_array_attrs(edges_df)
@@ -1120,8 +1362,13 @@ class SQLGraph(BaseGraph):
         id_key: str,
         attrs: dict[str, Any],
     ) -> None:
-        if hasattr(ids, "tolist"):
-            ids = ids.tolist()
+        if ids is not None:
+            if len(ids) == 0:
+                LOG.info("No ids to update, skipping")
+                return
+
+            if hasattr(ids, "tolist"):
+                ids = ids.tolist()
 
         # Handle array values with bulk_update_mappings
         attrs = attrs.copy()
