@@ -32,7 +32,7 @@ from tifffile import imread
 import tracksdata as td
 
 
-def basic_tracking_example(show_napari_viewer: bool = True) -> tuple:
+def basic_tracking_example(show_napari_viewer: bool = True) -> None:
     """
     Perform basic multi-object tracking on segmented microscopy data.
 
@@ -46,10 +46,6 @@ def basic_tracking_example(show_napari_viewer: bool = True) -> tuple:
     ----------
     show_napari_viewer : bool
         Whether to display results in napari viewer
-
-    Returns
-    -------
-    tuple: (labels, tracks_df, track_graph) for further analysis
     """
     # Step 1: Load and prepare data
 
@@ -128,7 +124,7 @@ def basic_tracking_example(show_napari_viewer: bool = True) -> tuple:
     # Convert tracking graph to napari-compatible format
     # Returns: tracked labels, tracks dataframe, and track graph
     print("Converting results to napari format...")
-    labels_out, tracks_df, track_graph = td.functional.to_napari_format(graph, labels.shape)
+    tracks_df, track_graph, track_labels = td.functional.to_napari_format(graph, labels.shape, mask_key="mask")
 
     print(f"✓ Generated {len(tracks_df)} track points across {len(set(tracks_df['track_id']))} tracks")
 
@@ -139,15 +135,13 @@ def basic_tracking_example(show_napari_viewer: bool = True) -> tuple:
         viewer = napari.Viewer()
 
         # Add original segmented labels
-        viewer.add_labels(labels_out, name="Tracked Labels")
+        viewer.add_labels(track_labels, name="Tracked Labels")
 
         # Add tracking trajectories with lineage information
         viewer.add_tracks(tracks_df, graph=track_graph, name="Tracks")
 
         # Start interactive viewer
         napari.run()
-
-    return labels_out, tracks_df, track_graph
 
 
 @click.command()
