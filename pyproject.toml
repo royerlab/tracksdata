@@ -51,7 +51,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+spatial = ["spatial-graph"]
 test = [
+  "spatial-graph",
   "pytest>=7.0",
   "pytest-cov",
   "pytest-html",

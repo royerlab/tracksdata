@@ -16,6 +16,7 @@ from tracksdata.utils._multiprocessing import multiprocessing_apply
 
 if TYPE_CHECKING:
     from tracksdata.graph.filters._base_filter import BaseFilter
+    from tracksdata.graph.filters._spatial_filter import SpatialFilter
 
 
 T = TypeVar("T", bound="BaseGraph")
@@ -897,3 +898,53 @@ class BaseGraph(abc.ABC):
             print(summary)
 
         return summary
+
+    def spatial_filter(self, attrs_keys: list[str] | None = None) -> "SpatialFilter":
+        """
+        Create a spatial filter for efficient spatial queries of graph nodes.
+
+        This method creates a spatial index of graph nodes based on their spatial coordinates,
+        enabling efficient querying of nodes within spatial regions of interest (ROI).
+
+        Parameters
+        ----------
+        attrs_keys : list[str] | None, optional
+            List of attribute keys to use as spatial coordinates. If None, defaults to
+            ["t", "z", "y", "x"] filtered to only include keys present in the graph.
+            Common combinations include:
+            - 2D: ["y", "x"]
+            - 3D: ["z", "y", "x"] or ["t", "y", "x"]
+            - 4D: ["t", "z", "y", "x"]
+
+        Returns
+        -------
+        SpatialFilter
+            A spatial filter object that can be used to query nodes within spatial regions
+            using slice notation.
+
+        Examples
+        --------
+        Create a 2D spatial filter for image coordinates:
+
+        ```python
+        spatial_filter = graph.spatial_filter(attrs_keys=["y", "x"])
+        # Query nodes in region y=[10, 50), x=[20, 60)
+        subgraph = spatial_filter[10:50, 20:60].subgraph()
+        ```
+
+        Create a 4D spatiotemporal filter:
+
+        ```python
+        spatial_filter = graph.spatial_filter()  # Uses default ["t", "z", "y", "x"]
+        # Query nodes in time=[0, 10), z=[0, 5), y=[10, 50), x=[20, 60)
+        nodes_in_roi = spatial_filter[0:10, 0:5, 10:50, 20:60].node_attrs()
+        ```
+
+        See Also
+        --------
+        SpatialFilter : The spatial filter class for detailed usage.
+        filter : General attribute-based filtering.
+        """
+        from tracksdata.graph.filters._spatial_filter import SpatialFilter
+
+        return SpatialFilter(self, attrs_keys=attrs_keys)
