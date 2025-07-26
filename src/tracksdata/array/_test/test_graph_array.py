@@ -1,7 +1,10 @@
 import numpy as np
 import pytest
+from pytest import fixture
 
+from tracksdata.nodes import RegionPropsNodes
 from tracksdata.array import GraphArrayView
+from tracksdata.array._graph_array import DEFAULT_DTYPE
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph import RustWorkXGraph
 from tracksdata.nodes._mask import Mask
@@ -24,7 +27,7 @@ def test_graph_array_view_init() -> None:
     assert array_view.shape == (10, 100, 100)
     assert array_view._attr_key == "label"
     assert array_view._offset == 0
-    assert array_view.dtype == np.int32
+    assert array_view.dtype == DEFAULT_DTYPE
     assert array_view.ndim == 3
     assert len(array_view) == 10
 
@@ -50,7 +53,7 @@ def test_graph_array_view_getitem_empty_time() -> None:
     # Should return zeros with correct shape
     assert result.shape == (100, 100)
     assert np.all(result == 0)
-    assert result.dtype == np.int32
+    assert result.dtype == DEFAULT_DTYPE
 
 
 def test_graph_array_view_getitem_with_nodes() -> None:
@@ -171,3 +174,53 @@ def test_graph_array_view_dtype_inference() -> None:
 
     # Dtype should be updated based on the actual data
     assert array_view.dtype == np.float64
+
+
+@fixture(params=[(10, 100, 100), (10, 100, 100, 100)])
+def multi_node_graph_from_image(request) -> GraphArrayView:
+    """Fixture to create a graph with multiple nodes for testing."""
+    dims = request.param
+    label = np.zeros(dims, dtype=np.uint8)
+    for i in range(dims[0]):
+        label[i, 10:20, 10:20] = i + 1
+    graph = RustWorkXGraph()
+    nodes_operator = RegionPropsNodes(extra_properties=["label"])
+    nodes_operator.add_nodes(graph, labels=label)
+    return GraphArrayView(graph=graph, shape=dims, attr_key="label"), label
+
+def test_graph_array_view_equal(multi_node_graph_from_image) -> None:
+    array_view, label = multi_node_graph_from_image
+    for t in range(array_view.shape[0]):
+        assert np.array_equal(array_view[t], label[t])
+    assert array_view.ndim == label.ndim
+    assert array_view.dtype == np.int64 # fixed
+    assert array_view.shape == label.shape
+    #assert np.array_equal(array_view[0], label[0])
+
+def test_graph_array_view_getitem_slices(multi_node_graph_from_image) -> None:
+    """Test __getitem__ with slices."""
+    array_view, label = multi_node_graph_from_image
+
+    for count_slice in range(1, array_view.ndim):
+        # Test with slice(10, 20)
+        window = tuple([5] + [slice(10, 20)] * count_slice)
+        assert np.array_equal(array_view[window], label[window])
+        # Test with slice(10, 20, 2)
+        window = tuple([5] + [slice(10, 20, 2)] * count_slice)
+        assert np.array_equal(array_view[window], label[window])
+        # Test with slice(None, 20)
+        window = tuple([5] + [slice(None, 20)] * count_slice)
+        assert np.array_equal(array_view[window], label[window])
+        # Test with slice(10, None)
+        window = tuple([5] + [slice(10, None)] * count_slice)
+        assert np.array_equal(array_view[window], label[window])
+        # Test with slice(None, None)
+        window = tuple([5] + [slice(None, None)] * count_slice)
+        assert np.array_equal(array_view[window], label[window])
+
+#def test_graph_array_view_getitem_indices(multi_node_graph_from_image) -> None:
+#    """Test __getitem__ with indices."""
+#    array_view, label = multi_node_graph_from_image
+#    indices = [5, 10, 10]
+#    assert np.array_equal(array_view[0,indices], label[0,indices])
+
