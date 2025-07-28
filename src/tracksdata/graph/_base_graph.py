@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal, TypeVar, overload
 
 import numpy as np
 import polars as pl
+import rustworkx as rx
 from numpy.typing import ArrayLike
 
 from tracksdata.attrs import AttrComparison, NodeAttr
@@ -948,3 +949,26 @@ class BaseGraph(abc.ABC):
         from tracksdata.graph.filters._spatial_filter import SpatialFilter
 
         return SpatialFilter(self, attrs_keys=attrs_keys)
+
+    @abc.abstractmethod
+    def tracklet_graph(
+        self,
+        track_id_key: str = DEFAULT_ATTR_KEYS.TRACK_ID,
+        ignore_track_id: int | None = None,
+    ) -> rx.PyDiGraph:
+        """
+        Create a compressed tracklet graph where each node is a tracklet
+        and each edge is a transition between tracklets.
+
+        Parameters
+        ----------
+        track_id_key : str
+            The key of the track id attribute.
+        ignore_track_id : int | None
+            The track id to ignore. If None, all track ids are used.
+
+        Returns
+        -------
+        rx.PyDiGraph
+            A compressed tracklet graph.
+        """
