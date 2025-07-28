@@ -970,6 +970,11 @@ class BaseGraph(abc.ABC):
         -------
         rx.PyDiGraph
             A compressed tracklet graph.
+
+        See Also
+        --------
+        [rx_digraph_to_napari_dict][tracksdata.functional.rx_digraph_to_napari_dict]:
+            Convert a tracklet graph to a napari-ready dictionary.
         """
 
         if track_id_key not in self.node_attr_keys:
