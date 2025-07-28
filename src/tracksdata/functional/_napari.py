@@ -141,6 +141,6 @@ def rx_digraph_to_napari_dict(
         A dictionary of parent -> child relationships.
     """
     dict_graph = {}
-    for parent, child in tracklet_graph.edge_list():
+    for parent, child in tracklet_graph.edges():
         dict_graph.setdefault(child, []).append(parent)
     return dict_graph

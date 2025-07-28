@@ -1351,6 +1351,10 @@ class SQLGraph(BaseGraph):
         Create a compressed tracklet graph where each node is a tracklet
         and each edge is a transition between tracklets.
 
+        IMPORTANT:
+        rx.PyDiGraph does not allow arbitrary indices, so we use the tracklet ids as node values.
+        And edge values are the tuple of source and target tracklet ids.
+
         Parameters
         ----------
         track_id_key : str
@@ -1398,6 +1402,11 @@ class SQLGraph(BaseGraph):
                     getattr(TargetNode, track_id_key) != ignore_track_id,
                 )
 
+            edge_query = edge_query.with_only_columns(
+                getattr(SourceNode, track_id_key).label("source_track_id"),
+                getattr(TargetNode, track_id_key).label("target_track_id"),
+            )
+
             nodes_df = pl.read_database(
                 self._raw_query(node_query),
                 connection=session.connection(),
@@ -1409,11 +1418,13 @@ class SQLGraph(BaseGraph):
             )
 
         graph = rx.PyDiGraph()
-        graph.add_nodes_from(nodes_df[track_id_key].to_list())
-        graph.add_edges_from_no_data(
+        tracklet_ids = nodes_df[track_id_key].to_list()
+        tracklet_id_to_rx = dict(zip(tracklet_ids, graph.add_nodes_from(tracklet_ids), strict=False))
+        graph.add_edges_from(
             zip(
-                edges_df[DEFAULT_ATTR_KEYS.EDGE_SOURCE].to_list(),
-                edges_df[DEFAULT_ATTR_KEYS.EDGE_TARGET].to_list(),
+                edges_df["source_track_id"].map_elements(tracklet_id_to_rx.__getitem__, return_dtype=int).to_list(),
+                edges_df["target_track_id"].map_elements(tracklet_id_to_rx.__getitem__, return_dtype=int).to_list(),
+                zip(edges_df["source_track_id"].to_list(), edges_df["target_track_id"].to_list(), strict=False),
                 strict=True,
             )
         )

@@ -959,6 +959,10 @@ class BaseGraph(abc.ABC):
         Create a compressed tracklet graph where each node is a tracklet
         and each edge is a transition between tracklets.
 
+        IMPORTANT:
+        rx.PyDiGraph does not allow arbitrary indices, so we use the tracklet ids as node values.
+        And edge values are the tuple of source and target tracklet ids.
+
         Parameters
         ----------
         track_id_key : str
@@ -986,24 +990,38 @@ class BaseGraph(abc.ABC):
         if ignore_track_id is not None:
             nodes_df = nodes_df.filter(pl.col(track_id_key) != ignore_track_id)
 
-        edges_df = edges_df.join(
-            nodes_df.rename({track_id_key: "source_track_id"}),
-            left_on=DEFAULT_ATTR_KEYS.EDGE_SOURCE,
-            right_on=DEFAULT_ATTR_KEYS.NODE_ID,
-            how="right",
-        ).join(
-            nodes_df.rename({track_id_key: "target_track_id"}),
-            left_on=DEFAULT_ATTR_KEYS.EDGE_TARGET,
-            right_on=DEFAULT_ATTR_KEYS.NODE_ID,
-            how="right",
-        )
-
-        edges_df = edges_df.filter(pl.col("source_track_id") != pl.col("target_track_id"))
+        nodes_df = nodes_df.unique(subset=[track_id_key])
 
         graph = rx.PyDiGraph()
-        graph.add_nodes_from(nodes_df[DEFAULT_ATTR_KEYS.TRACK_ID].to_list())
-        graph.add_edges_from_no_data(
-            zip(edges_df["source_track_id"].to_list(), edges_df["target_track_id"].to_list(), strict=True)
+        nodes_df = nodes_df.with_columns(
+            pl.Series(
+                np.asarray(graph.add_nodes_from(nodes_df[DEFAULT_ATTR_KEYS.TRACK_ID].to_list()), dtype=int),
+            ).alias("rx_id"),
+        )
+
+        edges_df = (
+            edges_df.join(
+                nodes_df.rename({track_id_key: "source_track_id", "rx_id": "source_rx_id"}),
+                left_on=DEFAULT_ATTR_KEYS.EDGE_SOURCE,
+                right_on=DEFAULT_ATTR_KEYS.NODE_ID,
+                how="right",
+            )
+            .join(
+                nodes_df.rename({track_id_key: "target_track_id", "rx_id": "target_rx_id"}),
+                left_on=DEFAULT_ATTR_KEYS.EDGE_TARGET,
+                right_on=DEFAULT_ATTR_KEYS.NODE_ID,
+                how="right",
+            )
+            .filter(~pl.col(DEFAULT_ATTR_KEYS.EDGE_ID).is_null())
+        )
+
+        graph.add_edges_from(
+            zip(
+                edges_df["source_rx_id"].to_list(),
+                edges_df["target_rx_id"].to_list(),
+                zip(edges_df["source_track_id"].to_list(), edges_df["target_track_id"].to_list(), strict=False),
+                strict=True,
+            )
         )
 
         return graph
