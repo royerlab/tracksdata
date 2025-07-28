@@ -45,6 +45,7 @@ def _fast_path_transverse(
 def _fast_dag_transverse(
     starts: np.ndarray,
     dag: dict[int, int],
+    track_id_offset: int,
 ) -> tuple[list[np.ndarray], np.ndarray, np.ndarray, dict[int, int], dict[int, int]]:
     """
     Traverse the tracks DAG creating a distinct id to each linear path.
@@ -61,6 +62,8 @@ def _fast_dag_transverse(
     dag : dict[int, int]
         Directed acyclic graph mapping parent → child for linear paths only.
         Dividing edges are excluded and handled separately.
+    track_id_offset : int
+        The starting track id, useful when assigning track ids to a subgraph.
 
     Returns
     -------
@@ -77,7 +80,7 @@ def _fast_dag_transverse(
     last_to_track_id = {}
     first_to_track_id = {}
 
-    track_id = 1
+    track_id = track_id_offset
 
     for start in starts:
         path = _fast_path_transverse(start, dag)
@@ -247,6 +250,7 @@ def _track_id_edges_from_long_edges(
 
 def _assign_track_ids(
     graph: rx.PyDiGraph,
+    track_id_offset: int,
 ) -> tuple[np.ndarray, np.ndarray, rx.PyDiGraph]:
     """
     Assigns an unique `track_id` to each simple path in the graph and
@@ -256,6 +260,8 @@ def _assign_track_ids(
     ----------
     graph : rx.PyDiGraph
         Directed acyclic graph of tracks.
+    track_id_offset : int
+        The starting track id, useful when assigning track ids to a subgraph.
 
     Returns
     -------
@@ -272,7 +278,9 @@ def _assign_track_ids(
     # was it better (faster) when using a numpy array for the digraph as in ultrack?
     linear_dag, starts, long_edges_df = _rx_graph_to_dict_dag(graph)
 
-    paths, track_ids, lengths, last_to_track_id, first_to_track_id = _fast_dag_transverse(starts, linear_dag)
+    paths, track_ids, lengths, last_to_track_id, first_to_track_id = _fast_dag_transverse(
+        starts, linear_dag, track_id_offset
+    )
 
     n_tracks = len(track_ids)
 
