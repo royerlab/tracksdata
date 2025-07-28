@@ -1370,9 +1370,6 @@ class SQLGraph(BaseGraph):
         with Session(self._engine) as session:
             node_query = sa.select(getattr(self.Node, track_id_key)).distinct()
 
-            if ignore_track_id is not None:
-                node_query = node_query.filter(getattr(self.Node, track_id_key) != ignore_track_id)
-
             SourceNode = aliased(self.Node)
             TargetNode = aliased(self.Node)
 
@@ -1393,6 +1390,13 @@ class SQLGraph(BaseGraph):
                     getattr(SourceNode, track_id_key) != getattr(TargetNode, track_id_key),
                 )
             )
+
+            if ignore_track_id is not None:
+                node_query = node_query.filter(getattr(self.Node, track_id_key) != ignore_track_id)
+                edge_query = edge_query.filter(
+                    getattr(SourceNode, track_id_key) != ignore_track_id,
+                    getattr(TargetNode, track_id_key) != ignore_track_id,
+                )
 
             nodes_df = pl.read_database(
                 self._raw_query(node_query),

@@ -985,12 +985,12 @@ class BaseGraph(abc.ABC):
             nodes_df.rename({track_id_key: "source_track_id"}),
             left_on=DEFAULT_ATTR_KEYS.EDGE_SOURCE,
             right_on=DEFAULT_ATTR_KEYS.NODE_ID,
-            how="left",
+            how="right",
         ).join(
             nodes_df.rename({track_id_key: "target_track_id"}),
             left_on=DEFAULT_ATTR_KEYS.EDGE_TARGET,
             right_on=DEFAULT_ATTR_KEYS.NODE_ID,
-            how="left",
+            how="right",
         )
 
         edges_df = edges_df.filter(pl.col("source_track_id") != pl.col("target_track_id"))
