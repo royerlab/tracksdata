@@ -1341,3 +1341,77 @@ class SQLGraph(BaseGraph):
         # recreate deleted objects
         self._engine = sa.create_engine(self._url, **self._engine_kwargs)
         self._define_schema(overwrite=False)
+
+    def tracklet_graph(
+        self,
+        track_id_key: str = DEFAULT_ATTR_KEYS.TRACK_ID,
+        ignore_track_id: int | None = None,
+    ) -> rx.PyDiGraph:
+        """
+        Create a compressed tracklet graph where each node is a tracklet
+        and each edge is a transition between tracklets.
+
+        Parameters
+        ----------
+        track_id_key : str
+            The key of the track id attribute.
+        ignore_track_id : int | None
+            The track id to ignore. If None, all track ids are used.
+
+        Returns
+        -------
+        rx.PyDiGraph
+            A compressed tracklet graph.
+        """
+
+        if track_id_key not in self.node_attr_keys:
+            raise ValueError(f"Track id key '{track_id_key}' not found in graph. Expected '{self.node_attr_keys}'")
+
+        with Session(self._engine) as session:
+            node_query = sa.select(getattr(self.Node, track_id_key)).distinct()
+
+            if ignore_track_id is not None:
+                node_query = node_query.filter(getattr(self.Node, track_id_key) != ignore_track_id)
+
+            SourceNode = aliased(self.Node)
+            TargetNode = aliased(self.Node)
+
+            edge_query = (
+                sa.select(
+                    getattr(self.Edge, DEFAULT_ATTR_KEYS.EDGE_SOURCE),
+                    getattr(self.Edge, DEFAULT_ATTR_KEYS.EDGE_TARGET),
+                )
+                .join(
+                    SourceNode,
+                    SourceNode.node_id == self.Edge.source_id,
+                )
+                .join(
+                    TargetNode,
+                    TargetNode.node_id == self.Edge.target_id,
+                )
+                .filter(
+                    getattr(SourceNode, track_id_key) != getattr(TargetNode, track_id_key),
+                )
+            )
+
+            nodes_df = pl.read_database(
+                self._raw_query(node_query),
+                connection=session.connection(),
+            )
+
+            edges_df = pl.read_database(
+                self._raw_query(edge_query),
+                connection=session.connection(),
+            )
+
+        graph = rx.PyDiGraph()
+        graph.add_nodes_from(nodes_df[track_id_key].to_list())
+        graph.add_edges_from_no_data(
+            zip(
+                edges_df[DEFAULT_ATTR_KEYS.EDGE_SOURCE].to_list(),
+                edges_df[DEFAULT_ATTR_KEYS.EDGE_TARGET].to_list(),
+                strict=True,
+            )
+        )
+
+        return graph
