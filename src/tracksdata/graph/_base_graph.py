@@ -950,7 +950,6 @@ class BaseGraph(abc.ABC):
 
         return SpatialFilter(self, attrs_keys=attrs_keys)
 
-    @abc.abstractmethod
     def tracklet_graph(
         self,
         track_id_key: str = DEFAULT_ATTR_KEYS.TRACK_ID,
@@ -972,3 +971,34 @@ class BaseGraph(abc.ABC):
         rx.PyDiGraph
             A compressed tracklet graph.
         """
+
+        if track_id_key not in self.node_attr_keys:
+            raise ValueError(f"Track id key '{track_id_key}' not found in graph. Expected '{self.node_attr_keys}'")
+
+        nodes_df = self.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, track_id_key])
+        edges_df = self.edge_attrs(attr_keys=[])
+
+        if ignore_track_id is not None:
+            nodes_df = nodes_df.filter(pl.col(track_id_key) != ignore_track_id)
+
+        edges_df = edges_df.join(
+            nodes_df.rename({track_id_key: "source_track_id"}),
+            left_on=DEFAULT_ATTR_KEYS.EDGE_SOURCE,
+            right_on=DEFAULT_ATTR_KEYS.NODE_ID,
+            how="left",
+        ).join(
+            nodes_df.rename({track_id_key: "target_track_id"}),
+            left_on=DEFAULT_ATTR_KEYS.EDGE_TARGET,
+            right_on=DEFAULT_ATTR_KEYS.NODE_ID,
+            how="left",
+        )
+
+        edges_df = edges_df.filter(pl.col("source_track_id") != pl.col("target_track_id"))
+
+        graph = rx.PyDiGraph()
+        graph.add_nodes_from(nodes_df[DEFAULT_ATTR_KEYS.TRACK_ID].to_list())
+        graph.add_edges_from_no_data(
+            zip(edges_df["source_track_id"].to_list(), edges_df["target_track_id"].to_list(), strict=True)
+        )
+
+        return graph
