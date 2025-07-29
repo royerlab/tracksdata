@@ -4,7 +4,6 @@ import pytest
 from tracksdata.array import GraphArrayView
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph import RustWorkXGraph
-from tracksdata.nodes._mask import Mask
 
 # NOTE: this could be generic test for all array backends
 # when more slicing operations are implemented we could test as in:
@@ -60,13 +59,14 @@ def test_graph_array_view_getitem_with_nodes() -> None:
     # Add attribute keys
     graph.add_node_attr_key("label", 0)
     graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
+    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
 
     # Create a mask
-    mask_data = np.array([[True, True], [True, False]], dtype=bool)
-    mask = Mask(mask_data, bbox=np.array([10, 20, 12, 22]))  # y_min, x_min, y_max, x_max
+    mask = np.array([[True, True], [True, False]], dtype=bool)
+    bbox = np.array([10, 20, 12, 22])
 
     # Add a node with mask and label
-    graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "label": 5, DEFAULT_ATTR_KEYS.MASK: mask})
+    graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "label": 5, DEFAULT_ATTR_KEYS.MASK: mask, DEFAULT_ATTR_KEYS.BBOX: bbox})
 
     array_view = GraphArrayView(graph=graph, shape=(10, 100, 100), attr_key="label")
 
@@ -95,18 +95,19 @@ def test_graph_array_view_getitem_multiple_nodes() -> None:
     # Add attribute keys
     graph.add_node_attr_key("label", 0)
     graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
+    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
 
     # Create two masks at different locations
-    mask1_data = np.array([[True, True]], dtype=bool)
-    mask1 = Mask(mask1_data, bbox=np.array([10, 20, 11, 22]))
+    mask1 = np.array([[True, True]], dtype=bool)
+    bbox1 = np.array([10, 20, 11, 22])
 
-    mask2_data = np.array([[True]], dtype=bool)
-    mask2 = Mask(mask2_data, bbox=np.array([30, 40, 31, 41]))
+    mask2 = np.array([[True]], dtype=bool)
+    bbox2 = np.array([30, 40, 31, 41])
 
     # Add nodes with different labels
-    graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "label": 3, DEFAULT_ATTR_KEYS.MASK: mask1})
+    graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "label": 3, DEFAULT_ATTR_KEYS.MASK: mask1, DEFAULT_ATTR_KEYS.BBOX: bbox1})
 
-    graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "label": 7, DEFAULT_ATTR_KEYS.MASK: mask2})
+    graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "label": 7, DEFAULT_ATTR_KEYS.MASK: mask2, DEFAULT_ATTR_KEYS.BBOX: bbox2})
 
     array_view = GraphArrayView(graph=graph, shape=(10, 100, 100), attr_key="label")
 
@@ -130,13 +131,15 @@ def test_graph_array_view_getitem_boolean_dtype() -> None:
     # Add attribute keys
     graph.add_node_attr_key("is_active", False)
     graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-
+    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
     # Create a mask
-    mask_data = np.array([[True]], dtype=bool)
-    mask = Mask(mask_data, bbox=np.array([10, 20, 11, 21]))
+    mask = np.array([[True]], dtype=bool)
+    bbox = np.array([10, 20, 11, 21])
 
     # Add a node with boolean attribute
-    graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "is_active": True, DEFAULT_ATTR_KEYS.MASK: mask})
+    graph.add_node(
+        {DEFAULT_ATTR_KEYS.T: 0, "is_active": True, DEFAULT_ATTR_KEYS.MASK: mask, DEFAULT_ATTR_KEYS.BBOX: bbox}
+    )
 
     array_view = GraphArrayView(graph=graph, shape=(10, 100, 100), attr_key="is_active")
 
@@ -156,13 +159,15 @@ def test_graph_array_view_dtype_inference() -> None:
     # Add attribute keys
     graph.add_node_attr_key("float_label", 0.0)
     graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-
+    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
     # Create a mask
-    mask_data = np.array([[True]], dtype=bool)
-    mask = Mask(mask_data, bbox=np.array([10, 20, 11, 21]))
+    mask = np.array([[True]], dtype=bool)
+    bbox = np.array([10, 20, 11, 21])
 
     # Add a node with float attribute
-    graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "float_label": 3.14, DEFAULT_ATTR_KEYS.MASK: mask})
+    graph.add_node(
+        {DEFAULT_ATTR_KEYS.T: 0, "float_label": 3.14, DEFAULT_ATTR_KEYS.MASK: mask, DEFAULT_ATTR_KEYS.BBOX: bbox}
+    )
 
     array_view = GraphArrayView(graph=graph, shape=(10, 100, 100), attr_key="float_label")
 

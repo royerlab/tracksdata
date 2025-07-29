@@ -18,6 +18,10 @@ class DefaultAttrKeys:
         Default key for time information.
     MASK : str
         Default key for node masks.
+    BBOX : str
+        Default key for node bounding boxes.
+        For a 2D image, the bounding box is a tuple of (x_start, y_start, x_end, y_end).
+        For a 3D image, the bounding box is a tuple of (x_start, y_start, z_start, x_end, y_end, z_end).
     SOLUTION : str
         Default key for solution information.
     TRACK_ID : str
@@ -50,6 +54,7 @@ class DefaultAttrKeys:
     NODE_ID = "node_id"
     T = "t"
     MASK = "mask"
+    BBOX = "bbox"
     SOLUTION = "solution"
     TRACK_ID = "track_id"
 

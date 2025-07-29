@@ -13,7 +13,8 @@ from tracksdata.attrs import AttrComparison, split_attr_comps
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.graph.filters._base_filter import BaseFilter, cache_method
-from tracksdata.utils._dataframe import unpack_array_attrs, unpickle_bytes_columns
+from tracksdata.utils._dataframe import unpack_array_attrs
+from tracksdata.utils._dtypes import column_from_bytes
 from tracksdata.utils._logging import LOG
 
 if TYPE_CHECKING:
@@ -210,7 +211,7 @@ class SQLFilter(BaseFilter):
             nodes_attrs = nodes_attrs.select(attr_keys)
 
         nodes_attrs = self._graph._cast_boolean_columns(self._graph.Node, nodes_attrs)
-        nodes_attrs = unpickle_bytes_columns(nodes_attrs)
+        nodes_attrs = column_from_bytes(nodes_attrs)
 
         if unpack:
             nodes_attrs = unpack_array_attrs(nodes_attrs)
@@ -266,7 +267,7 @@ class SQLFilter(BaseFilter):
             )
 
         edges_df = self._graph._cast_boolean_columns(self._graph.Edge, edges_df)
-        edges_df = unpickle_bytes_columns(edges_df)
+        edges_df = column_from_bytes(edges_df)
 
         if unpack:
             edges_df = unpack_array_attrs(edges_df)
@@ -898,7 +899,7 @@ class SQLGraph(BaseGraph):
                 connection=session.connection(),
             )
             node_df = self._cast_boolean_columns(self.Node, node_df)
-            node_df = unpickle_bytes_columns(node_df)
+            node_df = column_from_bytes(node_df)
 
         if single_node:
             return node_df
@@ -1062,7 +1063,7 @@ class SQLGraph(BaseGraph):
             connection=session.connection(),
         )
         nodes_df = self._cast_boolean_columns(self.Node, nodes_df)
-        nodes_df = unpickle_bytes_columns(nodes_df)
+        nodes_df = column_from_bytes(nodes_df)
 
         # indices are included by default and must be removed
         if attr_keys is not None:
@@ -1104,7 +1105,7 @@ class SQLGraph(BaseGraph):
                 connection=session.connection(),
             )
             edges_df = self._cast_boolean_columns(self.Edge, edges_df)
-            edges_df = unpickle_bytes_columns(edges_df)
+            edges_df = column_from_bytes(edges_df)
 
         if unpack:
             edges_df = unpack_array_attrs(edges_df)

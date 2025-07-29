@@ -31,7 +31,6 @@ def test_napari_conversion() -> None:
     mask_attrs = MaskDiskAttrs(
         radius=2,
         image_shape=image_shape,
-        output_key=DEFAULT_ATTR_KEYS.MASK,
     )
     mask_attrs.add_node_attrs(graph)
 

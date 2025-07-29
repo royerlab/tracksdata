@@ -4,8 +4,8 @@ from numpy.typing import ArrayLike
 from tracksdata.array._base_array import ArrayIndex, BaseReadOnlyArray
 from tracksdata.attrs import NodeAttr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
+from tracksdata.functional._mask import paint_mask_to_buffer
 from tracksdata.graph._base_graph import BaseGraph
-from tracksdata.nodes._mask import Mask
 from tracksdata.utils._dtypes import polars_dtype_to_numpy_dtype
 
 
@@ -69,7 +69,7 @@ class GraphArrayView(BaseReadOnlyArray):
                 return np.zeros(self.shape[1:], dtype=self.dtype)
 
             df = graph_filter.node_attrs(
-                attr_keys=[self._attr_key, DEFAULT_ATTR_KEYS.MASK],
+                attr_keys=[self._attr_key, DEFAULT_ATTR_KEYS.MASK, DEFAULT_ATTR_KEYS.BBOX],
             )
 
             dtype = polars_dtype_to_numpy_dtype(df[self._attr_key].dtype)
@@ -83,9 +83,13 @@ class GraphArrayView(BaseReadOnlyArray):
             # TODO: reuse buffer
             buffer = np.zeros(self.shape[1:], dtype=self.dtype)
 
-            for mask, value in zip(df[DEFAULT_ATTR_KEYS.MASK], df[self._attr_key], strict=False):
-                mask: Mask
-                mask.paint_buffer(buffer, value, offset=self._offset)
+            for bbox, mask, value in zip(
+                df[DEFAULT_ATTR_KEYS.BBOX],
+                df[DEFAULT_ATTR_KEYS.MASK],
+                df[self._attr_key],
+                strict=True,
+            ):
+                paint_mask_to_buffer(buffer, mask, bbox, value, offset=self._offset)
 
             return buffer
         else:

@@ -827,20 +827,24 @@ class BaseGraph(abc.ABC):
         graph.set_overlaps(iou_threshold=0.5)
         ```
         """
+        from tracksdata.functional._mask import mask_iou
+
         if iou_threshold < 0.0 or iou_threshold > 1.0:
             raise ValueError("iou_threshold must be between 0.0 and 1.0")
 
         def _estimate_overlaps(t: int) -> list[list[int, 2]]:
             node_attrs = self.filter(NodeAttr(DEFAULT_ATTR_KEYS.T) == t).node_attrs(
-                attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.MASK],
+                attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.BBOX, DEFAULT_ATTR_KEYS.MASK],
             )
             node_ids = node_attrs[DEFAULT_ATTR_KEYS.NODE_ID].to_list()
             masks = node_attrs[DEFAULT_ATTR_KEYS.MASK].to_list()
+            bboxes = node_attrs[DEFAULT_ATTR_KEYS.BBOX].to_list()
             overlaps = []
             for i in range(len(masks)):
                 mask_i = masks[i]
+                bbox_i = bboxes[i]
                 for j in range(i + 1, len(masks)):
-                    if mask_i.iou(masks[j]) > iou_threshold:
+                    if mask_iou(bbox_i, mask_i, bboxes[j], masks[j]) > iou_threshold:
                         overlaps.append([node_ids[i], node_ids[j]])
             return overlaps
 
