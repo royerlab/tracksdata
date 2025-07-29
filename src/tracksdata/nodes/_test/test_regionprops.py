@@ -252,9 +252,11 @@ def test_regionprops_spacing() -> None:
 
     # Check that nodes were added (spacing affects internal calculations)
     nodes_df = graph.node_attrs()
+
     assert len(nodes_df) == 1
     assert "area" in nodes_df.columns
     assert DEFAULT_ATTR_KEYS.MASK in nodes_df.columns
+    assert nodes_df[DEFAULT_ATTR_KEYS.BBOX].to_numpy().ndim == 2
 
 
 def test_regionprops_empty_labels() -> None:

@@ -120,8 +120,9 @@ class RegionPropsNodes(BaseNodesOperator):
         """
         Initialize the node attributes for the graph.
         """
-        if DEFAULT_ATTR_KEYS.MASK not in graph.node_attr_keys:
-            graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
+        for attr_key in [DEFAULT_ATTR_KEYS.MASK, DEFAULT_ATTR_KEYS.BBOX]:
+            if attr_key not in graph.node_attr_keys:
+                graph.add_node_attr_key(attr_key, None)
 
         # initialize the attribute keys
         for attr_key in axis_names + self.attrs_keys():
@@ -288,6 +289,7 @@ class RegionPropsNodes(BaseNodesOperator):
                     attrs[prop] = getattr(obj, prop)
 
             attrs[DEFAULT_ATTR_KEYS.MASK] = Mask(obj.image, obj.bbox)
+            attrs[DEFAULT_ATTR_KEYS.BBOX] = np.asarray(obj.bbox, dtype=int)
             attrs[DEFAULT_ATTR_KEYS.T] = t
 
             nodes_data.append(attrs)
