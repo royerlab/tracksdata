@@ -995,7 +995,7 @@ class BaseGraph(abc.ABC):
         graph = rx.PyDiGraph()
         nodes_df = nodes_df.with_columns(
             pl.Series(
-                np.asarray(graph.add_nodes_from(nodes_df[DEFAULT_ATTR_KEYS.TRACK_ID].to_list()), dtype=int),
+                np.asarray(graph.add_nodes_from(nodes_df[track_id_key].to_list()), dtype=int),
             ).alias("rx_id"),
         )
 
