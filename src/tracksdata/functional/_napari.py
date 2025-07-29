@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING, overload
 
 import polars as pl
+import rustworkx as rx
 
 from tracksdata.attrs import EdgeAttr, NodeAttr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
@@ -119,3 +120,27 @@ def to_napari_format(
         return tracks_data, dict_graph, array_view
 
     return tracks_data, dict_graph
+
+
+def rx_digraph_to_napari_dict(
+    tracklet_graph: rx.PyDiGraph,
+) -> dict[int, list[int]]:
+    """
+    Convert a tracklet graph to a napari-ready dictionary.
+    The input is a (child -> parent) graph (forward in time) and it is converted
+    to a (parent -> child) dictionary (backward in time).
+
+    Parameters
+    ----------
+    tracklet_graph : rx.PyDiGraph
+        The tracklet graph to convert.
+
+    Returns
+    -------
+    dict[int, list[int]]
+        A dictionary of parent -> child relationships.
+    """
+    dict_graph = {}
+    for parent, child in tracklet_graph.edges():
+        dict_graph.setdefault(child, []).append(parent)
+    return dict_graph

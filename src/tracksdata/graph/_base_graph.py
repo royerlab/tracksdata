@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal, TypeVar, overload
 
 import numpy as np
 import polars as pl
+import rustworkx as rx
 from numpy.typing import ArrayLike
 
 from tracksdata.attrs import AttrComparison, NodeAttr
@@ -952,3 +953,79 @@ class BaseGraph(abc.ABC):
         from tracksdata.graph.filters._spatial_filter import SpatialFilter
 
         return SpatialFilter(self, attrs_keys=attrs_keys)
+
+    def tracklet_graph(
+        self,
+        track_id_key: str = DEFAULT_ATTR_KEYS.TRACK_ID,
+        ignore_track_id: int | None = None,
+    ) -> rx.PyDiGraph:
+        """
+        Create a compressed tracklet graph where each node is a tracklet
+        and each edge is a transition between tracklets.
+
+        IMPORTANT:
+        rx.PyDiGraph does not allow arbitrary indices, so we use the tracklet ids as node values.
+        And edge values are the tuple of source and target tracklet ids.
+
+        Parameters
+        ----------
+        track_id_key : str
+            The key of the track id attribute.
+        ignore_track_id : int | None
+            The track id to ignore. If None, all track ids are used.
+
+        Returns
+        -------
+        rx.PyDiGraph
+            A compressed tracklet graph.
+
+        See Also
+        --------
+        [rx_digraph_to_napari_dict][tracksdata.functional.rx_digraph_to_napari_dict]:
+            Convert a tracklet graph to a napari-ready dictionary.
+        """
+
+        if track_id_key not in self.node_attr_keys:
+            raise ValueError(f"Track id key '{track_id_key}' not found in graph. Expected '{self.node_attr_keys}'")
+
+        nodes_df = self.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, track_id_key])
+        edges_df = self.edge_attrs(attr_keys=[])
+
+        if ignore_track_id is not None:
+            nodes_df = nodes_df.filter(pl.col(track_id_key) != ignore_track_id)
+
+        nodes_df = nodes_df.unique(subset=[track_id_key])
+
+        graph = rx.PyDiGraph()
+        nodes_df = nodes_df.with_columns(
+            pl.Series(
+                np.asarray(graph.add_nodes_from(nodes_df[track_id_key].to_list()), dtype=int),
+            ).alias("rx_id"),
+        )
+
+        edges_df = (
+            edges_df.join(
+                nodes_df.rename({track_id_key: "source_track_id", "rx_id": "source_rx_id"}),
+                left_on=DEFAULT_ATTR_KEYS.EDGE_SOURCE,
+                right_on=DEFAULT_ATTR_KEYS.NODE_ID,
+                how="right",
+            )
+            .join(
+                nodes_df.rename({track_id_key: "target_track_id", "rx_id": "target_rx_id"}),
+                left_on=DEFAULT_ATTR_KEYS.EDGE_TARGET,
+                right_on=DEFAULT_ATTR_KEYS.NODE_ID,
+                how="right",
+            )
+            .filter(~pl.col(DEFAULT_ATTR_KEYS.EDGE_ID).is_null())
+        )
+
+        graph.add_edges_from(
+            zip(
+                edges_df["source_rx_id"].to_list(),
+                edges_df["target_rx_id"].to_list(),
+                zip(edges_df["source_track_id"].to_list(), edges_df["target_track_id"].to_list(), strict=False),
+                strict=True,
+            )
+        )
+
+        return graph

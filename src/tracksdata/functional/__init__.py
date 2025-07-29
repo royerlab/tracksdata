@@ -7,7 +7,7 @@ from tracksdata.functional._mask import (
     mask_iou,
     paint_mask_to_buffer,
 )
-from tracksdata.functional._napari import to_napari_format
+from tracksdata.functional._napari import rx_digraph_to_napari_dict, to_napari_format
 
 __all__ = [
     "crop_image_with_bbox",
@@ -15,5 +15,6 @@ __all__ = [
     "mask_intersection",
     "mask_iou",
     "paint_mask_to_buffer",
+    "rx_digraph_to_napari_dict",
     "to_napari_format",
 ]

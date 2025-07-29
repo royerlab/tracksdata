@@ -447,6 +447,7 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
         self,
         output_key: str = DEFAULT_ATTR_KEYS.TRACK_ID,
         reset: bool = True,
+        track_id_offset: int = 1,
     ) -> rx.PyDiGraph:
         """
         Compute and assign track ids to nodes.
@@ -457,6 +458,8 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
             The key of the output track id attribute.
         reset : bool
             Whether to reset all track ids before assigning new ones.
+        track_id_offset : int
+            The starting track id, useful when assigning track ids to a subgraph.
 
         Returns
         -------
@@ -464,7 +467,7 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
             A compressed graph (parent -> child) with track ids lineage relationships.
         """
         try:
-            node_ids, track_ids, tracks_graph = _assign_track_ids(self.rx_graph)
+            node_ids, track_ids, tracks_graph = _assign_track_ids(self.rx_graph, track_id_offset)
         except RuntimeError as e:
             raise RuntimeError(
                 "Are you sure this graph is a valid lineage graph?\n"
