@@ -180,7 +180,7 @@ class GenericFuncNodeAttrs(BaseNodeAttrsOperator):
                 results.extend(batch_results)
 
         else:
-            for data_dict in node_attrs.rows(named=True):
+            for data_dict in node_attrs.iter_rows(named=True):
                 result = self.func(*args, **data_dict)
                 results.append(result)
 

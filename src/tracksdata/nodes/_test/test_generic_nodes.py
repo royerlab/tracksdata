@@ -7,6 +7,7 @@ from tracksdata.functional import crop_image_with_bbox
 from tracksdata.graph import RustWorkXGraph
 from tracksdata.nodes import GenericFuncNodeAttrs
 from tracksdata.options import get_options, options_context
+from tracksdata.utils._test_utils import setup_custom_node_attr, setup_mask_attrs
 
 
 def test_crop_func_attrs_init_default() -> None:
@@ -93,9 +94,8 @@ def test_crop_func_attrs_function_with_frames() -> None:
     """Test applying a function with frames."""
     graph = RustWorkXGraph()
 
-    # Register attribute keys
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+    # Set up graph attributes
+    setup_mask_attrs(graph)
 
     # Create test masks
     mask1 = np.array([[True, True], [True, False]], dtype=bool)
@@ -147,10 +147,9 @@ def test_crop_func_attrs_function_with_frames_and_attrs() -> None:
     """Test applying a function with frames and additional attributes."""
     graph = RustWorkXGraph()
 
-    # Register attribute keys
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
-    graph.add_node_attr_key("multiplier", 1.0)
+    # Set up graph attributes
+    setup_mask_attrs(graph)
+    setup_custom_node_attr(graph, "multiplier", 1.0)
 
     # Create test masks
     mask1 = np.array([[True, True], [True, False]], dtype=bool)
@@ -205,9 +204,8 @@ def test_crop_func_attrs_function_returns_different_types() -> None:
     """Test that functions can return different types."""
     graph = RustWorkXGraph()
 
-    # Register attribute keys
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+    # Set up graph attributes
+    setup_mask_attrs(graph)
 
     # Create test mask
     mask = np.array([[True, True], [True, False]], dtype=bool)
@@ -272,9 +270,8 @@ def test_crop_func_attrs_error_handling_missing_attr_key() -> None:
     """Test error handling when required attr_key is missing."""
     graph = RustWorkXGraph()
 
-    # Register attribute keys
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+    # Set up graph attributes
+    setup_mask_attrs(graph)
     # Note: "value" is not registered
 
     # Create test mask
@@ -304,9 +301,8 @@ def test_crop_func_attrs_function_with_frames_multiprocessing(n_workers: int) ->
     """Test applying a function with frames using different worker counts."""
     graph = RustWorkXGraph()
 
-    # Register attribute keys
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+    # Set up graph attributes
+    setup_mask_attrs(graph)
 
     # Create test masks for multiple time points
     mask1 = np.array([[True, True], [True, False]], dtype=bool)
@@ -357,8 +353,8 @@ def test_crop_func_attrs_empty_graph() -> None:
     """Test behavior with an empty graph."""
     graph = RustWorkXGraph()
 
-    # Register attribute keys
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
+    # Set up graph attributes
+    setup_custom_node_attr(graph, DEFAULT_ATTR_KEYS.MASK, None)
 
     def dummy_func(mask: NDArray) -> float:
         return 1.0
@@ -423,9 +419,8 @@ def test_crop_func_attrs_batch_processing_with_frames() -> None:
     """Test batch processing with batch_size > 0 with frames."""
     graph = RustWorkXGraph()
 
-    # Register attribute keys
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+    # Set up graph attributes
+    setup_mask_attrs(graph)
 
     # Create test masks
     mask1 = np.array([[True, True], [True, False]], dtype=bool)

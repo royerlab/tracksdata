@@ -13,7 +13,7 @@ Here's a complete basic example that demonstrates the core workflow of TracksDat
 ## Key Components Explained
 
 - **Graph**: The core data structure holding nodes (objects) and edges (connections)
-- **Nodes Operators**: Extract object features from segmented images (RegionPropsNodes, MaskNodes, etc.)
+- **Nodes Operators**: Extract object features from segmented images (RegionPropsNodes, etc.)
 - **Edges Operators**: Create temporal connections between objects (DistanceEdges, IoUEdges, etc.)
 - **Solvers**: Optimize a minimization problem to find the best tracking assignments (NearestNeighborsSolver, ILPSolver)
 - **Functional**: Utilities for format conversion and visualization

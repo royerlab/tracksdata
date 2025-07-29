@@ -9,6 +9,7 @@ from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph import RustWorkXGraph, SQLGraph
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.io._numpy_array import from_array
+from tracksdata.utils._test_utils import setup_mask_attrs, setup_spatial_attrs_2d
 
 
 def test_already_existing_keys(graph_backend: BaseGraph) -> None:
@@ -761,10 +762,8 @@ def test_sucessors_predecessors_edge_cases(graph_backend: BaseGraph) -> None:
 def test_match_method(graph_backend: BaseGraph) -> None:
     """Test the match method for matching nodes between two graphs."""
     # Create first graph (self) with masks
-    graph_backend.add_node_attr_key("x", 0.0)
-    graph_backend.add_node_attr_key("y", 0.0)
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+    setup_spatial_attrs_2d(graph_backend)
+    setup_mask_attrs(graph_backend)
 
     # Create masks for first graph
     mask1 = np.array([[True, True], [True, True]], dtype=bool)
@@ -802,10 +801,8 @@ def test_match_method(graph_backend: BaseGraph) -> None:
         kwargs = {}
 
     other_graph = graph_backend.__class__(**kwargs)
-    other_graph.add_node_attr_key("x", 0.0)
-    other_graph.add_node_attr_key("y", 0.0)
-    other_graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    other_graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+    setup_spatial_attrs_2d(other_graph)
+    setup_mask_attrs(other_graph)
 
     # Create overlapping masks for second graph
     # This mask overlaps significantly with mask1 (IoU > 0.5)
@@ -1182,8 +1179,7 @@ def test_from_other_with_edges(graph_backend: BaseGraph) -> None:
 
 def test_compute_overlaps_basic(graph_backend: BaseGraph) -> None:
     """Test basic compute_overlaps functionality."""
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+    setup_mask_attrs(graph_backend)
 
     # Create overlapping masks at time 0
     mask1 = np.array([[True, True], [True, True]], dtype=bool)
@@ -1205,8 +1201,7 @@ def test_compute_overlaps_basic(graph_backend: BaseGraph) -> None:
 
 def test_compute_overlaps_with_threshold(graph_backend: BaseGraph) -> None:
     """Test compute_overlaps with different IoU thresholds."""
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+    setup_mask_attrs(graph_backend)
 
     # Create masks with different overlap levels
     mask1 = np.array([[True, True], [True, True]], dtype=bool)
@@ -1240,8 +1235,7 @@ def test_compute_overlaps_with_threshold(graph_backend: BaseGraph) -> None:
 
 def test_compute_overlaps_multiple_timepoints(graph_backend: BaseGraph) -> None:
     """Test compute_overlaps across multiple time points."""
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+    setup_mask_attrs(graph_backend)
 
     # Time 0: overlapping masks
     mask1_t0 = np.array([[True, True], [True, True]], dtype=bool)

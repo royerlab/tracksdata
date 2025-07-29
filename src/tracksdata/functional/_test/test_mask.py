@@ -14,7 +14,7 @@ def test_mask_indices_no_offset() -> None:
     mask_array = np.array([[True, False], [False, True]], dtype=bool)
     bbox = np.array([1, 2, 3, 4])  # min_y, min_x, max_y, max_x
 
-    indices = mask_indices(mask_array, bbox)
+    indices = mask_indices(bbox, mask_array)
 
     # True values are at positions (0,0) and (1,1) in the mask
     # With bbox offset [1, 2]: (0+1, 0+2) and (1+1, 1+2) = (1, 2) and (2, 3)
@@ -31,7 +31,7 @@ def test_mask_indices_with_scalar_offset() -> None:
     mask_array = np.array([[True, False], [False, True]], dtype=bool)
     bbox = np.array([1, 2, 3, 4])
 
-    indices = mask_indices(mask_array, bbox, offset=5)
+    indices = mask_indices(bbox, mask_array, offset=5)
 
     # True values at (0,0) and (1,1) in mask
     # With bbox [1, 2] and offset 5: (0+1+5, 0+2+5) and (1+1+5, 1+2+5) = (6, 7) and (7, 8)
@@ -49,7 +49,7 @@ def test_mask_indices_with_array_offset() -> None:
     bbox = np.array([1, 2, 3, 4])
 
     offset = np.array([3, 4])
-    indices = mask_indices(mask_array, bbox, offset=offset)
+    indices = mask_indices(bbox, mask_array, offset=offset)
 
     # True values at (0,0) and (1,1) in mask
     # With bbox [1, 2] and offset [3, 4]: (0+1+3, 0+2+4) and (1+1+3, 1+2+4) = (4, 6) and (5, 7)
@@ -66,7 +66,7 @@ def test_mask_indices_3d() -> None:
     mask_array = np.array([[[True, False], [False, False]], [[False, False], [False, True]]], dtype=bool)
     bbox = np.array([1, 2, 3, 3, 4, 5])  # min_z, min_y, min_x, max_z, max_y, max_x
 
-    indices = mask_indices(mask_array, bbox)
+    indices = mask_indices(bbox, mask_array)
 
     # True values at (0,0,0) and (1,1,1) in mask
     # With bbox offset [1,2,3]: (0+1, 0+2, 0+3) and (1+1, 1+2, 1+3) = (1,2,3) and (2,3,4)
@@ -87,7 +87,7 @@ def test_paint_mask_to_buffer() -> None:
 
     # Create a buffer to paint on
     buffer = np.zeros((4, 4), dtype=float)
-    paint_mask_to_buffer(buffer, mask_array, bbox, value=5.0)
+    paint_mask_to_buffer(buffer, bbox, mask_array, value=5.0)
 
     # Check that the correct positions are painted
     expected_buffer = np.zeros((4, 4), dtype=float)
@@ -105,7 +105,7 @@ def test_paint_mask_to_buffer_with_offset() -> None:
     # Create a buffer to paint on
     buffer = np.zeros((6, 6), dtype=float)
     offset = np.array([2, 3])
-    paint_mask_to_buffer(buffer, mask_array, bbox, value=7.0, offset=offset)
+    paint_mask_to_buffer(buffer, bbox, mask_array, value=7.0, offset=offset)
 
     # Check that the correct positions are painted with offset
     expected_buffer = np.zeros((6, 6), dtype=float)
@@ -175,7 +175,7 @@ def test_mask_empty() -> None:
     mask_array = np.array([[False, False], [False, False]], dtype=bool)
     bbox = np.array([0, 0, 2, 2])
 
-    indices = mask_indices(mask_array, bbox)
+    indices = mask_indices(bbox, mask_array)
 
     # Should return empty arrays
     assert len(indices) == 2
@@ -188,7 +188,7 @@ def test_mask_all_true() -> None:
     mask_array = np.array([[True, True], [True, True]], dtype=bool)
     bbox = np.array([1, 1, 3, 3])
 
-    indices = mask_indices(mask_array, bbox)
+    indices = mask_indices(bbox, mask_array)
 
     # Should return all positions
     expected_y = np.array([1, 1, 2, 2])

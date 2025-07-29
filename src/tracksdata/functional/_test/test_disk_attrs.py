@@ -8,6 +8,7 @@ from tracksdata.functional._disk_attrs import (
     _spherical_mask,
 )
 from tracksdata.graph import RustWorkXGraph
+from tracksdata.utils._test_utils import setup_spatial_attrs_2d, setup_spatial_attrs_3d
 
 
 def test_spherical_mask_2d() -> None:
@@ -151,13 +152,8 @@ def test_mask_disk_attrs_add_nodes_2d() -> None:
     """Test adding disk masks to 2D nodes."""
     graph = RustWorkXGraph()
 
-    # Initialize required attributes (if they don't exist)
-    if DEFAULT_ATTR_KEYS.T not in graph.node_attr_keys:
-        graph.add_node_attr_key(DEFAULT_ATTR_KEYS.T, default_value=0)
-    if "y" not in graph.node_attr_keys:
-        graph.add_node_attr_key("y", default_value=0.0)
-    if "x" not in graph.node_attr_keys:
-        graph.add_node_attr_key("x", default_value=0.0)
+    # Initialize required attributes
+    setup_spatial_attrs_2d(graph)
 
     # Add 2 nodes at t=0
     node_attrs = [{DEFAULT_ATTR_KEYS.T: 0, "y": 5.0, "x": 10.0}, {DEFAULT_ATTR_KEYS.T: 0, "y": 15.0, "x": 20.0}]
@@ -187,24 +183,15 @@ def test_mask_disk_attrs_add_nodes_2d() -> None:
         assert mask.dtype == bool
         assert mask.shape == (5, 5)  # Radius 2 creates 5x5 disk
 
-        # bbox is stored as Polars list, convert to numpy for testing
-        bbox_array = np.array(bbox.to_list())
-        assert len(bbox_array) == 4  # [min_y, min_x, max_y, max_x]
+        assert len(bbox) == 4  # [min_y, min_x, max_y, max_x]
 
 
 def test_mask_disk_attrs_add_nodes_3d() -> None:
     """Test adding disk masks to 3D nodes."""
     graph = RustWorkXGraph()
 
-    # Initialize required attributes for 3D (if they don't exist)
-    if DEFAULT_ATTR_KEYS.T not in graph.node_attr_keys:
-        graph.add_node_attr_key(DEFAULT_ATTR_KEYS.T, default_value=0)
-    if "z" not in graph.node_attr_keys:
-        graph.add_node_attr_key("z", default_value=0.0)
-    if "y" not in graph.node_attr_keys:
-        graph.add_node_attr_key("y", default_value=0.0)
-    if "x" not in graph.node_attr_keys:
-        graph.add_node_attr_key("x", default_value=0.0)
+    # Initialize required attributes
+    setup_spatial_attrs_3d(graph)
 
     # Add 2 nodes at t=0 with 3D coordinates
     node_attrs = [
@@ -234,22 +221,15 @@ def test_mask_disk_attrs_add_nodes_3d() -> None:
         assert mask.dtype == bool
         assert mask.shape == (3, 3, 3)  # Radius 1 creates 3x3x3 ball
 
-        # bbox is stored as Polars list, convert to numpy for testing
-        bbox_array = np.array(bbox.to_list())
-        assert len(bbox_array) == 6  # [min_z, min_y, min_x, max_z, max_y, max_x]
+        assert len(bbox) == 6  # [min_z, min_y, min_x, max_z, max_y, max_x]
 
 
 def test_mask_disk_attrs_with_cropping() -> None:
     """Test disk mask creation with image boundary cropping."""
     graph = RustWorkXGraph()
 
-    # Initialize required attributes (if they don't exist)
-    if DEFAULT_ATTR_KEYS.T not in graph.node_attr_keys:
-        graph.add_node_attr_key(DEFAULT_ATTR_KEYS.T, default_value=0)
-    if "y" not in graph.node_attr_keys:
-        graph.add_node_attr_key("y", default_value=0.0)
-    if "x" not in graph.node_attr_keys:
-        graph.add_node_attr_key("x", default_value=0.0)
+    # Initialize required attributes
+    setup_spatial_attrs_2d(graph)
 
     # Add a node near the edge that will require cropping
     node_attrs = [{DEFAULT_ATTR_KEYS.T: 0, "y": 1.0, "x": 1.0}]  # Near top-left corner
@@ -291,13 +271,8 @@ def test_mask_disk_attrs_multiple_time_points() -> None:
     """Test disk mask creation across multiple time points."""
     graph = RustWorkXGraph()
 
-    # Initialize required attributes (if they don't exist)
-    if DEFAULT_ATTR_KEYS.T not in graph.node_attr_keys:
-        graph.add_node_attr_key(DEFAULT_ATTR_KEYS.T, default_value=0)
-    if "y" not in graph.node_attr_keys:
-        graph.add_node_attr_key("y", default_value=0.0)
-    if "x" not in graph.node_attr_keys:
-        graph.add_node_attr_key("x", default_value=0.0)
+    # Initialize required attributes
+    setup_spatial_attrs_2d(graph)
 
     # Add nodes at different time points
     node_attrs = [

@@ -89,7 +89,7 @@ class GraphArrayView(BaseReadOnlyArray):
                 df[self._attr_key],
                 strict=True,
             ):
-                paint_mask_to_buffer(buffer, mask, bbox, value, offset=self._offset)
+                paint_mask_to_buffer(buffer, bbox, mask, value, offset=self._offset)
 
             return buffer
         else:

@@ -23,6 +23,10 @@ from tracksdata.utils._logging import LOG
 if TYPE_CHECKING:
     from tracksdata.graph._graph_view import GraphView
 
+# Minimum array size threshold for using blosc2 compression
+# Arrays smaller than this are stored using cloudpickle
+BLOSC_COMPRESSION_THRESHOLD = 30
+
 
 class MaybeBloscBytes(TypeDecorator):
     """
@@ -41,7 +45,7 @@ class MaybeBloscBytes(TypeDecorator):
         if value is None:
             return None
 
-        if isinstance(value, np.ndarray) and value.size > 30:
+        if isinstance(value, np.ndarray) and value.size > BLOSC_COMPRESSION_THRESHOLD:
             # Use blosc2.pack_array2 for compression
             return blosc2.pack_array2(value)
 

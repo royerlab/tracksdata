@@ -4,6 +4,7 @@ import pytest
 from tracksdata.array import GraphArrayView
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph import RustWorkXGraph
+from tracksdata.utils._test_utils import setup_mask_attrs
 
 # NOTE: this could be generic test for all array backends
 # when more slicing operations are implemented we could test as in:
@@ -58,8 +59,7 @@ def test_graph_array_view_getitem_with_nodes() -> None:
 
     # Add attribute keys
     graph.add_node_attr_key("label", 0)
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+    setup_mask_attrs(graph)
 
     # Create a mask
     mask = np.array([[True, True], [True, False]], dtype=bool)
@@ -94,8 +94,7 @@ def test_graph_array_view_getitem_multiple_nodes() -> None:
 
     # Add attribute keys
     graph.add_node_attr_key("label", 0)
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+    setup_mask_attrs(graph)
 
     # Create two masks at different locations
     mask1 = np.array([[True, True]], dtype=bool)
@@ -130,8 +129,7 @@ def test_graph_array_view_getitem_boolean_dtype() -> None:
 
     # Add attribute keys
     graph.add_node_attr_key("is_active", False)
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+    setup_mask_attrs(graph)
     # Create a mask
     mask = np.array([[True]], dtype=bool)
     bbox = np.array([10, 20, 11, 21])
@@ -158,8 +156,7 @@ def test_graph_array_view_dtype_inference() -> None:
 
     # Add attribute keys
     graph.add_node_attr_key("float_label", 0.0)
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+    setup_mask_attrs(graph)
     # Create a mask
     mask = np.array([[True]], dtype=bool)
     bbox = np.array([10, 20, 11, 21])

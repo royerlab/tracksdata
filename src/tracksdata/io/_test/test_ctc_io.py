@@ -4,6 +4,11 @@ import numpy as np
 
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph import RustWorkXGraph
+from tracksdata.utils._test_utils import (
+    setup_custom_node_attr,
+    setup_edge_distance_attr,
+    setup_mask_attrs,
+)
 
 
 def test_export_from_ctc_roundtrip(tmp_path: Path):
@@ -11,11 +16,10 @@ def test_export_from_ctc_roundtrip(tmp_path: Path):
     # Create original graph with nodes and edges
     in_graph = RustWorkXGraph()
 
-    in_graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
-    in_graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    in_graph.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACK_ID, -1)
-    in_graph.add_node_attr_key("x", -999_999)
-    in_graph.add_node_attr_key("y", -999_999)
+    setup_mask_attrs(in_graph)
+    setup_custom_node_attr(in_graph, DEFAULT_ATTR_KEYS.TRACK_ID, -1)
+    setup_custom_node_attr(in_graph, "x", -999_999)
+    setup_custom_node_attr(in_graph, "y", -999_999)
 
     node_1 = in_graph.add_node(
         attrs={
@@ -50,7 +54,7 @@ def test_export_from_ctc_roundtrip(tmp_path: Path):
         },
     )
 
-    in_graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    setup_edge_distance_attr(in_graph)
     in_graph.add_edge(node_1, node_2, attrs={DEFAULT_ATTR_KEYS.EDGE_DIST: 1.0})
     in_graph.add_edge(node_1, node_3, attrs={DEFAULT_ATTR_KEYS.EDGE_DIST: 1.0})
 

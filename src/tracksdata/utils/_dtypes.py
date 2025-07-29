@@ -72,8 +72,14 @@ def _try_packing_numpy_array(x: Any) -> bytes:
 def _try_unpacking_numpy_array(x: bytes) -> Any:
     try:
         unpacked = blosc2.unpack_array2(x)
-    except Exception:
-        unpacked = loads(x)
+    except (RuntimeError, ValueError, TypeError) as e:
+        # If blosc2 fails, try cloudpickle
+        try:
+            unpacked = loads(x)
+        except Exception as pickle_error:
+            raise ValueError(
+                f"Failed to deserialize data: blosc2 error: {e}, pickle error: {pickle_error}"
+            ) from pickle_error
 
     return unpacked
 
@@ -134,12 +140,16 @@ def column_from_bytes(df: pl.DataFrame, column: str | None = None) -> pl.DataFra
         # Always use Object dtype to avoid issues with heterogeneous array shapes/types
         try:
             df = df.with_columns(pl.col(c).map_elements(_try_unpacking_numpy_array, return_dtype=pl.Object))
-        except Exception:
+        except (pl.exceptions.ComputeError, pl.exceptions.InvalidOperationError) as e:
             # If there's an issue with map_elements (e.g., polars conversion errors),
             # fall back to manual conversion
-            LOG.warning(f"Error in map_elements for column {c}, falling back to manual conversion")
-            values = [_try_unpacking_numpy_array(val) for val in df[c].to_list()]
-            df = df.with_columns(pl.Series(name=c, values=values, dtype=pl.Object))
+            LOG.warning(f"Polars error in map_elements for column {c}: {e}, falling back to manual conversion")
+            try:
+                values = [_try_unpacking_numpy_array(val) for val in df[c].to_numpy()]
+                df = df.with_columns(pl.Series(name=c, values=values, dtype=pl.Object))
+            except Exception as fallback_error:
+                LOG.error(f"Failed to deserialize column {c} even with manual fallback: {fallback_error}")
+                raise ValueError(f"Unable to deserialize column {c}") from fallback_error
 
     blosc2.set_nthreads(prev_nthreads)
     return df

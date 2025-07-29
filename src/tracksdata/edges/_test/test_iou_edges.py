@@ -5,6 +5,11 @@ from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.edges import IoUEdgeAttr
 from tracksdata.graph import RustWorkXGraph
 from tracksdata.options import get_options, options_context
+from tracksdata.utils._test_utils import (
+    setup_custom_node_attr,
+    setup_edge_distance_attr,
+    setup_mask_attrs,
+)
 
 
 def test_iou_edges_init_default() -> None:
@@ -28,10 +33,9 @@ def test_iou_edges_add_weights(n_workers: int) -> None:
     """Test adding IoU weights to edges with different worker counts."""
     graph = RustWorkXGraph()
 
-    # Register attribute keys
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    # Set up graph attributes
+    setup_mask_attrs(graph)
+    setup_edge_distance_attr(graph)
 
     # Create test masks and bboxes
     mask1_data = np.array([[True, True], [True, False]], dtype=bool)
@@ -79,10 +83,9 @@ def test_iou_edges_no_overlap() -> None:
     """Test IoU calculation with non-overlapping masks."""
     graph = RustWorkXGraph()
 
-    # Register attribute keys
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    # Set up graph attributes
+    setup_mask_attrs(graph)
+    setup_edge_distance_attr(graph)
 
     # Create non-overlapping masks
     mask1_data = np.array([[True, True], [False, False]], dtype=bool)
@@ -119,10 +122,9 @@ def test_iou_edges_perfect_overlap() -> None:
     """Test IoU calculation with perfectly overlapping masks."""
     graph = RustWorkXGraph()
 
-    # Register attribute keys
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    # Set up graph attributes
+    setup_mask_attrs(graph)
+    setup_edge_distance_attr(graph)
 
     # Create identical masks
     mask_data = np.array([[True, True], [True, False]], dtype=bool)
@@ -155,10 +157,10 @@ def test_iou_edges_custom_mask_key() -> None:
     """Test IoU edges operator with custom mask key."""
     graph = RustWorkXGraph()
 
-    # Register attribute keys
-    graph.add_node_attr_key("custom_mask", None)
-    graph.add_node_attr_key("custom_bbox", None)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    # Set up custom attributes
+    setup_custom_node_attr(graph, "custom_mask", None)
+    setup_custom_node_attr(graph, "custom_bbox", None)
+    setup_edge_distance_attr(graph)
 
     # Create test masks
     mask1_data = np.array([[True, True], [True, True]], dtype=bool)
