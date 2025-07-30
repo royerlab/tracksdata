@@ -24,22 +24,22 @@ def test_regionprops_init_custom() -> None:
     assert operator._spacing == (1.0, 2.0)
 
 
-def test_regionprops_attrs_keys() -> None:
-    """Test attrs_keys method."""
+def test_regionprops_attr_keys() -> None:
+    """Test attr_keys method."""
     # Test with string properties
     operator = RegionPropsNodes(extra_properties=["area", "perimeter"])
-    assert operator.attrs_keys() == ["area", "perimeter"]
+    assert operator.attr_keys() == ["area", "perimeter"]
 
     # Test with callable properties
     def custom_prop(region: RegionProperties) -> float:
         return region.area * 2
 
     operator = RegionPropsNodes(extra_properties=[custom_prop, "area"])
-    assert operator.attrs_keys() == ["custom_prop", "area"]
+    assert operator.attr_keys() == ["custom_prop", "area"]
 
     # Test with empty properties
     operator = RegionPropsNodes()
-    assert operator.attrs_keys() == []
+    assert operator.attr_keys() == []
 
 
 def test_regionprops_add_nodes_2d() -> None:

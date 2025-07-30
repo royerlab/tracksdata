@@ -125,11 +125,11 @@ class RegionPropsNodes(BaseNodesOperator):
                 graph.add_node_attr_key(attr_key, None)
 
         # initialize the attribute keys
-        for attr_key in axis_names + self.attrs_keys():
+        for attr_key in axis_names + self.attr_keys():
             if attr_key not in graph.node_attr_keys:
                 graph.add_node_attr_key(attr_key, -1.0)
 
-    def attrs_keys(self) -> list[str]:
+    def attr_keys(self) -> list[str]:
         """
         Get the keys of the node attributes that will be extracted.
 
@@ -145,7 +145,7 @@ class RegionPropsNodes(BaseNodesOperator):
         --------
         ```python
         node_op = RegionPropsNodes(extra_properties=["area", "perimeter"])
-        keys = node_op.attrs_keys()
+        keys = node_op.attr_keys()
         print(keys)  # ['area', 'perimeter']
         ```
         """

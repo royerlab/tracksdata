@@ -37,7 +37,7 @@ class DataFrameSpatialFilter:
         from spatial_graph import PointRTree
 
         start_time = time.time()
-        self._attrs_keys = df.columns
+        self._attr_keys = df.columns
 
         if df.is_empty():
             self._node_rtree = None
@@ -119,7 +119,7 @@ class SpatialFilter:
     ----------
     graph : BaseGraph
         The graph containing nodes with spatial coordinates.
-    attrs_keys : list[str] | None, optional
+    attr_keys : list[str] | None, optional
         List of attribute keys to use as spatial coordinates. If None, defaults to
         ["t", "z", "y", "x"] filtered to only include keys present in the graph.
 
@@ -132,7 +132,7 @@ class SpatialFilter:
     graph.add_node({"t": 1, "y": 30, "x": 40})
 
     # Create spatial filter with 2D coordinates
-    spatial_filter = SpatialFilter(graph, attrs_keys=["y", "x"])
+    spatial_filter = SpatialFilter(graph, attr_keys=["y", "x"])
 
     # Query nodes in spatial region
     subgraph = spatial_filter[0:50, 0:50]
@@ -142,19 +142,19 @@ class SpatialFilter:
     def __init__(
         self,
         graph: "BaseGraph",
-        attrs_keys: list[str] | None = None,
+        attr_keys: list[str] | None = None,
     ) -> None:
-        if attrs_keys is None:
-            attrs_keys = ["t", "z", "y", "x"]
+        if attr_keys is None:
+            attr_keys = ["t", "z", "y", "x"]
             valid_keys = set(graph.node_attr_keys)
-            attrs_keys = list(filter(lambda x: x in valid_keys, attrs_keys))
+            attr_keys = list(filter(lambda x: x in valid_keys, attr_keys))
 
         self._graph = graph
 
-        nodes_df = graph.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, *attrs_keys])
+        nodes_df = graph.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, *attr_keys])
         node_ids = nodes_df[DEFAULT_ATTR_KEYS.NODE_ID]
 
-        self._df_filter = DataFrameSpatialFilter(indices=node_ids, df=nodes_df.select(attrs_keys))
+        self._df_filter = DataFrameSpatialFilter(indices=node_ids, df=nodes_df.select(attr_keys))
 
     def __getitem__(self, keys: tuple[slice, ...]) -> "BaseFilter":
         """
@@ -167,7 +167,7 @@ class SpatialFilter:
         ----------
         keys : tuple[slice, ...]
             Tuple of slices defining the spatial bounds for each coordinate dimension.
-            Must match the number of coordinate dimensions specified in attrs_keys.
+            Must match the number of coordinate dimensions specified in attr_keys.
             Each slice defines [start, stop) bounds for that dimension.
 
         Returns
@@ -273,7 +273,7 @@ class BBoxSpatialFilter:
         ----------
         keys : tuple[slice, ...]
             Tuple of slices defining the spatial bounds for each coordinate dimension.
-            Must match the number of coordinate dimensions specified in attrs_keys.
+            Must match the number of coordinate dimensions specified in attr_keys.
             Each slice defines [start, stop] bounds for that dimension.
 
         Returns
