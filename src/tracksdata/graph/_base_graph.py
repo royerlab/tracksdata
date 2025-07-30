@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Literal, TypeVar, overload
 import numpy as np
 import polars as pl
 import rustworkx as rx
+from geff.rustworkx.io import read_rx
 from numpy.typing import ArrayLike
 
 from tracksdata.attrs import AttrComparison, NodeAttr
@@ -1087,3 +1088,44 @@ class BaseGraph(abc.ABC):
         )
 
         return graph
+
+    @classmethod
+    def from_geff(
+        cls: type[T],
+        data_path: str | Path,
+        **kwargs,
+    ) -> T:
+        """
+        Create a graph from a geff data directory.
+
+        Parameters
+        ----------
+        data_path : str | Path
+            The path to the geff data directory.
+        **kwargs
+            Additional keyword arguments to pass to the graph constructor.
+
+        Returns
+        -------
+        T
+            The loaded graph.
+        """
+        from tracksdata.graph import IndexedRXGraph
+
+        # this performs a roundtrip with the rustworkx graph
+        rx_graph, _ = read_rx(data_path)
+
+        if not isinstance(rx_graph, rx.PyDiGraph):
+            LOG.warning("The graph is not a directed graph, converting to directed graph.")
+            rx_graph = rx_graph.to_directed()
+
+        indexed_graph = IndexedRXGraph(
+            rx_graph=rx_graph,
+            node_id_map=rx_graph.attrs["to_rx_id_map"],
+            **kwargs,
+        )
+
+        if cls == IndexedRXGraph:
+            return indexed_graph
+
+        return cls.from_other(indexed_graph, **kwargs)
