@@ -847,10 +847,12 @@ class RustWorkXGraph(BaseGraph):
             for key in attr_keys:
                 columns[key].append(node_data[key])
 
-        # tentative casting to preferred format
-        for col_name, col_data in columns.items():
-            if isinstance(col_data[0], np.ndarray):
-                columns[col_name] = pl.Series(col_data, dtype=pl.Object)
+        for key in attr_keys:
+            try:
+                columns[key] = np.asarray(columns[key])
+            except ValueError:
+                # in case the array is inhomogeneous, we keep it as a list
+                pass
 
         # Create DataFrame and set node_id as index in one shot
         df = pl.DataFrame(columns)
