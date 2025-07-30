@@ -1376,7 +1376,7 @@ the specified bounds for each spatial dimension.</p>
           –
           <div class="doc-md-description">
             <p>Tuple of slices defining the spatial bounds for each coordinate dimension.
-Must match the number of coordinate dimensions specified in attrs_keys.
+Must match the number of coordinate dimensions specified in attr_keys.
 Each slice defines [start, stop] bounds for that dimension.</p>
           </div>
         </li>
@@ -1491,7 +1491,7 @@ Each slice defines [start, stop] bounds for that dimension.</p>
 </span><span id="__span-0-273"><a id="__codelineno-0-273" name="__codelineno-0-273"></a><span class="sd">    ----------</span>
 </span><span id="__span-0-274"><a id="__codelineno-0-274" name="__codelineno-0-274"></a><span class="sd">    keys : tuple[slice, ...]</span>
 </span><span id="__span-0-275"><a id="__codelineno-0-275" name="__codelineno-0-275"></a><span class="sd">        Tuple of slices defining the spatial bounds for each coordinate dimension.</span>
-</span><span id="__span-0-276"><a id="__codelineno-0-276" name="__codelineno-0-276"></a><span class="sd">        Must match the number of coordinate dimensions specified in attrs_keys.</span>
+</span><span id="__span-0-276"><a id="__codelineno-0-276" name="__codelineno-0-276"></a><span class="sd">        Must match the number of coordinate dimensions specified in attr_keys.</span>
 </span><span id="__span-0-277"><a id="__codelineno-0-277" name="__codelineno-0-277"></a><span class="sd">        Each slice defines [start, stop] bounds for that dimension.</span>
 </span><span id="__span-0-278"><a id="__codelineno-0-278" name="__codelineno-0-278"></a>
 </span><span id="__span-0-279"><a id="__codelineno-0-279" name="__codelineno-0-279"></a><span class="sd">    Returns</span>
@@ -1562,7 +1562,7 @@ Each slice defines [start, stop] bounds for that dimension.</p>
 
 
 </h2>
-<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">SpatialFilter</span><span class="p">(</span><span class="n">graph</span><span class="p">:</span> <span class="n">BaseGraph</span><span class="p">,</span> <span class="n">attrs_keys</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">SpatialFilter</span><span class="p">(</span><span class="n">graph</span><span class="p">:</span> <span class="n">BaseGraph</span><span class="p">,</span> <span class="n">attr_keys</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span>
 </span></code></pre></div>
 
     <div class="doc doc-contents ">
@@ -1574,7 +1574,7 @@ and allows efficient querying of nodes within spatial regions of interest (ROI).
 <h4 id="tracksdata.graph.filters.SpatialFilter--parameters">Parameters</h4>
 <p>graph : BaseGraph
     The graph containing nodes with spatial coordinates.
-attrs_keys : list[str] | None, optional
+attr_keys : list[str] | None, optional
     List of attribute keys to use as spatial coordinates. If None, defaults to
     ["t", "z", "y", "x"] filtered to only include keys present in the graph.</p>
 <h4 id="tracksdata.graph.filters.SpatialFilter--examples">Examples</h4>
@@ -1584,7 +1584,7 @@ attrs_keys : list[str] | None, optional
 </span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">graph</span><span class="o">.</span><span class="n">add_node</span><span class="p">({</span><span class="s2">&quot;t&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">&quot;y&quot;</span><span class="p">:</span> <span class="mi">30</span><span class="p">,</span> <span class="s2">&quot;x&quot;</span><span class="p">:</span> <span class="mi">40</span><span class="p">})</span>
 </span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
 </span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="c1"># Create spatial filter with 2D coordinates</span>
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="n">spatial_filter</span> <span class="o">=</span> <span class="n">SpatialFilter</span><span class="p">(</span><span class="n">graph</span><span class="p">,</span> <span class="n">attrs_keys</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;y&quot;</span><span class="p">,</span> <span class="s2">&quot;x&quot;</span><span class="p">])</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="n">spatial_filter</span> <span class="o">=</span> <span class="n">SpatialFilter</span><span class="p">(</span><span class="n">graph</span><span class="p">,</span> <span class="n">attr_keys</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;y&quot;</span><span class="p">,</span> <span class="s2">&quot;x&quot;</span><span class="p">])</span>
 </span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
 </span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="c1"># Query nodes in spatial region</span>
 </span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="n">subgraph</span> <span class="o">=</span> <span class="n">spatial_filter</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="mi">50</span><span class="p">,</span> <span class="mi">0</span><span class="p">:</span><span class="mi">50</span><span class="p">]</span>
@@ -1632,19 +1632,19 @@ attrs_keys : list[str] | None, optional
 <span class="normal"><a href="#__codelineno-0-157">157</a></span></pre></div></td><td class="code"><div><pre><span></span><code><span id="__span-0-142"><a id="__codelineno-0-142" name="__codelineno-0-142"></a><span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
 </span><span id="__span-0-143"><a id="__codelineno-0-143" name="__codelineno-0-143"></a>    <span class="bp">self</span><span class="p">,</span>
 </span><span id="__span-0-144"><a id="__codelineno-0-144" name="__codelineno-0-144"></a>    <span class="n">graph</span><span class="p">:</span> <span class="s2">&quot;BaseGraph&quot;</span><span class="p">,</span>
-</span><span id="__span-0-145"><a id="__codelineno-0-145" name="__codelineno-0-145"></a>    <span class="n">attrs_keys</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-145"><a id="__codelineno-0-145" name="__codelineno-0-145"></a>    <span class="n">attr_keys</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
 </span><span id="__span-0-146"><a id="__codelineno-0-146" name="__codelineno-0-146"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-</span><span id="__span-0-147"><a id="__codelineno-0-147" name="__codelineno-0-147"></a>    <span class="k">if</span> <span class="n">attrs_keys</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-</span><span id="__span-0-148"><a id="__codelineno-0-148" name="__codelineno-0-148"></a>        <span class="n">attrs_keys</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;t&quot;</span><span class="p">,</span> <span class="s2">&quot;z&quot;</span><span class="p">,</span> <span class="s2">&quot;y&quot;</span><span class="p">,</span> <span class="s2">&quot;x&quot;</span><span class="p">]</span>
+</span><span id="__span-0-147"><a id="__codelineno-0-147" name="__codelineno-0-147"></a>    <span class="k">if</span> <span class="n">attr_keys</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="__span-0-148"><a id="__codelineno-0-148" name="__codelineno-0-148"></a>        <span class="n">attr_keys</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;t&quot;</span><span class="p">,</span> <span class="s2">&quot;z&quot;</span><span class="p">,</span> <span class="s2">&quot;y&quot;</span><span class="p">,</span> <span class="s2">&quot;x&quot;</span><span class="p">]</span>
 </span><span id="__span-0-149"><a id="__codelineno-0-149" name="__codelineno-0-149"></a>        <span class="n">valid_keys</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">graph</span><span class="o">.</span><span class="n">node_attr_keys</span><span class="p">)</span>
-</span><span id="__span-0-150"><a id="__codelineno-0-150" name="__codelineno-0-150"></a>        <span class="n">attrs_keys</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">filter</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">valid_keys</span><span class="p">,</span> <span class="n">attrs_keys</span><span class="p">))</span>
+</span><span id="__span-0-150"><a id="__codelineno-0-150" name="__codelineno-0-150"></a>        <span class="n">attr_keys</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">filter</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">valid_keys</span><span class="p">,</span> <span class="n">attr_keys</span><span class="p">))</span>
 </span><span id="__span-0-151"><a id="__codelineno-0-151" name="__codelineno-0-151"></a>
 </span><span id="__span-0-152"><a id="__codelineno-0-152" name="__codelineno-0-152"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_graph</span> <span class="o">=</span> <span class="n">graph</span>
 </span><span id="__span-0-153"><a id="__codelineno-0-153" name="__codelineno-0-153"></a>
-</span><span id="__span-0-154"><a id="__codelineno-0-154" name="__codelineno-0-154"></a>    <span class="n">nodes_df</span> <span class="o">=</span> <span class="n">graph</span><span class="o">.</span><span class="n">node_attrs</span><span class="p">(</span><span class="n">attr_keys</span><span class="o">=</span><span class="p">[</span><span class="n">DEFAULT_ATTR_KEYS</span><span class="o">.</span><span class="n">NODE_ID</span><span class="p">,</span> <span class="o">*</span><span class="n">attrs_keys</span><span class="p">])</span>
+</span><span id="__span-0-154"><a id="__codelineno-0-154" name="__codelineno-0-154"></a>    <span class="n">nodes_df</span> <span class="o">=</span> <span class="n">graph</span><span class="o">.</span><span class="n">node_attrs</span><span class="p">(</span><span class="n">attr_keys</span><span class="o">=</span><span class="p">[</span><span class="n">DEFAULT_ATTR_KEYS</span><span class="o">.</span><span class="n">NODE_ID</span><span class="p">,</span> <span class="o">*</span><span class="n">attr_keys</span><span class="p">])</span>
 </span><span id="__span-0-155"><a id="__codelineno-0-155" name="__codelineno-0-155"></a>    <span class="n">node_ids</span> <span class="o">=</span> <span class="n">nodes_df</span><span class="p">[</span><span class="n">DEFAULT_ATTR_KEYS</span><span class="o">.</span><span class="n">NODE_ID</span><span class="p">]</span>
 </span><span id="__span-0-156"><a id="__codelineno-0-156" name="__codelineno-0-156"></a>
-</span><span id="__span-0-157"><a id="__codelineno-0-157" name="__codelineno-0-157"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_df_filter</span> <span class="o">=</span> <span class="n">DataFrameSpatialFilter</span><span class="p">(</span><span class="n">indices</span><span class="o">=</span><span class="n">node_ids</span><span class="p">,</span> <span class="n">df</span><span class="o">=</span><span class="n">nodes_df</span><span class="o">.</span><span class="n">select</span><span class="p">(</span><span class="n">attrs_keys</span><span class="p">))</span>
+</span><span id="__span-0-157"><a id="__codelineno-0-157" name="__codelineno-0-157"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_df_filter</span> <span class="o">=</span> <span class="n">DataFrameSpatialFilter</span><span class="p">(</span><span class="n">indices</span><span class="o">=</span><span class="n">node_ids</span><span class="p">,</span> <span class="n">df</span><span class="o">=</span><span class="n">nodes_df</span><span class="o">.</span><span class="n">select</span><span class="p">(</span><span class="n">attr_keys</span><span class="p">))</span>
 </span></code></pre></div></td></tr></table></div>
                   </details>
 
@@ -1686,7 +1686,7 @@ the specified bounds for each spatial dimension.</p>
           –
           <div class="doc-md-description">
             <p>Tuple of slices defining the spatial bounds for each coordinate dimension.
-Must match the number of coordinate dimensions specified in attrs_keys.
+Must match the number of coordinate dimensions specified in attr_keys.
 Each slice defines [start, stop) bounds for that dimension.</p>
           </div>
         </li>
@@ -1774,7 +1774,7 @@ Each slice defines [start, stop) bounds for that dimension.</p>
 </span><span id="__span-0-167"><a id="__codelineno-0-167" name="__codelineno-0-167"></a><span class="sd">    ----------</span>
 </span><span id="__span-0-168"><a id="__codelineno-0-168" name="__codelineno-0-168"></a><span class="sd">    keys : tuple[slice, ...]</span>
 </span><span id="__span-0-169"><a id="__codelineno-0-169" name="__codelineno-0-169"></a><span class="sd">        Tuple of slices defining the spatial bounds for each coordinate dimension.</span>
-</span><span id="__span-0-170"><a id="__codelineno-0-170" name="__codelineno-0-170"></a><span class="sd">        Must match the number of coordinate dimensions specified in attrs_keys.</span>
+</span><span id="__span-0-170"><a id="__codelineno-0-170" name="__codelineno-0-170"></a><span class="sd">        Must match the number of coordinate dimensions specified in attr_keys.</span>
 </span><span id="__span-0-171"><a id="__codelineno-0-171" name="__codelineno-0-171"></a><span class="sd">        Each slice defines [start, stop) bounds for that dimension.</span>
 </span><span id="__span-0-172"><a id="__codelineno-0-172" name="__codelineno-0-172"></a>
 </span><span id="__span-0-173"><a id="__codelineno-0-173" name="__codelineno-0-173"></a><span class="sd">    Returns</span>
