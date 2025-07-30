@@ -307,15 +307,41 @@ class RustWorkXGraph(BaseGraph):
     def __init__(self, rx_graph: rx.PyDiGraph | None = None) -> None:
         super().__init__()
 
+        self._time_to_nodes: dict[int, list[int]] = {}
+        self._node_attr_keys: list[str] = []
+        self._edge_attr_keys: list[str] = []
+        self._overlaps: list[list[int, 2]] = []
+
         if rx_graph is None:
             self._graph = rx.PyDiGraph()
+            self._node_attr_keys.append(DEFAULT_ATTR_KEYS.T)
+
         else:
             self._graph = rx_graph
 
-        self._time_to_nodes: dict[int, list[int]] = {}
-        self._node_attr_keys: list[str] = [DEFAULT_ATTR_KEYS.T]
-        self._edge_attr_keys: list[str] = []
-        self._overlaps: list[list[int, 2]] = []
+            unique_node_attr_keys = set()
+            unique_edge_attr_keys = set()
+
+            for node_id in self._graph.node_indices():
+                node_attrs = self._graph[node_id]
+                try:
+                    t = node_attrs[DEFAULT_ATTR_KEYS.T]
+                except KeyError as e:
+                    raise ValueError(
+                        f"Node attributes must have a '{DEFAULT_ATTR_KEYS.T}' key. Got {node_attrs.keys()}"
+                    ) from e
+
+                self._time_to_nodes.setdefault(int(t), []).append(node_id)
+
+                unique_node_attr_keys.update(node_attrs.keys())
+
+            edge_idx_map = self._graph.edge_index_map()
+            for edge_idx, (_, _, attr) in edge_idx_map.items():
+                unique_edge_attr_keys.update(attr.keys())
+                attr[DEFAULT_ATTR_KEYS.EDGE_ID] = edge_idx
+
+            self._node_attr_keys = list(unique_node_attr_keys)
+            self._edge_attr_keys = list(unique_edge_attr_keys)
 
     @property
     def rx_graph(self) -> rx.PyDiGraph:
@@ -1142,16 +1168,14 @@ class RustWorkXGraph(BaseGraph):
 
 class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
     """
-    A graph that is indexed by node ids.
-
-    This graph is useful when you have a graph with arbitrary node ids.
+    A graph with arbitrary node indices.
 
     Parameters
     ----------
     rx_graph : rx.PyDiGraph | None
         The rustworkx graph to index.
     node_id_map : dict[int, int] | None
-        A map of world ids to graph ids, must be provided if `rx_graph` is provided.
+        A map of external ids (arbitrary) to rx graph ids (0 to N-1), must be provided if `rx_graph` is provided.
 
     Examples
     --------

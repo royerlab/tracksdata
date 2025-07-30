@@ -17,7 +17,10 @@ from tracksdata.utils._multiprocessing import multiprocessing_apply
 
 if TYPE_CHECKING:
     from tracksdata.graph.filters._base_filter import BaseFilter
-    from tracksdata.graph.filters._spatial_filter import SpatialFilter
+    from tracksdata.graph.filters._spatial_filter import (
+        BBoxSpatialFilter,
+        SpatialFilter,
+    )
 
 
 T = TypeVar("T", bound="BaseGraph")
@@ -947,12 +950,71 @@ class BaseGraph(abc.ABC):
 
         See Also
         --------
-        SpatialFilter : The spatial filter class for detailed usage.
-        filter : General attribute-based filtering.
+        [SpatialFilter][tracksdata.graph.filters.SpatialFilter]:
+            The point spatial filter query class.
+
         """
         from tracksdata.graph.filters._spatial_filter import SpatialFilter
 
         return SpatialFilter(self, attrs_keys=attrs_keys)
+
+    def bbox_spatial_filter(
+        self,
+        frame_attr_key: str | None = DEFAULT_ATTR_KEYS.T,
+        bbox_attr_key: str = DEFAULT_ATTR_KEYS.BBOX,
+    ) -> "BBoxSpatialFilter":
+        """
+        Create a spatial filter for efficient spatial queries of graph nodes using bounding boxes.
+
+        This method creates a spatial index of graph nodes based on their bounding box coordinates,
+        enabling efficient querying of nodes intersecting with spatial regions of interest (ROI).
+
+        Parameters
+        ----------
+        frame_attr_key : str
+            The attribute key for the frame (time) coordinate.
+            Default is `DEFAULT_ATTR_KEYS.T`.
+            If None it will only use the bounding box coordinates.
+        bbox_attr_key : str
+            The attribute key for the bounding box coordinates.
+            Defaults to `DEFAULT_ATTR_KEYS.BBOX`.
+            The bounding box coordinates should be in the format:
+            [min_x, min_y, min_z, ..., max_x, max_y, max_z, ...]
+            where each dimension has a min and max value.
+
+        Returns
+        -------
+        BBoxSpatialFilter
+            A spatial filter object that can be used to query nodes within spatial regions
+            using slice notation.
+
+        Examples
+        --------
+        Create a 2D spatial filter for bounding boxes:
+
+        ```python
+        spatial_filter = graph.bbox_spatial_filter(frame_attr_key=None, box_attr_key="bbox")
+        # Query nodes intersecting with region y=[10, 50), x=[20, 60)
+        subgraph = spatial_filter[10:50, 20:60].subgraph()
+        ```
+
+        Create a 4D spatiotemporal filter:
+
+        ```python
+        spatial_filter = graph.bbox_spatial_filter()
+        # Uses default ["t", "bbox"]
+        # Query nodes intersecting with time=[0, 10), z=[0, 5), y=[10, 50), x=[20, 60)
+        nodes_in_roi = spatial_filter[0:10, 0:5, 10:50, 20:60].node_attrs()
+        ```
+
+        See Also
+        --------
+        [BBoxSpatialFilter][tracksdata.graph.filters.BBoxSpatialFilter]:
+            The bounding box spatial filter query class.
+        """
+        from tracksdata.graph.filters._spatial_filter import BBoxSpatialFilter
+
+        return BBoxSpatialFilter(self, frame_attr_key=frame_attr_key, bbox_attr_key=bbox_attr_key)
 
     def tracklet_graph(
         self,

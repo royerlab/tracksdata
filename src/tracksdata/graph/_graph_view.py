@@ -82,7 +82,8 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
         sync: bool = True,
     ) -> None:
         # Initialize RustWorkXGraph
-        RustWorkXGraph.__init__(self, rx_graph=rx_graph)
+        RustWorkXGraph.__init__(self, rx_graph=None)  # rx_graph is not used to avoid initialization
+        self._graph = rx_graph
 
         # Initialize MappedGraphMixin
         MappedGraphMixin.__init__(self, node_map_to_root)
@@ -90,9 +91,7 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
         # Setting up the time_to_nodes mapping (this was removed accidentally)
         for idx in rx_graph.node_indices():
             t = self.rx_graph[idx][DEFAULT_ATTR_KEYS.T]
-            if t not in self._time_to_nodes:
-                self._time_to_nodes[t] = []
-            self._time_to_nodes[t].append(idx)
+            self._time_to_nodes.setdefault(t, []).append(idx)
 
         # Set up edge mapping (nodes handled by mixin)
         self._edge_map_to_root: bidict.bidict[int, int] = bidict.bidict(
