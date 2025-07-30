@@ -6,6 +6,7 @@ import scipy.sparse as sp
 from toolz import curry
 
 from tracksdata.constants import DEFAULT_ATTR_KEYS
+from tracksdata.functional._mask import mask_intersection
 from tracksdata.io._ctc import compressed_tracks_table
 from tracksdata.options import get_options
 from tracksdata.utils._dtypes import column_from_bytes, column_to_bytes
@@ -66,15 +67,30 @@ def _match_single_frame(
     _rows = []
     _cols = []
 
-    for i, (ref_id, ref_mask) in enumerate(
-        zip(ref_group[reference_graph_key], ref_group[DEFAULT_ATTR_KEYS.MASK], strict=True)
+    ref_mask_sizes = ref_group[DEFAULT_ATTR_KEYS.MASK].map_elements(np.sum, return_dtype=pl.Int64)
+    comp_mask_sizes = comp_group[DEFAULT_ATTR_KEYS.MASK].map_elements(np.sum, return_dtype=pl.Int64)
+
+    for i, (ref_id, ref_bbox, ref_mask, ref_mask_size) in enumerate(
+        zip(
+            ref_group[reference_graph_key],
+            ref_group[DEFAULT_ATTR_KEYS.BBOX],
+            ref_group[DEFAULT_ATTR_KEYS.MASK],
+            ref_mask_sizes,
+            strict=True,
+        )
     ):
-        for j, (comp_id, comp_mask) in enumerate(
-            zip(comp_group[input_graph_key], comp_group[DEFAULT_ATTR_KEYS.MASK], strict=True)
+        for j, (comp_id, comp_bbox, comp_mask, comp_mask_size) in enumerate(
+            zip(
+                comp_group[input_graph_key],
+                comp_group[DEFAULT_ATTR_KEYS.BBOX],
+                comp_group[DEFAULT_ATTR_KEYS.MASK],
+                comp_mask_sizes,
+                strict=True,
+            )
         ):
             # intersection over reference is used to select the matches
-            inter = ref_mask.intersection(comp_mask)
-            ctc_score = inter / ref_mask.size
+            inter = mask_intersection(ref_bbox, ref_mask, comp_bbox, comp_mask)
+            ctc_score = inter / ref_mask_size
             if ctc_score > min_reference_intersection:
                 _mapped_ref.append(ref_id)
                 _mapped_comp.append(comp_id)
@@ -83,8 +99,8 @@ def _match_single_frame(
 
                 # NOTE: there was something weird with IoU, the length when compared with `ctc_metrics`
                 #       sometimes it had an extra element
-                iou = inter / (ref_mask.size + comp_mask.size - inter)
-                _ious.append(iou.item())
+                iou = inter / (ref_mask_size + comp_mask_size - inter)
+                _ious.append(iou)
 
     if optimal_matching and len(_rows) > 0:
         LOG.info("Solving optimal matching ...")
@@ -150,7 +166,9 @@ def _matching_data(
         ("ref", reference_graph, reference_graph_key),
         ("comp", input_graph, input_graph_key),
     ]:
-        nodes_df = graph.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.T, track_id_key, DEFAULT_ATTR_KEYS.MASK])
+        nodes_df = graph.node_attrs(
+            attr_keys=[DEFAULT_ATTR_KEYS.T, track_id_key, DEFAULT_ATTR_KEYS.BBOX, DEFAULT_ATTR_KEYS.MASK]
+        )
         if n_workers > 1:
             # required by multiprocessing
             nodes_df = column_to_bytes(nodes_df, DEFAULT_ATTR_KEYS.MASK)

@@ -4,6 +4,11 @@ from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.edges import DistanceEdges
 from tracksdata.graph import RustWorkXGraph
 from tracksdata.options import get_options, options_context
+from tracksdata.utils._test_utils import (
+    setup_custom_node_attr,
+    setup_spatial_attrs_2d,
+    setup_spatial_attrs_3d,
+)
 
 
 def test_distance_edges_init_default_params() -> None:
@@ -48,8 +53,7 @@ def test_distance_edges_add_edges_single_timepoint_no_previous() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
+    setup_spatial_attrs_2d(graph)
 
     # Add nodes only at t=1 (no t=0)
     graph.add_node({DEFAULT_ATTR_KEYS.T: 1, "x": 0.0, "y": 0.0})
@@ -67,8 +71,7 @@ def test_distance_edges_add_edges_single_timepoint_no_current() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
+    setup_spatial_attrs_2d(graph)
 
     # Add nodes only at t=0 (no t=1)
     graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
@@ -86,8 +89,7 @@ def test_distance_edges_add_edges_2d_coordinates() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
+    setup_spatial_attrs_2d(graph)
 
     # Add nodes at t=0
     _ = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
@@ -114,9 +116,7 @@ def test_distance_edges_add_edges_3d_coordinates() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
-    graph.add_node_attr_key("z", 0.0)
+    setup_spatial_attrs_3d(graph)
 
     # Add nodes at t=0
     _ = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0, "z": 0.0})
@@ -139,8 +139,8 @@ def test_distance_edges_add_edges_custom_attr_keys() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("pos_x", 0.0)
-    graph.add_node_attr_key("pos_y", 0.0)
+    setup_custom_node_attr(graph, "pos_x", 0.0)
+    setup_custom_node_attr(graph, "pos_y", 0.0)
 
     # Add nodes at t=0
     _ = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "pos_x": 0.0, "pos_y": 0.0})
@@ -163,8 +163,7 @@ def test_distance_edges_add_edges_distance_threshold() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
+    setup_spatial_attrs_2d(graph)
 
     # Add nodes at t=0
     _ = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
@@ -186,8 +185,7 @@ def test_distance_edges_add_edges_multiple_timepoints(n_workers: int) -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
+    setup_spatial_attrs_2d(graph)
 
     # Add nodes at multiple timepoints
     for t in range(3):
@@ -209,8 +207,7 @@ def test_distance_edges_add_edges_custom_weight_key() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
+    setup_spatial_attrs_2d(graph)
 
     # Add nodes at t=0
     _ = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
@@ -237,8 +234,7 @@ def test_distance_edges_n_neighbors_limit() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
+    setup_spatial_attrs_2d(graph)
 
     # Add many nodes at t=0
     for i in range(5):
@@ -264,8 +260,7 @@ def test_distance_edges_add_edges_with_delta_t(n_workers: int) -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
+    setup_spatial_attrs_2d(graph)
 
     # Add nodes at t=0, t=1, t=2
     node_0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})

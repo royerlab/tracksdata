@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 
 from tracksdata.graph import RustWorkXGraph
@@ -134,10 +135,10 @@ def test_bbox_spatial_filter_overlaps() -> None:
     graph.add_node_attr_key("bbox", [0, 0, 0, 0])
     # Add nodes with bounding boxes
     bboxes = [
-        [0, 20, 10, 30],  # Node 1
-        [5, 25, 15, 35],  # Node 2
-        [10, 30, 20, 40],  # Node 3
-        [15, 35, 25, 45],  # Node 4
+        np.asarray([0, 20, 10, 30]),  # Node 1
+        np.asarray([5, 25, 15, 35]),  # Node 2
+        np.asarray([10, 30, 20, 40]),  # Node 3
+        np.asarray([15, 35, 25, 45]),  # Node 4
     ]
     node_ids = graph.bulk_add_nodes([{"t": 0, "bbox": bbox} for bbox in bboxes])
 
@@ -154,12 +155,12 @@ def test_bbox_spatial_filter_overlaps() -> None:
 def test_bbox_spatial_filter_with_edges() -> None:
     """Test SpatialFilter preserves edges in subgraphs."""
     graph = RustWorkXGraph()
-    graph.add_node_attr_key("bbox", [0, 0, 0, 0])
+    graph.add_node_attr_key("bbox", np.asarray([0, 0, 0, 0]))
     graph.add_edge_attr_key("weight", 0.0)
 
     # Add nodes and edge
-    node1_id = graph.add_node({"t": 0, "bbox": [10, 20, 15, 25]})
-    node2_id = graph.add_node({"t": 1, "bbox": [30, 40, 35, 45]})
+    node1_id = graph.add_node({"t": 0, "bbox": np.asarray([10, 20, 15, 25])})
+    node2_id = graph.add_node({"t": 1, "bbox": np.asarray([30, 40, 35, 45])})
     graph.add_edge(node1_id, node2_id, {"weight": 1.0})
 
     spatial_filter = BBoxSpatialFilter(graph, frame_attr_key="t", bbox_attr_key="bbox")

@@ -48,9 +48,6 @@ class RandomNodes(BaseNodesOperator):
     [RegionPropsNodes][tracksdata.nodes.RegionPropsNodes]:
         Extract nodes from segmented images using region properties.
 
-    [Mask][tracksdata.nodes.Mask]:
-        Node operator for mask-based objects.
-
     Examples
     --------
     Generate 2D random nodes:

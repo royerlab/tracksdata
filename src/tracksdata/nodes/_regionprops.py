@@ -10,7 +10,6 @@ from typing_extensions import override
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.nodes._base_nodes import BaseNodesOperator
-from tracksdata.nodes._mask import Mask
 from tracksdata.utils._logging import LOG
 from tracksdata.utils._multiprocessing import multiprocessing_apply
 
@@ -123,6 +122,9 @@ class RegionPropsNodes(BaseNodesOperator):
         for attr_key in [DEFAULT_ATTR_KEYS.MASK, DEFAULT_ATTR_KEYS.BBOX]:
             if attr_key not in graph.node_attr_keys:
                 graph.add_node_attr_key(attr_key, None)
+
+        if DEFAULT_ATTR_KEYS.BBOX not in graph.node_attr_keys:
+            graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
 
         # initialize the attribute keys
         for attr_key in axis_names + self.attrs_keys():
@@ -288,7 +290,7 @@ class RegionPropsNodes(BaseNodesOperator):
                 else:
                     attrs[prop] = getattr(obj, prop)
 
-            attrs[DEFAULT_ATTR_KEYS.MASK] = Mask(obj.image, obj.bbox)
+            attrs[DEFAULT_ATTR_KEYS.MASK] = obj.image
             attrs[DEFAULT_ATTR_KEYS.BBOX] = np.asarray(obj.bbox, dtype=int)
             attrs[DEFAULT_ATTR_KEYS.T] = t
 

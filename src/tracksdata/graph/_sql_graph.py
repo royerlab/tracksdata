@@ -2,12 +2,15 @@ from collections.abc import Sequence
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
+import blosc2
+import cloudpickle
 import numpy as np
 import polars as pl
 import rustworkx as rx
 import sqlalchemy as sa
 from sqlalchemy.orm import DeclarativeBase, Session, aliased, load_only
 from sqlalchemy.sql.type_api import TypeEngine
+from sqlalchemy.types import LargeBinary, TypeDecorator
 
 from tracksdata.attrs import AttrComparison, split_attr_comps
 from tracksdata.constants import DEFAULT_ATTR_KEYS
@@ -18,6 +21,46 @@ from tracksdata.utils._logging import LOG
 
 if TYPE_CHECKING:
     from tracksdata.graph._graph_view import GraphView
+
+# Minimum array size threshold for using blosc2 compression
+# Arrays smaller than this are stored using cloudpickle
+BLOSC_COMPRESSION_THRESHOLD = 30
+
+
+class MaybeBloscBytes(TypeDecorator):
+    """
+    Custom SQLAlchemy type that compresses numpy arrays using blosc2.pack_array2
+    and decompresses them using blosc2.unpack_array2.
+
+    This provides efficient compression for large numpy arrays stored in the database,
+    particularly useful for mask and bbox data.
+    """
+
+    impl = LargeBinary
+    cache_ok = False
+
+    def process_bind_param(self, value: Any, dialect: Any) -> bytes | None:
+        """Convert numpy array to compressed bytes for storage."""
+        if value is None:
+            return None
+
+        if isinstance(value, np.ndarray) and value.size > BLOSC_COMPRESSION_THRESHOLD:
+            # Use blosc2.pack_array2 for compression
+            return blosc2.pack_array2(value)
+
+        return cloudpickle.dumps(value)
+
+    def process_result_value(self, value: bytes | None, dialect: Any) -> Any:
+        """Convert compressed bytes back to numpy array."""
+        if value is None:
+            return None
+
+        try:
+            # Try to unpack as blosc2-compressed numpy array first
+            return blosc2.unpack_array2(value)
+
+        except Exception:
+            return cloudpickle.loads(value)
 
 
 def _is_builtin(obj: Any) -> bool:
@@ -1145,7 +1188,7 @@ class SQLGraph(BaseGraph):
             return sa.Enum(default_value.__class__)
 
         elif default_value is None or not _is_builtin(default_value):
-            return sa.PickleType
+            return MaybeBloscBytes
 
         else:
             raise ValueError(f"Unsupported default value type: {type(default_value)}")

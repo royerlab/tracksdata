@@ -1,10 +1,11 @@
 import numpy as np
+import polars as pl
 import pytest
 from skimage.measure._regionprops import RegionProperties
 
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph import RustWorkXGraph
-from tracksdata.nodes import Mask, RegionPropsNodes
+from tracksdata.nodes import RegionPropsNodes
 from tracksdata.options import get_options, options_context
 
 
@@ -64,6 +65,7 @@ def test_regionprops_add_nodes_2d() -> None:
     assert "x" in nodes_df.columns
     assert "area" in nodes_df.columns
     assert DEFAULT_ATTR_KEYS.MASK in nodes_df.columns
+    assert DEFAULT_ATTR_KEYS.BBOX in nodes_df.columns
 
     # Check that all nodes have t=0
     assert all(nodes_df[DEFAULT_ATTR_KEYS.T] == 0)
@@ -98,6 +100,7 @@ def test_regionprops_add_nodes_3d() -> None:
     assert "x" in nodes_df.columns
     assert "area" in nodes_df.columns
     assert DEFAULT_ATTR_KEYS.MASK in nodes_df.columns
+    assert DEFAULT_ATTR_KEYS.BBOX in nodes_df.columns
 
 
 def test_regionprops_add_nodes_with_intensity() -> None:
@@ -231,12 +234,10 @@ def test_regionprops_mask_creation() -> None:
     # Check that masks were created
     nodes_df = graph.node_attrs()
     masks = nodes_df[DEFAULT_ATTR_KEYS.MASK]
+    bboxes = nodes_df[DEFAULT_ATTR_KEYS.BBOX]
 
-    # All masks should be Mask objects
-    for mask in masks:
-        assert isinstance(mask, Mask)
-        assert mask._mask is not None
-        assert mask._bbox is not None
+    assert isinstance(masks.dtype, pl.Object)
+    assert isinstance(bboxes.dtype, pl.List)
 
 
 def test_regionprops_spacing() -> None:

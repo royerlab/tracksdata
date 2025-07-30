@@ -4,6 +4,10 @@ from tracksdata.attrs import Attr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph import RustWorkXGraph
 from tracksdata.solvers import NearestNeighborsSolver
+from tracksdata.utils._test_utils import (
+    setup_edge_distance_attr,
+    setup_spatial_attrs_2d,
+)
 
 
 def test_nearest_neighbors_solver_init_default() -> None:
@@ -47,8 +51,7 @@ def test_nearest_neighbors_solver_solve_no_edges() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
+    setup_spatial_attrs_2d(graph)
 
     # Add some nodes
     graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
@@ -66,9 +69,8 @@ def test_nearest_neighbors_solver_solve_simple_case() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    setup_spatial_attrs_2d(graph)
+    setup_edge_distance_attr(graph)
 
     # Add nodes
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
@@ -102,9 +104,8 @@ def test_nearest_neighbors_solver_solve_max_children_constraint() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    setup_spatial_attrs_2d(graph)
+    setup_edge_distance_attr(graph)
 
     # Add nodes
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})  # Parent
@@ -142,9 +143,8 @@ def test_nearest_neighbors_solver_solve_one_parent_constraint() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    setup_spatial_attrs_2d(graph)
+    setup_edge_distance_attr(graph)
 
     # Add nodes
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})  # Parent 1
@@ -174,8 +174,7 @@ def test_nearest_neighbors_solver_solve_custom_weight_expr() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
+    setup_spatial_attrs_2d(graph)
     graph.add_edge_attr_key("custom_weight", 0.0)
 
     # Add nodes
@@ -207,8 +206,7 @@ def test_nearest_neighbors_solver_solve_complex_expression() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
+    setup_spatial_attrs_2d(graph)
     graph.add_edge_attr_key("distance", 0.0)
     graph.add_edge_attr_key("confidence", 0.0)
 
@@ -242,9 +240,8 @@ def test_nearest_neighbors_solver_solve_custom_output_key() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    setup_spatial_attrs_2d(graph)
+    setup_edge_distance_attr(graph)
 
     # Add nodes and edges
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
@@ -270,9 +267,8 @@ def test_nearest_neighbors_solver_solve_with_overlaps() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    setup_spatial_attrs_2d(graph)
+    setup_edge_distance_attr(graph)
 
     # Add nodes - overlapping pair at time t=1
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
@@ -325,9 +321,8 @@ def test_nearest_neighbors_solver_solve_large_graph() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    setup_spatial_attrs_2d(graph)
+    setup_edge_distance_attr(graph)
 
     # Create a more complex graph structure
     # Time 0: nodes 0, 1

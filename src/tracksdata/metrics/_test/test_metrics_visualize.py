@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph import RustWorkXGraph
 from tracksdata.metrics._visualize import visualize_matches
 from tracksdata.nodes import MaskDiskAttrs
@@ -60,7 +59,6 @@ def test_visualize_matches(make_napari_viewer: Callable[[], "napari.Viewer"]) ->
     input_mask_attrs = MaskDiskAttrs(
         radius=5,
         image_shape=image_shape,
-        output_key=DEFAULT_ATTR_KEYS.MASK,
     )
     input_mask_attrs.add_node_attrs(input_graph)
 
@@ -68,7 +66,6 @@ def test_visualize_matches(make_napari_viewer: Callable[[], "napari.Viewer"]) ->
     ref_mask_attrs = MaskDiskAttrs(
         radius=3,
         image_shape=image_shape,
-        output_key=DEFAULT_ATTR_KEYS.MASK,
     )
     ref_mask_attrs.add_node_attrs(ref_graph)
 

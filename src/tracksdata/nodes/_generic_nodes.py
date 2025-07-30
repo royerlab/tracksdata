@@ -46,16 +46,18 @@ class GenericFuncNodeAttrs(BaseNodeAttrsOperator):
     graph = ...
 
 
-    def intensity_median_times_t(image: NDArray, mask: Mask, t: int) -> float:
-        cropped_frame = mask.crop(image)
-        valid_pixels = cropped_frame[mask.mask]
+    def intensity_median_times_t(image: NDArray, mask: NDArray, bbox: NDArray, t: int) -> float:
+        from tracksdata.functional._mask_utils import crop_with_bbox_and_mask
+
+        cropped_frame = crop_with_bbox_and_mask(image, bbox)
+        valid_pixels = cropped_frame[mask]
         return np.median(valid_pixels) * t
 
 
     crop_attrs = GenericFuncNodeAttrs(
         func=intensity_median,
         output_key="intensity_median",
-        attr_keys=["mask", "t"],
+        attr_keys=["mask", "bbox", "t"],
     )
 
     crop_attrs.add_node_attrs(graph, frames=video)
@@ -68,11 +70,13 @@ class GenericFuncNodeAttrs(BaseNodeAttrsOperator):
     graph = ...
 
 
-    def intensity_median_times_t(image: NDArray, masks: list[Mask], t: list[int]) -> list[float]:
+    def intensity_median_times_t(image: NDArray, mask: list[NDArray], bbox: list[NDArray], t: list[int]) -> list[float]:
+        from tracksdata.functional._mask_utils import crop_with_bbox_and_mask
+
         results = []
-        for i in range(len(masks)):
-            cropped_frame = masks[i].crop(image)
-            valid_pixels = cropped_frame[masks[i].mask]
+        for i in range(len(mask)):
+            cropped_frame = crop_with_bbox_and_mask(image, bbox[i])
+            valid_pixels = cropped_frame[mask[i]]
             value = np.median(valid_pixels) * t[i]
             results.append(value)
         return results
@@ -81,7 +85,7 @@ class GenericFuncNodeAttrs(BaseNodeAttrsOperator):
     crop_attrs = GenericFuncNodeAttrs(
         func=intensity_median,
         output_key="intensity_median",
-        attr_keys=["mask", "t"],
+        attr_keys=["mask", "bbox", "t"],
     )
 
     crop_attrs.add_node_attrs(graph, frames=video)
@@ -176,7 +180,7 @@ class GenericFuncNodeAttrs(BaseNodeAttrsOperator):
                 results.extend(batch_results)
 
         else:
-            for data_dict in node_attrs.rows(named=True):
+            for data_dict in node_attrs.iter_rows(named=True):
                 result = self.func(*args, **data_dict)
                 results.append(result)
 

@@ -1,36 +1,12 @@
 import numpy as np
 
-from tracksdata.nodes._mask import Mask
-
-
-def test_mask_init() -> None:
-    """Test Mask initialization."""
-    mask_array = np.array([[True, False], [False, True]], dtype=bool)
-    bbox = np.array([0, 0, 2, 2])
-
-    mask = Mask(mask_array, bbox)
-    assert np.array_equal(mask._mask, mask_array)
-    assert np.array_equal(mask._bbox, bbox)
-
-
-def test_mask_getstate_setstate() -> None:
-    """Test Mask serialization and deserialization."""
-    mask_array = np.array([[True, False], [False, True]], dtype=bool)
-    bbox = np.array([0, 0, 2, 2])
-
-    mask = Mask(mask_array, bbox)
-
-    # Test serialization
-    state = mask.__getstate__()
-    assert "_mask" in state
-    assert np.array_equal(state["_bbox"], bbox)
-
-    # Test deserialization
-    new_mask = Mask.__new__(Mask)
-    new_mask.__setstate__(state)
-    # After deserialization, the mask should be restored correctly
-    assert np.array_equal(new_mask._mask, mask_array)
-    assert np.array_equal(new_mask._bbox, bbox)
+from tracksdata.functional._mask import (
+    crop_image_with_bbox,
+    mask_indices,
+    mask_intersection,
+    mask_iou,
+    paint_mask_to_buffer,
+)
 
 
 def test_mask_indices_no_offset() -> None:
@@ -38,8 +14,7 @@ def test_mask_indices_no_offset() -> None:
     mask_array = np.array([[True, False], [False, True]], dtype=bool)
     bbox = np.array([1, 2, 3, 4])  # min_y, min_x, max_y, max_x
 
-    mask = Mask(mask_array, bbox)
-    indices = mask.mask_indices()
+    indices = mask_indices(bbox, mask_array)
 
     # True values are at positions (0,0) and (1,1) in the mask
     # With bbox offset [1, 2]: (0+1, 0+2) and (1+1, 1+2) = (1, 2) and (2, 3)
@@ -56,8 +31,7 @@ def test_mask_indices_with_scalar_offset() -> None:
     mask_array = np.array([[True, False], [False, True]], dtype=bool)
     bbox = np.array([1, 2, 3, 4])
 
-    mask = Mask(mask_array, bbox)
-    indices = mask.mask_indices(offset=5)
+    indices = mask_indices(bbox, mask_array, offset=5)
 
     # True values at (0,0) and (1,1) in mask
     # With bbox [1, 2] and offset 5: (0+1+5, 0+2+5) and (1+1+5, 1+2+5) = (6, 7) and (7, 8)
@@ -74,9 +48,8 @@ def test_mask_indices_with_array_offset() -> None:
     mask_array = np.array([[True, False], [False, True]], dtype=bool)
     bbox = np.array([1, 2, 3, 4])
 
-    mask = Mask(mask_array, bbox)
     offset = np.array([3, 4])
-    indices = mask.mask_indices(offset=offset)
+    indices = mask_indices(bbox, mask_array, offset=offset)
 
     # True values at (0,0) and (1,1) in mask
     # With bbox [1, 2] and offset [3, 4]: (0+1+3, 0+2+4) and (1+1+3, 1+2+4) = (4, 6) and (5, 7)
@@ -93,8 +66,7 @@ def test_mask_indices_3d() -> None:
     mask_array = np.array([[[True, False], [False, False]], [[False, False], [False, True]]], dtype=bool)
     bbox = np.array([1, 2, 3, 3, 4, 5])  # min_z, min_y, min_x, max_z, max_y, max_x
 
-    mask = Mask(mask_array, bbox)
-    indices = mask.mask_indices()
+    indices = mask_indices(bbox, mask_array)
 
     # True values at (0,0,0) and (1,1,1) in mask
     # With bbox offset [1,2,3]: (0+1, 0+2, 0+3) and (1+1, 1+2, 1+3) = (1,2,3) and (2,3,4)
@@ -108,16 +80,14 @@ def test_mask_indices_3d() -> None:
     assert np.array_equal(indices[2], expected_x)
 
 
-def test_paint_buffer() -> None:
-    """Test paint_buffer method."""
+def test_paint_mask_to_buffer() -> None:
+    """Test paint_mask_to_buffer function."""
     mask_array = np.array([[True, False], [False, True]], dtype=bool)
     bbox = np.array([0, 0, 2, 2])
 
-    mask = Mask(mask_array, bbox)
-
     # Create a buffer to paint on
     buffer = np.zeros((4, 4), dtype=float)
-    mask.paint_buffer(buffer, value=5.0)
+    paint_mask_to_buffer(buffer, bbox, mask_array, value=5.0)
 
     # Check that the correct positions are painted
     expected_buffer = np.zeros((4, 4), dtype=float)
@@ -127,17 +97,15 @@ def test_paint_buffer() -> None:
     assert np.array_equal(buffer, expected_buffer)
 
 
-def test_paint_buffer_with_offset() -> None:
-    """Test paint_buffer method with offset."""
+def test_paint_mask_to_buffer_with_offset() -> None:
+    """Test paint_mask_to_buffer function with offset."""
     mask_array = np.array([[True, False], [False, True]], dtype=bool)
     bbox = np.array([0, 0, 2, 2])
-
-    mask = Mask(mask_array, bbox)
 
     # Create a buffer to paint on
     buffer = np.zeros((6, 6), dtype=float)
     offset = np.array([2, 3])
-    mask.paint_buffer(buffer, value=7.0, offset=offset)
+    paint_mask_to_buffer(buffer, bbox, mask_array, value=7.0, offset=offset)
 
     # Check that the correct positions are painted with offset
     expected_buffer = np.zeros((6, 6), dtype=float)
@@ -148,17 +116,15 @@ def test_paint_buffer_with_offset() -> None:
 
 
 def test_mask_iou() -> None:
-    """Test IoU calculation between masks."""
+    """Test IoU calculation between mask/bbox pairs."""
     # Create two overlapping masks
     mask1_array = np.array([[True, True], [True, False]], dtype=bool)
     bbox1 = np.array([0, 0, 2, 2])
-    mask1 = Mask(mask1_array, bbox1)
 
     mask2_array = np.array([[True, False], [True, True]], dtype=bool)
     bbox2 = np.array([0, 0, 2, 2])
-    mask2 = Mask(mask2_array, bbox2)
 
-    iou = mask1.iou(mask2)
+    iou = mask_iou(bbox1, mask1_array, bbox2, mask2_array)
 
     # Intersection: positions (0,0) and (1,0) = 2 pixels
     # Union: 3 + 3 - 2 = 4 pixels
@@ -171,13 +137,11 @@ def test_mask_iou_no_overlap() -> None:
     """Test IoU calculation with non-overlapping masks."""
     mask1_array = np.array([[True, False], [False, False]], dtype=bool)
     bbox1 = np.array([0, 0, 2, 2])
-    mask1 = Mask(mask1_array, bbox1)
 
     mask2_array = np.array([[False, False], [False, True]], dtype=bool)
     bbox2 = np.array([0, 0, 2, 2])
-    mask2 = Mask(mask2_array, bbox2)
 
-    iou = mask1.iou(mask2)
+    iou = mask_iou(bbox1, mask1_array, bbox2, mask2_array)
     assert iou == 0.0
 
 
@@ -186,11 +150,24 @@ def test_mask_iou_identical() -> None:
     mask_array = np.array([[True, False], [False, True]], dtype=bool)
     bbox = np.array([0, 0, 2, 2])
 
-    mask1 = Mask(mask_array, bbox)
-    mask2 = Mask(mask_array.copy(), bbox.copy())
-
-    iou = mask1.iou(mask2)
+    iou = mask_iou(bbox, mask_array, bbox.copy(), mask_array.copy())
     assert iou == 1.0
+
+
+def test_mask_intersection() -> None:
+    """Test intersection calculation between mask/bbox pairs."""
+    # Create two overlapping masks
+    mask1_array = np.array([[True, True], [True, False]], dtype=bool)
+    bbox1 = np.array([0, 0, 2, 2])
+
+    mask2_array = np.array([[True, False], [True, True]], dtype=bool)
+    bbox2 = np.array([0, 0, 2, 2])
+
+    intersection = mask_intersection(bbox1, mask1_array, bbox2, mask2_array)
+
+    # Intersection: positions (0,0) and (1,0) = 2 pixels
+    expected_intersection = 2.0
+    assert abs(intersection - expected_intersection) < 1e-6
 
 
 def test_mask_empty() -> None:
@@ -198,8 +175,7 @@ def test_mask_empty() -> None:
     mask_array = np.array([[False, False], [False, False]], dtype=bool)
     bbox = np.array([0, 0, 2, 2])
 
-    mask = Mask(mask_array, bbox)
-    indices = mask.mask_indices()
+    indices = mask_indices(bbox, mask_array)
 
     # Should return empty arrays
     assert len(indices) == 2
@@ -212,8 +188,7 @@ def test_mask_all_true() -> None:
     mask_array = np.array([[True, True], [True, True]], dtype=bool)
     bbox = np.array([1, 1, 3, 3])
 
-    mask = Mask(mask_array, bbox)
-    indices = mask.mask_indices()
+    indices = mask_indices(bbox, mask_array)
 
     # Should return all positions
     expected_y = np.array([1, 1, 2, 2])
@@ -224,70 +199,23 @@ def test_mask_all_true() -> None:
     assert np.array_equal(indices[1], expected_x)
 
 
-def test_mask_repr() -> None:
-    """Test mask representation."""
-    mask_array = np.array([[True, False], [False, True]], dtype=bool)
-    bbox = np.array([0, 0, 2, 2])
-
-    mask = Mask(mask_array, bbox)
-    assert repr(mask) == "Mask(bbox=[0:2, 0:2])"
-
-
-def test_mask_crop() -> None:
-    """Test mask cropping."""
-    mask_array = np.array([[True, False], [False, True]], dtype=bool)
+def test_crop_image_with_bbox() -> None:
+    """Test image cropping with bbox."""
     bbox = np.array([1, 1, 3, 3])
-
-    mask = Mask(mask_array, bbox)
     image = np.array([[0, 0, 0, 0], [0, 1, 2, 0], [0, 3, 4, 0], [0, 0, 0, 0]])
-    cropped_image = mask.crop(image)
-    assert np.array_equal(cropped_image, image[1:3, 1:3])
+
+    cropped_image = crop_image_with_bbox(image, bbox)
+    expected_crop = image[1:3, 1:3]
+
+    assert np.array_equal(cropped_image, expected_crop)
 
 
-def test_mask_crop_with_shape() -> None:
-    """Test mask cropping with shape."""
-    mask_array = np.array([[True, False], [False, True]], dtype=bool)
+def test_crop_image_with_bbox_and_shape() -> None:
+    """Test image cropping with bbox and specific shape."""
     bbox = np.array([1, 1, 3, 3])
-
-    mask = Mask(mask_array, bbox)
     image = np.array([[0, 0, 0, 0], [0, 1, 2, 0], [0, 3, 4, 0], [0, 0, 0, 0]])
-    cropped_image = mask.crop(image, shape=(2, 4))
-    assert np.array_equal(cropped_image, image[1:3, 0:4])
 
+    cropped_image = crop_image_with_bbox(image, bbox, shape=(2, 4))
+    expected_crop = image[1:3, 0:4]
 
-def test_mask_from_coordinates_2d_basic() -> None:
-    """Test 2D mask creation and bbox without cropping."""
-    center = np.asarray([5, 5])
-    radius = 2
-    mask = Mask.from_coordinates(center, radius)
-    # Should be a disk of radius 2, shape (5,5), centered at (5,5)
-    assert mask.mask.shape == (5, 5)
-    assert mask.mask[2, 2]  # center pixel is True
-    np.testing.assert_array_equal(mask.bbox, [3, 3, 8, 8])
-
-
-def test_mask_from_coordinates_3d_basic() -> None:
-    """Test 3D mask creation and bbox without cropping."""
-    center = np.asarray([4, 5, 6])
-    radius = 1
-    mask = Mask.from_coordinates(center, radius)
-    # Should be a ball of radius 1, shape (3,3,3), centered at (4,5,6)
-    assert mask.mask.shape == (3, 3, 3)
-    assert mask.mask[1, 1, 1]  # center voxel is True
-    np.testing.assert_array_equal(mask.bbox, [3, 4, 5, 6, 7, 8])
-
-
-def test_mask_from_coordinates_cropping() -> None:
-    """Test cropping when mask falls outside the image boundary."""
-    center = np.asarray([0, 0])
-    radius = 5
-    image_shape = (4, 3)
-
-    mask = Mask.from_coordinates(center, radius, image_shape=image_shape)
-
-    # Mask shape should match the bbox size
-    expected_shape = (4, 3)
-    assert mask.mask.shape == expected_shape
-
-    # Mask should be cropped to fit within image bounds
-    np.testing.assert_array_equal(mask.bbox, [0, 0, 4, 3])
+    assert np.array_equal(cropped_image, expected_crop)

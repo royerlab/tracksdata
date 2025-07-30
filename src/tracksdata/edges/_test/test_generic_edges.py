@@ -3,6 +3,11 @@ import numpy as np
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.edges import GenericFuncEdgeAttrs
 from tracksdata.graph import RustWorkXGraph
+from tracksdata.utils._test_utils import (
+    setup_custom_node_attr,
+    setup_edge_distance_attr,
+    setup_spatial_attrs_2d,
+)
 
 
 def _scalar_distance_func(source_val: float, target_val: float) -> float:
@@ -41,8 +46,8 @@ def test_generic_edges_add_weights_single_attr_key() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    setup_custom_node_attr(graph, "x", 0.0)
+    setup_edge_distance_attr(graph)
 
     # Add nodes at time 0
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 1.0})
@@ -78,9 +83,8 @@ def test_generic_edges_add_weights_multiple_attr_keys() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    setup_spatial_attrs_2d(graph)
+    setup_edge_distance_attr(graph)
 
     # Add nodes at time 0
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
@@ -112,8 +116,8 @@ def test_generic_edges_add_weights_all_time_points() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    setup_custom_node_attr(graph, "x", 0.0)
+    setup_edge_distance_attr(graph)
 
     # Add nodes at different time points
     node0_t0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 1.0})
@@ -142,7 +146,7 @@ def test_generic_edges_no_edges_at_time_point() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
+    setup_custom_node_attr(graph, "x", 0.0)
 
     # Add nodes but no edges at time 0
     graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 1.0})
@@ -163,8 +167,8 @@ def test_generic_edges_creates_output_key() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    setup_custom_node_attr(graph, "x", 0.0)
+    setup_edge_distance_attr(graph)
 
     # Add nodes and edge
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 1.0})
@@ -191,9 +195,9 @@ def test_generic_edges_dict_input_function() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("value", 0.0)
-    graph.add_node_attr_key("weight", 0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    setup_custom_node_attr(graph, "value", 0.0)
+    setup_custom_node_attr(graph, "weight", 0.0)
+    setup_edge_distance_attr(graph)
 
     # Add nodes
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "value": 10.0, "weight": 2.0})
