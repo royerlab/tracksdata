@@ -5,7 +5,7 @@ import bidict
 import polars as pl
 import rustworkx as rx
 
-from tracksdata.attrs import AttrComparison
+from tracksdata.attrs import AttrComparison, AttrKey, EdgeAttrKey, NodeAttrKey
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.functional._rx import _assign_track_ids
 from tracksdata.graph._base_graph import BaseGraph
@@ -222,24 +222,25 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
     def edge_attr_keys(self) -> list[str]:
         return self._root.edge_attr_keys
 
-    def add_node_attr_key(self, key: str, default_value: Any) -> None:
-        self._root.add_node_attr_key(key, default_value)
-        # because attributes are passed by reference, we need don't need if both are rustworkx graphs
-        if not self._is_root_rx_graph:
-            if self.sync:
-                rx_graph = self.rx_graph
-                for node_id in rx_graph.node_indices():
-                    rx_graph[node_id][key] = default_value
-            else:
-                self._out_of_sync = True
+    def add_new_attr(self, key: AttrKey) -> None:
+        # TODO: docs
+        self._root.add_new_attr(key)
 
-    def add_edge_attr_key(self, key: str, default_value: Any) -> None:
-        self._root.add_edge_attr_key(key, default_value)
         # because attributes are passed by reference, we need don't need if both are rustworkx graphs
         if not self._is_root_rx_graph:
             if self.sync:
-                for _, _, edge_attr in self.rx_graph.weighted_edge_list():
-                    edge_attr[key] = default_value
+
+                rx_graph = self.rx_graph
+                if isinstance(key, NodeAttrKey):
+                    for node_id in rx_graph.node_indices():
+                        rx_graph[node_id][key] = key.default_value
+
+                elif isinstance(key, EdgeAttrKey):
+                    for _, _, edge_attr in rx_graph.weighted_edge_list():
+                        edge_attr[key] = key.default_value
+                else:
+                    AttrKey.raise_invalid_type_error(key)
+
             else:
                 self._out_of_sync = True
 
