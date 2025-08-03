@@ -1376,3 +1376,25 @@ def test_tracklet_graph_missing_track_id_key(graph_backend: BaseGraph) -> None:
     """Test tracklet_graph raises error when track_id_key doesn't exist."""
     with pytest.raises(ValueError, match="Track id key 'track_id' not found in graph"):
         graph_backend.tracklet_graph()
+
+
+def test_nodes_interface(graph_backend: BaseGraph) -> None:
+    graph_backend.add_node_attr_key("x", 0)
+
+    # Simple test case: just check that the method accepts the parameter
+    # and filters out nodes properly when there are no edges
+    node1 = graph_backend.add_node({"t": 0, "x": 1})
+    node2 = graph_backend.add_node({"t": 1, "x": 0})
+    node3 = graph_backend.add_node({"t": 2, "x": -1})
+
+    assert graph_backend[node1]["x"] == 1
+    assert graph_backend[node2]["x"] == 0
+    assert graph_backend[node3]["x"] == -1
+
+    graph_backend.add_node_attr_key("y", -1)
+
+    graph_backend[node2]["y"] = 5
+
+    assert graph_backend[node1]["y"] == -1
+    assert graph_backend[node2]["y"] == 5
+    assert graph_backend[node3]["y"] == -1

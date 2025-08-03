@@ -1087,3 +1087,30 @@ class BaseGraph(abc.ABC):
         )
 
         return graph
+
+    def __getitem__(self, node_id: int) -> "NodeInterface":
+        # TODO: docs
+        # Teun, would it be more appropriate to use something else as `nodes`?
+        if not isinstance(node_id, int):
+            raise ValueError(f"graph index must be a integer, found '{node_id}' of type {type(node_id)}")
+        return NodeInterface(self, node_id)
+
+
+class NodeInterface:
+    # TODO: add docs
+    def __init__(self, graph: BaseGraph, node_id: int):
+        self._graph = graph
+        self._node_id = node_id
+
+    def __getitem__(self, key: str) -> Any:
+        return self._graph.filter(node_ids=[self._node_id]).node_attrs(attr_keys=[key])[key].item()
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        return self._graph.update_node_attrs(attrs={key: value}, node_ids=[self._node_id])
+
+    def __str__(self) -> str:
+        node_attr = self._graph.filter(node_ids=[self._node_id]).node_attrs()
+        return str(node_attr)
+
+    def __repr__(self) -> str:
+        return str(self)
