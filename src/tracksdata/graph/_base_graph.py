@@ -1101,21 +1101,6 @@ class BaseGraph(abc.ABC):
         -------
         NodeInterface
             A node interface for the given node id.
-
-        Examples
-        --------
-        ```python
-        # to get 't' attribute of node 1
-        graph[1]["t"]
-        # to set 'x' attribute of node 1 to 5
-        graph[1]["x"] = 5
-        # to get all attributes of node 1
-        graph[1].to_dict()
-        ```
-
-        See Also
-        --------
-        [NodeInterface][tracksdata.graph.NodeInterface] The node interface class.
         """
 
         if not isinstance(node_id, int):
@@ -1133,17 +1118,6 @@ class NodeInterface:
         The graph to interact with.
     node_id : int
         The id of the node to interact with.
-
-    Examples
-    --------
-    ```python
-    # to get 't' attribute of node 1
-    graph[1]["t"]
-    # to set 'x' attribute of node 1 to 5
-    graph[1]["x"] = 5
-    # to get all attributes of node 1
-    graph[1].to_dict()
-    ```
 
     See Also
     --------
