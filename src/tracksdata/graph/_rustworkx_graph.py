@@ -1013,6 +1013,7 @@ class RustWorkXGraph(BaseGraph):
         self,
         output_key: str = DEFAULT_ATTR_KEYS.TRACK_ID,
         reset: bool = True,
+        track_id_offset: int = 1,
     ) -> rx.PyDiGraph:
         """
         Compute and assign track ids to nodes.
@@ -1023,6 +1024,8 @@ class RustWorkXGraph(BaseGraph):
             The key of the output track id attribute.
         reset : bool
             Whether to reset the track ids of the graph. If True, the track ids will be reset to -1.
+        track_id_offset : int
+            The starting track id, useful when assigning track ids to a subgraph.
 
         Returns
         -------
@@ -1030,7 +1033,7 @@ class RustWorkXGraph(BaseGraph):
             A compressed graph (parent -> child) with track ids lineage relationships.
         """
         try:
-            node_ids, track_ids, tracks_graph = _assign_track_ids(self.rx_graph)
+            node_ids, track_ids, tracks_graph = _assign_track_ids(self.rx_graph, track_id_offset)
         except RuntimeError as e:
             raise RuntimeError(
                 "Are you sure this graph is a valid lineage graph?\n"
