@@ -8,9 +8,10 @@ from typing import TYPE_CHECKING, Any, Literal, TypeVar, overload
 import numpy as np
 import polars as pl
 import rustworkx as rx
+from deprecated import deprecated
 from numpy.typing import ArrayLike
 
-from tracksdata.attrs import AttrComparison, NodeAttr
+from tracksdata.attrs import AttrComparison, NodeAttr, AttrKey
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.utils._logging import LOG
 from tracksdata.utils._multiprocessing import multiprocessing_apply
@@ -467,13 +468,21 @@ class BaseGraph(abc.ABC):
         """
 
     @abc.abstractmethod
+    def add_new_attr(self, key: AttrKey) -> None:
+        """
+        Add a new edge or node attribute key to the graph.
+
+        TODO: finish docs
+        """
+
+    @deprecated(action="error", reason="Use `add_new_attr(td.NodeAttrKey(...))")
     def add_node_attr_key(self, key: str, default_value: Any) -> None:
         """
         Add a new attribute key to the graph.
         All existing nodes will have the default value for the new attribute key.
         """
 
-    @abc.abstractmethod
+    @deprecated(action="error", reason="Use `add_new_attr(td.NodeAttrKey(...))")
     def add_edge_attr_key(self, key: str, default_value: Any) -> None:
         """
         Add a new attribute key to the graph.

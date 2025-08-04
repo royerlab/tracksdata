@@ -22,7 +22,7 @@ import functools
 import math
 import operator
 from collections.abc import Callable, Sequence
-from typing import Any, Union, overload
+from typing import Any, Union, overload, Type
 
 import numpy as np
 import polars as pl
@@ -655,7 +655,7 @@ def attr_comps_to_strs(attr_comps: Sequence[AttrComparison]) -> list[str]:
 def polars_reduce_attr_comps(
     df: pl.DataFrame,
     attr_comps: Sequence[AttrComparison],
-    reduce_op: Callable[[Expr, Expr], Expr],
+    reduce_op: Callable[[pl.Series, pl.Series], pl.Series],
 ) -> pl.Expr:
     """
     Reduce a list of attribute comparisons into a single polars expression.
@@ -666,7 +666,7 @@ def polars_reduce_attr_comps(
         The dataframe to reduce the attribute comparisons on.
     attr_comps : Sequence[AttrComparison]
         The attribute comparisons to reduce.
-    reduce_op : Callable[[Expr, Expr], Expr]
+    reduce_op : Callable[[pl.Series, pl.Series], pl.Series]
         The operation to reduce the attribute comparisons with.
 
     Returns
@@ -679,3 +679,49 @@ def polars_reduce_attr_comps(
         raise ValueError("No attribute comparisons provided.")
 
     return pl.reduce(reduce_op, [attr_comp.op(df[str(attr_comp.column)], attr_comp.other) for attr_comp in attr_comps])
+
+
+class AttrKey:
+    # TODO: docs
+    def __init__(
+        self,
+        name: str,
+        dtype: Type,
+        default_value: Any,
+    ):
+        self.name = name
+        self.dtype = self._validate_dtype(dtype)
+        self.default_value = default_value
+   
+    @staticmethod
+    def _validate_dtype(dtype: Type) -> Type:
+        # TODO
+        return dtype
+    
+    @staticmethod
+    def raise_invalid_type_error(invalid_key: Any) -> None:
+        raise ValueError(
+            f"Expected `EdgeAttrKey` or `NodeAttrKey`, got object {invalid_key} of type {type(invalid_key)}."
+        )
+
+
+class NodeAttrKey(AttrKey):
+    """
+    Wrapper of [AttrKey][tracksdata.attrs.AttrKey] to represent nodes' attribute key
+
+    See Also
+    --------
+    [AttrKey][tracksdata.attrs.AttrKey]:
+        The base class for all attribute keys.
+    """
+
+
+class EdgeAttrKey(AttrKey):
+    """
+    Wrapper of [AttrKey][tracksdata.attrs.AttrKey] to represent edges' attribute key
+
+    See Also
+    --------
+    [AttrKey][tracksdata.attrs.AttrKey]:
+        The base class for all attribute keys.
+    """

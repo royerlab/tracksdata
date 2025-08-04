@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from sqlalchemy.orm import DeclarativeBase, Session, aliased, load_only
 from sqlalchemy.sql.type_api import TypeEngine
 
-from tracksdata.attrs import AttrComparison, split_attr_comps
+from tracksdata.attrs import AttrComparison, AttrKey, EdgeAttrKey, NodeAttrKey, split_attr_comps
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.graph.filters._base_filter import BaseFilter, cache_method
@@ -1153,22 +1153,22 @@ class SQLGraph(BaseGraph):
     def _add_new_column(
         self,
         table_class: type[DeclarativeBase],
-        key: str,
-        default_value: Any,
+        key: AttrKey
     ) -> None:
-        sa_type = self._sqlalchemy_type_inference(default_value)
+        # TODO: improved type inference from `key.dtype`
+        sa_type = self._sqlalchemy_type_inference(key.default_value)
 
         if sa_type == sa.Boolean:
-            self._boolean_columns[table_class.__tablename__].append(key)
+            self._boolean_columns[table_class.__tablename__].append(key.name)
 
-        sa_column = sa.Column(key, sa_type, default=default_value)
+        sa_column = sa.Column(key.name, sa_type, default=key.default_value)
 
         str_dialect_type = sa_column.type.compile(dialect=self._engine.dialect)
 
         add_column_stmt = sa.DDL(
             f"ALTER TABLE {table_class.__table__} ADD "
             f"COLUMN {sa_column.name} {str_dialect_type} "
-            f"DEFAULT {default_value}",
+            f"DEFAULT {key.default_value}",
         )
         LOG.info("add %s column statement:\n'%s'", table_class.__table__, add_column_stmt)
 
@@ -1178,20 +1178,24 @@ class SQLGraph(BaseGraph):
             session.commit()
 
         # register the new column in the Node class
-        setattr(table_class, key, sa_column)
+        setattr(table_class, key.name, sa_column)
         table_class.__table__.append_column(sa_column)
-
-    def add_node_attr_key(self, key: str, default_value: Any) -> None:
-        if key in self.node_attr_keys:
-            raise ValueError(f"Node attribute key {key} already exists")
-
-        self._add_new_column(self.Node, key, default_value)
-
-    def add_edge_attr_key(self, key: str, default_value: Any) -> None:
-        if key in self.edge_attr_keys:
-            raise ValueError(f"Edge attribute key {key} already exists")
-
-        self._add_new_column(self.Edge, key, default_value)
+    
+    def add_new_attr(self, key: AttrKey) -> None:
+        # TODO: docs
+        if isinstance(key, EdgeAttrKey):
+            existing_keys = self.edge_attr_keys
+            table_class = self.Edge
+        elif isinstance(key, NodeAttrKey):
+            existing_keys = self.node_attr_keys
+            table_class = self.Node
+        else:
+            AttrKey.raise_invalid_type_error(key)
+       
+        if key in existing_keys:
+            raise ValueError(f"Attribute key {key} already exists")
+        
+        self._add_new_column(table_class, key)
 
     @property
     def num_edges(self) -> int:
