@@ -1089,15 +1089,67 @@ class BaseGraph(abc.ABC):
         return graph
 
     def __getitem__(self, node_id: int) -> "NodeInterface":
-        # TODO: docs
-        # Teun, would it be more appropriate to use something else as `nodes`?
+        """
+        Helper method to interact with a single node.
+
+        Parameters
+        ----------
+        node_id : int
+            The id of the node to interact with.
+
+        Returns
+        -------
+        NodeInterface
+            A node interface for the given node id.
+
+        Examples
+        --------
+        ```python
+        # to get 't' attribute of node 1
+        graph[1]["t"]
+        # to set 'x' attribute of node 1 to 5
+        graph[1]["x"] = 5
+        # to get all attributes of node 1
+        graph[1].to_dict()
+        ```
+
+        See Also
+        --------
+        [NodeInterface][tracksdata.graph.NodeInterface] The node interface class.
+        """
+
         if not isinstance(node_id, int):
             raise ValueError(f"graph index must be a integer, found '{node_id}' of type {type(node_id)}")
         return NodeInterface(self, node_id)
 
 
 class NodeInterface:
-    # TODO: add docs
+    """
+    Helper class to interact with a single node.
+
+    Parameters
+    ----------
+    graph : BaseGraph
+        The graph to interact with.
+    node_id : int
+        The id of the node to interact with.
+
+    Examples
+    --------
+    ```python
+    # to get 't' attribute of node 1
+    graph[1]["t"]
+    # to set 'x' attribute of node 1 to 5
+    graph[1]["x"] = 5
+    # to get all attributes of node 1
+    graph[1].to_dict()
+    ```
+
+    See Also
+    --------
+    [BaseGraph][tracksdata.graph.BaseGraph] The base graph class.
+    """
+
     def __init__(self, graph: BaseGraph, node_id: int):
         self._graph = graph
         self._node_id = node_id
@@ -1114,3 +1166,12 @@ class NodeInterface:
 
     def __repr__(self) -> str:
         return str(self)
+
+    def to_dict(self) -> dict[str, Any]:
+        data = (
+            self._graph.filter(node_ids=[self._node_id])
+            .node_attrs()
+            .drop(DEFAULT_ATTR_KEYS.NODE_ID)
+            .rows(named=True)[0]
+        )
+        return data

@@ -1398,3 +1398,7 @@ def test_nodes_interface(graph_backend: BaseGraph) -> None:
     assert graph_backend[node1]["y"] == -1
     assert graph_backend[node2]["y"] == 5
     assert graph_backend[node3]["y"] == -1
+
+    assert graph_backend[node1].to_dict() == {"t": 0, "x": 1, "y": -1}
+    assert graph_backend[node2].to_dict() == {"t": 1, "x": 0, "y": 5}
+    assert graph_backend[node3].to_dict() == {"t": 2, "x": -1, "y": -1}
