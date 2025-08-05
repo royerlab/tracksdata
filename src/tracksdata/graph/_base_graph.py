@@ -8,8 +8,12 @@ from typing import TYPE_CHECKING, Any, Literal, TypeVar, overload
 import numpy as np
 import polars as pl
 import rustworkx as rx
+from geff import GeffMetadata
+from geff.metadata_schema import Axis
 from geff.rustworkx.io import read_rx
+from geff.write_arrays import write_arrays
 from numpy.typing import ArrayLike
+from zarr.storage import StoreLike
 
 from tracksdata.attrs import AttrComparison, NodeAttr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
@@ -1129,3 +1133,54 @@ class BaseGraph(abc.ABC):
             return indexed_graph
 
         return cls.from_other(indexed_graph, **kwargs)
+
+    def to_geff(
+        self, geff_store: StoreLike, geff_metadata: GeffMetadata | None = None, zarr_format: Literal[2, 3] = 3
+    ) -> None:
+        """
+        Write the graph to a geff data directory.
+
+        Parameters
+        ----------
+        geff_store : StoreLike
+            The store to write the graph to.
+        geff_metadata : GeffMetadata | None
+            The geff metadata to write to the graph.
+            It automatically generates the metadata with:
+            - axes: time (t) and spatial axes ((z), y, x)
+            - tracklet node property: track_id
+        zarr_format : Literal[2, 3]
+            The zarr format to write the graph to.
+            Defaults to 3.
+        """
+
+        node_attrs = self.node_attrs()
+
+        if geff_metadata is None:
+            axes = [Axis(name="time", type="time", unit="s")]
+            axes.extend([Axis(name=c, type="space", unit="µm") for c in ("z", "y", "x") if c in node_attrs.columns])
+
+            if DEFAULT_ATTR_KEYS.TRACK_ID in node_attrs.columns:
+                track_node_props = {
+                    "tracklet": DEFAULT_ATTR_KEYS.TRACK_ID,
+                }
+            else:
+                track_node_props = None
+
+            geff_metadata = GeffMetadata(
+                directed=True,
+                axes=axes,
+                track_node_props=track_node_props,
+            )
+
+        edge_attrs = self.edge_attrs()
+
+        write_arrays(
+            geff_store,
+            metadata=geff_metadata,
+            node_ids=node_attrs[DEFAULT_ATTR_KEYS.NODE_ID].to_numpy(),
+            node_attrs=node_attrs.drop(DEFAULT_ATTR_KEYS.NODE_ID).to_dict(as_series=False),
+            edge_ids=edge_attrs[DEFAULT_ATTR_KEYS.EDGE_ID].to_numpy(),
+            edge_attrs=edge_attrs.drop(DEFAULT_ATTR_KEYS.EDGE_ID).to_dict(as_series=False),
+            zarr_format=zarr_format,
+        )
