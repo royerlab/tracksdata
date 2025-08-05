@@ -904,7 +904,7 @@ class BaseGraph(abc.ABC):
 
         return summary
 
-    def spatial_filter(self, attrs_keys: list[str] | None = None) -> "SpatialFilter":
+    def spatial_filter(self, attr_keys: list[str] | None = None) -> "SpatialFilter":
         """
         Create a spatial filter for efficient spatial queries of graph nodes.
 
@@ -913,7 +913,7 @@ class BaseGraph(abc.ABC):
 
         Parameters
         ----------
-        attrs_keys : list[str] | None, optional
+        attr_keys : list[str] | None, optional
             List of attribute keys to use as spatial coordinates. If None, defaults to
             ["t", "z", "y", "x"] filtered to only include keys present in the graph.
             Common combinations include:
@@ -932,7 +932,7 @@ class BaseGraph(abc.ABC):
         Create a 2D spatial filter for image coordinates:
 
         ```python
-        spatial_filter = graph.spatial_filter(attrs_keys=["y", "x"])
+        spatial_filter = graph.spatial_filter(attr_keys=["y", "x"])
         # Query nodes in region y=[10, 50), x=[20, 60)
         subgraph = spatial_filter[10:50, 20:60].subgraph()
         ```
@@ -953,7 +953,7 @@ class BaseGraph(abc.ABC):
         """
         from tracksdata.graph.filters._spatial_filter import SpatialFilter
 
-        return SpatialFilter(self, attrs_keys=attrs_keys)
+        return SpatialFilter(self, attr_keys=attr_keys)
 
     def bbox_spatial_filter(
         self,
