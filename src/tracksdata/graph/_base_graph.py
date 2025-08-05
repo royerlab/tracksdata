@@ -1164,7 +1164,7 @@ class BaseGraph(abc.ABC):
             node_attrs = column_to_bytes(node_attrs, DEFAULT_ATTR_KEYS.MASK)
 
         if geff_metadata is None:
-            axes = [Axis(name="time", type="time")]
+            axes = [Axis(name=DEFAULT_ATTR_KEYS.T, type="time")]
             axes.extend([Axis(name=c, type="space") for c in ("z", "y", "x") if c in node_attrs.columns])
 
             if DEFAULT_ATTR_KEYS.TRACK_ID in node_attrs.columns:
