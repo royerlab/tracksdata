@@ -3,6 +3,8 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 import pytest
+import rustworkx as rx
+from zarr.storage import MemoryStore
 
 from tracksdata.attrs import EdgeAttr, NodeAttr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
@@ -1376,3 +1378,76 @@ def test_tracklet_graph_missing_track_id_key(graph_backend: BaseGraph) -> None:
     """Test tracklet_graph raises error when track_id_key doesn't exist."""
     with pytest.raises(ValueError, match="Track id key 'track_id' not found in graph"):
         graph_backend.tracklet_graph()
+
+
+def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
+    """Test geff roundtrip."""
+
+    graph_backend.add_node_attr_key("x", 0.0)
+    graph_backend.add_node_attr_key("y", 0.0)
+    graph_backend.add_node_attr_key("z", 0.0)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACK_ID, -1)
+
+    graph_backend.add_edge_attr_key("weight", 0.0)
+
+    node1 = graph_backend.add_node(
+        {
+            "t": 0,
+            "x": 1.0,
+            "y": 1.0,
+            "z": 1.0,
+            "bbox": np.array([6, 6, 8, 8]),
+            "mask": Mask(np.array([[True, True], [True, True]], dtype=bool), bbox=np.array([6, 6, 8, 8])),
+            DEFAULT_ATTR_KEYS.TRACK_ID: 1,
+        }
+    )
+    node2 = graph_backend.add_node(
+        {
+            "t": 1,
+            "x": 2.0,
+            "y": 2.0,
+            "z": 2.0,
+            "bbox": np.array([0, 0, 3, 3]),
+            "mask": Mask(
+                np.array([[True, True, True], [True, True, True], [True, True, True]], dtype=bool),
+                bbox=np.array([0, 0, 3, 3]),
+            ),
+            DEFAULT_ATTR_KEYS.TRACK_ID: 1,
+        }
+    )
+
+    node3 = graph_backend.add_node(
+        {
+            "t": 2,
+            "x": 3.0,
+            "y": 3.0,
+            "z": 3.0,
+            "bbox": np.array([2, 2, 4, 4]),
+            "mask": Mask(np.array([[True, True], [True, True]], dtype=bool), bbox=np.array([2, 2, 4, 4])),
+            DEFAULT_ATTR_KEYS.TRACK_ID: 1,
+        }
+    )
+
+    graph_backend.add_edge(node1, node2, {"weight": 0.8})
+    graph_backend.add_edge(node2, node3, {"weight": 0.9})
+
+    output_store = MemoryStore()
+
+    graph_backend.to_geff(geff_store=output_store)
+
+    geff_graph = RustWorkXGraph.from_geff(output_store)
+
+    assert geff_graph.num_nodes == 3
+    assert geff_graph.num_edges == 2
+
+    rx_graph = graph_backend.filter().subgraph().rx_graph
+
+    assert set(graph_backend.node_attr_keys) == set(geff_graph.node_attr_keys)
+    assert set(graph_backend.edge_attr_keys) == set(geff_graph.edge_attr_keys)
+
+    assert rx.is_isomorphic(
+        rx_graph,
+        geff_graph.rx_graph,
+    )

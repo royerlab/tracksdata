@@ -93,3 +93,24 @@ def column_from_bytes(df: pl.DataFrame, column: str) -> pl.DataFrame:
         The converted DataFrame.
     """
     return df.with_columns(pl.col(column).map_elements(loads, return_dtype=pl.Object))
+
+
+def column_to_numpy(series: pl.Series) -> np.ndarray:
+    """
+    Helper function to convert a polars series to a numpy array.
+    It handles the case where the series is a binary column.
+
+    Parameters
+    ----------
+    series : pl.Series
+        The series to convert.
+
+    Returns
+    -------
+    np.ndarray
+        The converted numpy array.
+    """
+    if series.dtype == pl.Binary:
+        return np.asarray(series.to_list())
+    else:
+        return series.to_numpy()
