@@ -1289,6 +1289,9 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
         list[int]
             The indices of the nodes.
         """
+        if len(nodes) == 0:
+            return []
+
         graph_ids = super().bulk_add_nodes(nodes)
 
         if indices is None:
