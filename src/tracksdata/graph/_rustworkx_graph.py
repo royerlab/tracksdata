@@ -426,6 +426,42 @@ class RustWorkXGraph(BaseGraph):
             self._time_to_nodes.setdefault(node["t"], []).append(index)
         return indices
 
+    def remove_node(self, node_id: int) -> None:
+        """
+        Remove a node from the graph.
+
+        This method removes the specified node and all edges connected to it
+        (both incoming and outgoing edges). Also updates the time_to_nodes mapping.
+
+        Parameters
+        ----------
+        node_id : int
+            The ID of the node to remove.
+
+        Raises
+        ------
+        ValueError
+            If the node_id does not exist in the graph.
+        """
+        if node_id not in self.rx_graph.node_indices():
+            raise ValueError(f"Node {node_id} does not exist in the graph")
+
+        # Get the time value before removing the node
+        t = self.rx_graph[node_id]["t"]
+
+        # Remove the node from the graph (this also removes all connected edges)
+        self.rx_graph.remove_node(node_id)
+
+        # Update the time_to_nodes mapping
+        self._time_to_nodes[t].remove(node_id)
+        # Clean up empty time entries
+        if not self._time_to_nodes[t]:
+            del self._time_to_nodes[t]
+
+        # Remove from overlaps if present
+        if self._overlaps is not None:
+            self._overlaps = [overlap for overlap in self._overlaps if node_id != overlap[0] and node_id != overlap[1]]
+
     def add_edge(
         self,
         source_id: int,
@@ -1518,6 +1554,27 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
         """
         node_ids = self._get_local_ids() if node_ids is None else self._map_to_local(node_ids)
         super().update_node_attrs(attrs=attrs, node_ids=node_ids)
+
+    def remove_node(self, node_id: int) -> None:
+        """
+        Remove a node from the graph.
+
+        Parameters
+        ----------
+        node_id : int
+            The external ID of the node to remove.
+
+        Raises
+        ------
+        ValueError
+            If the node_id does not exist in the graph.
+        """
+        if node_id not in self._external_to_local:
+            raise ValueError(f"Node {node_id} does not exist in the graph")
+
+        local_node_id = self._map_to_local(node_id)
+        super().remove_node(local_node_id)
+        self._remove_id_mapping(external_id=node_id)
 
     def filter(
         self,

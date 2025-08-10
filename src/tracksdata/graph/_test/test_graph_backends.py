@@ -1380,6 +1380,167 @@ def test_tracklet_graph_missing_track_id_key(graph_backend: BaseGraph) -> None:
         graph_backend.tracklet_graph()
 
 
+def test_remove_node(graph_backend: BaseGraph) -> None:
+    """Test removing nodes from the graph."""
+    # Add attribute keys
+    graph_backend.add_node_attr_key("x", 0.0)
+    graph_backend.add_node_attr_key("y", 0.0)
+    graph_backend.add_edge_attr_key("weight", 0.0)
+
+    # Add nodes
+    node1 = graph_backend.add_node({"t": 0, "x": 1.0, "y": 1.0})
+    node2 = graph_backend.add_node({"t": 1, "x": 2.0, "y": 2.0})
+    node3 = graph_backend.add_node({"t": 2, "x": 3.0, "y": 3.0})
+
+    # Add edges
+    edge1 = graph_backend.add_edge(node1, node2, {"weight": 0.5})
+    edge2 = graph_backend.add_edge(node2, node3, {"weight": 0.7})
+    edge3 = graph_backend.add_edge(node1, node3, {"weight": 0.3})
+
+    # Add overlap
+    graph_backend.add_overlap(node1, node3)
+
+    initial_node_count = graph_backend.num_nodes
+
+    # Remove node2 - this should also remove edges involving node2
+    graph_backend.remove_node(node2)
+
+    # Check node count decreased
+    assert graph_backend.num_nodes == initial_node_count - 1
+
+    # Check that node2 is no longer in the graph
+    assert node2 not in graph_backend.node_ids()
+    assert node1 in graph_backend.node_ids()
+    assert node3 in graph_backend.node_ids()
+
+    # Check that edges involving node2 were removed
+    remaining_edges = graph_backend.edge_attrs()
+    remaining_edge_ids = set(remaining_edges[DEFAULT_ATTR_KEYS.EDGE_ID].to_list())
+
+    # Only edge3 (node1->node3) should remain
+    assert edge1 not in remaining_edge_ids
+    assert edge2 not in remaining_edge_ids
+    assert edge3 in remaining_edge_ids
+
+    # Check that the remaining edge is correct
+    assert len(remaining_edges) == 1
+    assert remaining_edges[DEFAULT_ATTR_KEYS.EDGE_SOURCE].to_list()[0] == node1
+    assert remaining_edges[DEFAULT_ATTR_KEYS.EDGE_TARGET].to_list()[0] == node3
+    assert remaining_edges["weight"].to_list()[0] == 0.3
+
+    # Check that overlaps involving node2 are removed, but others remain
+    remaining_overlaps = graph_backend.overlaps()
+    # The overlap (node1, node3) should still exist since node2 wasn't involved
+    assert [node1, node3] in remaining_overlaps
+
+    # Test error when removing non-existent node
+    with pytest.raises(ValueError, match="Node .* does not exist in the graph"):
+        graph_backend.remove_node(99999)
+
+    # Test error when removing already removed node
+    with pytest.raises(ValueError, match="Node .* does not exist in the graph"):
+        graph_backend.remove_node(node2)
+
+
+def test_remove_node_and_add_new_nodes(graph_backend: BaseGraph) -> None:
+    """Test removing nodes and then adding new nodes."""
+    # Add attribute keys
+    graph_backend.add_node_attr_key("x", 0.0)
+    graph_backend.add_edge_attr_key("weight", 0.0)
+
+    # Add initial nodes
+    node1 = graph_backend.add_node({"t": 0, "x": 1.0})
+    node2 = graph_backend.add_node({"t": 1, "x": 2.0})
+    node3 = graph_backend.add_node({"t": 2, "x": 3.0})
+
+    # Add edges
+    graph_backend.add_edge(node1, node2, {"weight": 0.5})
+    graph_backend.add_edge(node2, node3, {"weight": 0.7})
+
+    initial_node_count = graph_backend.num_nodes
+    initial_edge_count = graph_backend.num_edges
+
+    # Remove the middle node
+    graph_backend.remove_node(node2)
+
+    assert graph_backend.num_nodes == initial_node_count - 1
+    assert graph_backend.num_edges == initial_edge_count - 2  # Both edges removed
+
+    # Add new nodes after removal
+    new_node1 = graph_backend.add_node({"t": 1, "x": 10.0})
+    new_node2 = graph_backend.add_node({"t": 3, "x": 20.0})
+
+    assert graph_backend.num_nodes == initial_node_count + 1  # net +1 node
+
+    # Add new edges with new nodes
+    graph_backend.add_edge(node1, new_node1, {"weight": 0.9})
+    graph_backend.add_edge(new_node1, node3, {"weight": 0.8})
+    graph_backend.add_edge(node3, new_node2, {"weight": 0.6})
+
+    assert graph_backend.num_edges == initial_edge_count + 1  # net +1 edge
+
+    # Verify the graph structure by checking node attributes
+    # Since RustWorkX can reuse node IDs, we need to check attributes instead of just IDs
+    node_attrs = graph_backend.node_attrs()
+
+    # Create sets of (t, x) tuples for comparison
+    current_nodes = set(zip(node_attrs["t"].to_list(), node_attrs["x"].to_list(), strict=True))
+
+    # Check that the original nodes (except node2) are present
+    assert (0, 1.0) in current_nodes  # node1 attributes
+    assert (2, 3.0) in current_nodes  # node3 attributes
+    assert (1, 2.0) not in current_nodes  # node2 attributes should be gone
+
+    # Check that new nodes are present
+    assert (1, 10.0) in current_nodes  # new_node1 attributes
+    assert (3, 20.0) in current_nodes  # new_node2 attributes
+
+    # Verify edge count is correct
+    assert graph_backend.num_edges == initial_edge_count + 1  # net +1 edge
+
+    # Test time points are updated correctly
+    time_points = set(graph_backend.time_points())
+    assert time_points == {0, 1, 2, 3}  # all time points represented
+
+
+def test_remove_isolated_node(graph_backend: BaseGraph) -> None:
+    """Test removing a node with no edges."""
+    # Add an isolated node
+    node1 = graph_backend.add_node({"t": 0})
+    node2 = graph_backend.add_node({"t": 1})  # isolated node
+
+    initial_count = graph_backend.num_nodes
+
+    # Remove the isolated node
+    graph_backend.remove_node(node2)
+
+    assert graph_backend.num_nodes == initial_count - 1
+    assert node1 in graph_backend.node_ids()
+    assert node2 not in graph_backend.node_ids()
+
+
+def test_remove_all_nodes_in_time_point(graph_backend: BaseGraph) -> None:
+    """Test that time points are cleaned up when all nodes in a time are removed."""
+    # Add nodes at different time points
+    graph_backend.add_node({"t": 0})
+    node2 = graph_backend.add_node({"t": 1})
+    node3 = graph_backend.add_node({"t": 1})  # another node at t=1
+    graph_backend.add_node({"t": 2})
+
+    initial_time_points = set(graph_backend.time_points())
+    assert initial_time_points == {0, 1, 2}
+
+    # Remove one node from t=1
+    graph_backend.remove_node(node2)
+    time_points_after_one = set(graph_backend.time_points())
+    assert time_points_after_one == {0, 1, 2}  # t=1 still has node3
+
+    # Remove the other node from t=1
+    graph_backend.remove_node(node3)
+    time_points_after_two = set(graph_backend.time_points())
+    assert time_points_after_two == {0, 2}  # t=1 should be gone
+
+
 def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
     """Test geff roundtrip."""
 

@@ -646,6 +646,44 @@ class SQLGraph(BaseGraph):
 
         return node_ids
 
+    def remove_node(self, node_id: int) -> None:
+        """
+        Remove a node from the graph.
+
+        This method removes the specified node and all edges connected to it
+        (both incoming and outgoing edges). Also removes any overlaps
+        involving this node.
+
+        Parameters
+        ----------
+        node_id : int
+            The ID of the node to remove.
+
+        Raises
+        ------
+        ValueError
+            If the node_id does not exist in the graph.
+        """
+        with Session(self._engine) as session:
+            # Check if the node exists
+            node = session.query(self.Node).filter(self.Node.node_id == node_id).first()
+            if node is None:
+                raise ValueError(f"Node {node_id} does not exist in the graph")
+
+            # Remove all edges where this node is source or target
+            session.query(self.Edge).filter(
+                sa.or_(self.Edge.source_id == node_id, self.Edge.target_id == node_id)
+            ).delete()
+
+            # Remove all overlaps involving this node
+            session.query(self.Overlap).filter(
+                sa.or_(self.Overlap.source_id == node_id, self.Overlap.target_id == node_id)
+            ).delete()
+
+            # Remove the node itself
+            session.delete(node)
+            session.commit()
+
     def add_edge(
         self,
         source_id: int,
@@ -1165,10 +1203,18 @@ class SQLGraph(BaseGraph):
 
         str_dialect_type = sa_column.type.compile(dialect=self._engine.dialect)
 
+        # Properly quote default values based on type
+        if isinstance(default_value, str):
+            quoted_default = f"'{default_value}'"
+        elif default_value is None:
+            quoted_default = "NULL"
+        else:
+            quoted_default = str(default_value)
+
         add_column_stmt = sa.DDL(
             f"ALTER TABLE {table_class.__table__} ADD "
             f"COLUMN {sa_column.name} {str_dialect_type} "
-            f"DEFAULT {default_value}",
+            f"DEFAULT {quoted_default}",
         )
         LOG.info("add %s column statement:\n'%s'", table_class.__table__, add_column_stmt)
 

@@ -187,6 +187,29 @@ class MappedGraphMixin:
         """
         self._local_to_external.putall(mappings)
 
+    def _remove_id_mapping(
+        self,
+        *,
+        local_id: int | None = None,
+        external_id: int | None = None,
+    ) -> None:
+        """
+        Remove an ID mapping.
+
+        Parameters
+        ----------
+        local_id : int
+            Local node ID to remove from mapping
+        external_id : int
+            External node ID to remove from mapping
+        """
+        if local_id is not None:
+            del self._local_to_external[local_id]
+        elif external_id is not None:
+            del self._external_to_local[external_id]
+        else:
+            raise ValueError("Either local_id or external_id must be provided")
+
     def _get_external_ids(self) -> list[int]:
         """
         Get all external IDs in the mapping.

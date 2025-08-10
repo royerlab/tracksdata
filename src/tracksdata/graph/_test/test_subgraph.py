@@ -957,3 +957,252 @@ def test_bulk_add_edges_returned_ids(graph_backend: BaseGraph, use_subgraph: boo
     empty_result = graph_with_data.bulk_add_edges([], return_ids=True)
     assert empty_result == []
     assert graph_with_data.num_edges == initial_edge_count + len(edges_to_add)  # No change
+
+
+@parametrize_subgraph_tests
+def test_remove_node_basic(graph_backend: BaseGraph, use_subgraph: bool) -> None:
+    """Test basic remove_node functionality on both original graphs and subgraphs."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+
+    initial_nodes = graph_with_data._test_nodes.copy()  # type: ignore
+    initial_node_count = graph_with_data.num_nodes
+
+    # Remove a node that has edges
+    node_to_remove = initial_nodes[1]
+    graph_with_data.remove_node(node_to_remove)
+
+    # Check node count decreased
+    assert graph_with_data.num_nodes == initial_node_count - 1
+
+    # Check that the node is no longer in the graph
+    current_nodes = graph_with_data.node_ids()
+    assert node_to_remove not in current_nodes
+
+    # Check that all other expected nodes are still there
+    remaining_expected_nodes = [n for n in initial_nodes if n != node_to_remove]
+    for node in remaining_expected_nodes:
+        assert node in current_nodes
+
+    # Check that edges involving the removed node are gone
+    current_edges = graph_with_data.edge_attrs()
+    for i in range(len(current_edges)):
+        source = current_edges[DEFAULT_ATTR_KEYS.EDGE_SOURCE].to_list()[i]
+        target = current_edges[DEFAULT_ATTR_KEYS.EDGE_TARGET].to_list()[i]
+        assert source != node_to_remove
+        assert target != node_to_remove
+
+
+@parametrize_subgraph_tests
+def test_remove_node_with_overlaps(graph_backend: BaseGraph, use_subgraph: bool) -> None:
+    """Test removing nodes that have overlaps."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+    nodes = graph_with_data._test_nodes  # type: ignore
+
+    # Add some overlaps
+    graph_with_data.add_overlap(nodes[0], nodes[1])
+    graph_with_data.add_overlap(nodes[1], nodes[2])
+
+    # Verify overlaps exist
+    overlaps_before = graph_with_data.overlaps()
+    assert len(overlaps_before) == 2
+
+    # Remove node that's involved in overlaps
+    graph_with_data.remove_node(nodes[1])
+
+    # Check that overlaps involving removed node are gone
+    overlaps_after = graph_with_data.overlaps()
+    for overlap in overlaps_after:
+        assert nodes[1] not in overlap
+
+
+def test_remove_node_then_add_new_nodes(graph_backend: BaseGraph) -> None:
+    """Test the specific case of removing nodes and then adding new nodes."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
+    original_nodes = graph_with_data._test_nodes  # type: ignore
+
+    # Remove a few nodes
+    nodes_to_remove = original_nodes[:2]
+    for node in nodes_to_remove:
+        graph_with_data.remove_node(node)
+
+    initial_count_after_removal = graph_with_data.num_nodes
+
+    # Add new nodes after removal
+    new_node1 = graph_with_data.add_node({"t": 10, "x": 100.0, "y": 100.0, "label": "new1"})
+    new_node2 = graph_with_data.add_node({"t": 11, "x": 200.0, "y": 200.0, "label": "new2"})
+    new_node3 = graph_with_data.add_node({"t": 12, "x": 300.0, "y": 300.0, "label": "new3"})
+
+    # Check that new nodes were added
+    assert graph_with_data.num_nodes == initial_count_after_removal + 3
+
+    # Verify new nodes exist and have correct attributes
+    all_node_ids = graph_with_data.node_ids()
+    for node_id in [new_node1, new_node2, new_node3]:
+        assert node_id in all_node_ids
+
+    # Verify removed nodes are still gone by checking attributes
+    # Since RustWorkX can reuse node IDs, we check attributes instead
+    all_node_attrs = graph_with_data.node_attrs()
+    current_node_attrs = set(
+        zip(
+            all_node_attrs["t"].to_list(),
+            all_node_attrs["x"].to_list(),
+            all_node_attrs["y"].to_list(),
+            all_node_attrs["label"].to_list(),
+            strict=True,
+        )
+    )
+
+    # Get the original attributes for the removed nodes to verify they're gone
+    remaining_nodes = [n for n in original_nodes if n not in nodes_to_remove]
+    if remaining_nodes:  # Only check if there are remaining nodes
+        remaining_attrs = graph_with_data.filter(node_ids=remaining_nodes).node_attrs()
+        for i in range(len(remaining_attrs)):
+            # Verify that remaining original nodes are still present
+            attrs_tuple = (
+                remaining_attrs["t"].to_list()[i],
+                remaining_attrs["x"].to_list()[i],
+                remaining_attrs["y"].to_list()[i],
+                remaining_attrs["label"].to_list()[i],
+            )
+            assert attrs_tuple in current_node_attrs
+
+    # Verify new node attributes
+    new_nodes_attrs = graph_with_data.filter(node_ids=[new_node1, new_node2, new_node3]).node_attrs()
+    labels = new_nodes_attrs["label"].to_list()
+    assert "new1" in labels
+    assert "new2" in labels
+    assert "new3" in labels
+
+    # Add edges with new nodes
+    graph_with_data.add_edge(new_node1, new_node2, {"weight": 1.0, "new_attribute": 100.0})
+    graph_with_data.add_edge(new_node2, new_node3, {"weight": 2.0, "new_attribute": 200.0})
+
+    # Verify edges exist
+    all_edges = graph_with_data.edge_attrs()
+    edge_sources = all_edges[DEFAULT_ATTR_KEYS.EDGE_SOURCE].to_list()
+    edge_targets = all_edges[DEFAULT_ATTR_KEYS.EDGE_TARGET].to_list()
+
+    assert new_node1 in edge_sources
+    assert new_node2 in edge_sources
+    assert new_node2 in edge_targets
+    assert new_node3 in edge_targets
+
+
+def test_remove_node_from_subgraph_affects_root(graph_backend: BaseGraph) -> None:
+    """Test that removing a node from a subgraph also removes it from the root graph."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
+    original_nodes = graph_with_data._test_nodes  # type: ignore
+
+    # Create a subgraph
+    subgraph_nodes = original_nodes[:3]
+    subgraph = graph_with_data.filter(node_ids=subgraph_nodes).subgraph()
+
+    node_to_remove = subgraph_nodes[0]
+    initial_root_count = graph_with_data.num_nodes
+    initial_subgraph_count = subgraph.num_nodes
+
+    # Remove node from subgraph
+    subgraph.remove_node(node_to_remove)
+
+    # Check both graphs were affected
+    assert subgraph.num_nodes == initial_subgraph_count - 1
+    assert graph_with_data.num_nodes == initial_root_count - 1
+
+    # Check node is gone from both
+    assert node_to_remove not in subgraph.node_ids()
+    assert node_to_remove not in graph_with_data.node_ids()
+
+
+def test_remove_node_error_cases(graph_backend: BaseGraph) -> None:
+    """Test error cases for remove_node."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
+
+    # Test removing non-existent node
+    with pytest.raises(ValueError, match="Node .* does not exist in the graph"):
+        graph_with_data.remove_node(99999)
+
+    # Remove a node then try to remove it again
+    nodes = graph_with_data._test_nodes  # type: ignore
+    node_to_remove = nodes[0]
+    graph_with_data.remove_node(node_to_remove)
+
+    with pytest.raises(ValueError, match="Node .* does not exist in the graph"):
+        graph_with_data.remove_node(node_to_remove)
+
+
+def test_remove_node_subgraph_error_cases(graph_backend: BaseGraph) -> None:
+    """Test error cases for remove_node in subgraphs."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
+    original_nodes = graph_with_data._test_nodes  # type: ignore
+
+    # Create a subgraph with only some nodes
+    subgraph_nodes = original_nodes[:2]
+    subgraph = graph_with_data.filter(node_ids=subgraph_nodes).subgraph()
+
+    # Try to remove a node that exists in root but not in subgraph
+    node_not_in_subgraph = original_nodes[3]  # This node should not be in the subgraph
+
+    with pytest.raises(ValueError, match="Node .* does not exist in the graph"):
+        subgraph.remove_node(node_not_in_subgraph)
+
+
+@parametrize_subgraph_tests
+def test_remove_node_updates_time_points(graph_backend: BaseGraph, use_subgraph: bool) -> None:
+    """Test that time points are properly updated when nodes are removed."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+
+    initial_time_points = set(graph_with_data.time_points())
+    nodes = graph_with_data._test_nodes  # type: ignore
+
+    # Find a node that is the only one at its time point
+    # First check what time points have only one node
+    node_attrs = graph_with_data.node_attrs()
+    time_counts = {}
+    for row in node_attrs.iter_rows(named=True):
+        t = row["t"]
+        node_id = row[DEFAULT_ATTR_KEYS.NODE_ID]
+        if t not in time_counts:
+            time_counts[t] = []
+        time_counts[t].append(node_id)
+
+    # Find a time point with only one node
+    single_node_time = None
+    single_node_id = None
+    for t, node_list in time_counts.items():
+        if len(node_list) == 1 and node_list[0] in nodes:
+            single_node_time = t
+            single_node_id = node_list[0]
+            break
+
+    if single_node_time is not None:
+        # Remove the single node at this time point
+        graph_with_data.remove_node(single_node_id)
+
+        # Check that the time point was removed
+        final_time_points = set(graph_with_data.time_points())
+        assert single_node_time not in final_time_points
+        assert len(final_time_points) == len(initial_time_points) - 1
+
+
+def test_remove_node_preserves_other_graph_properties(graph_backend: BaseGraph) -> None:
+    """Test that removing nodes preserves other graph properties correctly."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
+    original_nodes = graph_with_data._test_nodes  # type: ignore
+
+    # Add more complex structure
+    graph_with_data.add_node_attr_key("special", "default")
+    graph_with_data.update_node_attrs(node_ids=[original_nodes[0]], attrs={"special": "important"})
+
+    node_to_remove = original_nodes[1]
+    node_to_keep_special = original_nodes[0]
+
+    # Remove a node
+    graph_with_data.remove_node(node_to_remove)
+
+    # Check that special attributes are preserved for remaining nodes
+    remaining_attrs = graph_with_data.filter(node_ids=[node_to_keep_special]).node_attrs()
+    assert remaining_attrs["special"].to_list()[0] == "important"
+
+    # Check that attribute keys are still available
+    assert "special" in graph_with_data.node_attr_keys

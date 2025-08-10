@@ -136,6 +136,25 @@ class BaseGraph(abc.ABC):
         return [self.add_node(node, validate_keys=False) for node in nodes]
 
     @abc.abstractmethod
+    def remove_node(self, node_id: int) -> None:
+        """
+        Remove a node from the graph.
+
+        This method removes the specified node and all edges connected to it
+        (both incoming and outgoing edges).
+
+        Parameters
+        ----------
+        node_id : int
+            The ID of the node to remove.
+
+        Raises
+        ------
+        ValueError
+            If the node_id does not exist in the graph.
+        """
+
+    @abc.abstractmethod
     def add_edge(
         self,
         source_id: int,
