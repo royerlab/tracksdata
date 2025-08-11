@@ -113,6 +113,10 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
         self._overlaps = None
 
     @property
+    def supports_custom_indices(self) -> bool:
+        return self._root.supports_custom_indices
+
+    @property
     def sync(self) -> bool:
         return self._sync
 
@@ -247,10 +251,12 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
         self,
         attrs: dict[str, Any],
         validate_keys: bool = True,
+        index: int | None = None,
     ) -> int:
         parent_node_id = self._root.add_node(
             attrs=attrs,
             validate_keys=validate_keys,
+            index=index,
         )
 
         if self.sync:
@@ -265,8 +271,8 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
 
         return parent_node_id
 
-    def bulk_add_nodes(self, nodes: list[dict[str, Any]]) -> list[int]:
-        parent_node_ids = self._root.bulk_add_nodes(nodes)
+    def bulk_add_nodes(self, nodes: list[dict[str, Any]], indices: list[int] | None = None) -> list[int]:
+        parent_node_ids = self._root.bulk_add_nodes(nodes, indices=indices)
         if self.sync:
             node_ids = RustWorkXGraph.bulk_add_nodes(self, nodes)
             self._add_id_mappings(list(zip(node_ids, parent_node_ids, strict=True)))

@@ -438,6 +438,10 @@ class SQLGraph(BaseGraph):
         self._max_id_per_time = {}
         self._update_max_id_per_time()
 
+    @property
+    def supports_custom_indices(self) -> bool:
+        return True
+
     def _define_schema(self, overwrite: bool) -> None:
         """
         Define the database schema classes for this SQLGraph instance.
@@ -537,12 +541,14 @@ class SQLGraph(BaseGraph):
         self,
         attrs: dict[str, Any],
         validate_keys: bool = True,
+        index: int | None = None,
     ) -> int:
         """
         Add a node to the graph at time t.
 
         Node IDs are automatically generated based on the time point and
-        the node_id_time_multiplier to ensure uniqueness across time points.
+        the node_id_time_multiplier to ensure uniqueness across time points,
+        unless an explicit index is provided.
 
         Parameters
         ----------
@@ -553,6 +559,9 @@ class SQLGraph(BaseGraph):
         validate_keys : bool, default True
             Whether to check if the attribute keys are valid against the
             current schema. If False, validation is skipped for performance.
+        index : int | None, default None
+            Optional specific node ID to use. If provided, this will be used
+            as the node_id instead of the auto-generated value.
 
         Returns
         -------
@@ -570,6 +579,7 @@ class SQLGraph(BaseGraph):
         ```python
         node_id = graph.add_node({"t": 0, "x": 10.5, "y": 20.3})
         node_id = graph.add_node({"t": 1, "x": 15.2, "y": 25.8, "intensity": 150.0})
+        node_id = graph.add_node({"t": 0, "x": 20.0, "y": 30.0}, index=12345)
         ```
         """
         if validate_keys:
@@ -579,8 +589,12 @@ class SQLGraph(BaseGraph):
                 raise ValueError(f"Node attributes must have a 't' key. Got {attrs.keys()}")
 
         time = attrs["t"]
-        default_node_id = (time * self.node_id_time_multiplier) - 1
-        node_id = self._max_id_per_time.get(time, default_node_id) + 1
+
+        if index is None:
+            default_node_id = (time * self.node_id_time_multiplier) - 1
+            node_id = self._max_id_per_time.get(time, default_node_id) + 1
+        else:
+            node_id = index
 
         node = self.Node(
             node_id=node_id,
@@ -591,27 +605,33 @@ class SQLGraph(BaseGraph):
             session.add(node)
             session.commit()
 
-        self._max_id_per_time[time] = node_id
+        # Update max_id tracking only if using auto-generated IDs
+        if index is None:
+            self._max_id_per_time[time] = node_id
 
         return node_id
 
     def bulk_add_nodes(
         self,
         nodes: list[dict[str, Any]],
-    ) -> None:
+        indices: list[int] | None = None,
+    ) -> list[int]:
         """
         Add multiple nodes to the graph efficiently.
 
         Provides better performance than calling add_node multiple times by
         using SQLAlchemy's bulk insert functionality and reducing database
         transactions. Automatically assigns node IDs and handles time-based
-        ID generation.
+        ID generation, or uses provided indices.
 
         Parameters
         ----------
         nodes : list[dict[str, Any]]
             List of node attribute dictionaries. Each dictionary must contain
             a "t" key and any additional attribute keys.
+        indices : list[int] | None, default None
+            Optional list of specific node IDs to use. If provided, must be
+            the same length as nodes. If None, IDs are auto-generated.
 
         Examples
         --------
@@ -621,6 +641,9 @@ class SQLGraph(BaseGraph):
             {"t": 0, "x": 15, "y": 25, "label": "B"},
         ]
         graph.bulk_add_nodes(nodes)
+
+        # With specific indices
+        graph.bulk_add_nodes(nodes, indices=[1000, 2000])
         ```
 
         Returns
@@ -631,14 +654,23 @@ class SQLGraph(BaseGraph):
         if len(nodes) == 0:
             return []
 
+        if indices is not None and len(indices) != len(nodes):
+            raise ValueError(f"Length of indices ({len(indices)}) must match length of nodes ({len(nodes)})")
+
         node_ids = []
-        for node in nodes:
+        for i, node in enumerate(nodes):
             time = node["t"]
-            default_node_id = (time * self.node_id_time_multiplier) - 1
-            node_id = self._max_id_per_time.get(time, default_node_id) + 1
+
+            if indices is None:
+                default_node_id = (time * self.node_id_time_multiplier) - 1
+                node_id = self._max_id_per_time.get(time, default_node_id) + 1
+                # Update max_id tracking only for auto-generated IDs
+                self._max_id_per_time[time] = node_id
+            else:
+                node_id = indices[i]
+
             node[DEFAULT_ATTR_KEYS.NODE_ID] = node_id
             node_ids.append(node_id)
-            self._max_id_per_time[time] = node_id
 
         with Session(self._engine) as session:
             session.execute(sa.insert(self.Node), nodes)

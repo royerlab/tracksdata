@@ -1380,6 +1380,54 @@ def test_tracklet_graph_missing_track_id_key(graph_backend: BaseGraph) -> None:
         graph_backend.tracklet_graph()
 
 
+def test_custom_indices(graph_backend: BaseGraph) -> None:
+    """Test custom node indices functionality."""
+
+    if not graph_backend.supports_custom_indices:
+        pytest.skip("Graph does not support custom indices")
+
+    # Add attribute keys for testing
+    graph_backend.add_node_attr_key("x", 0.0)
+    graph_backend.add_node_attr_key("y", 0.0)
+
+    # Test add_node with custom index
+    custom_node_id = graph_backend.add_node({"t": 0, "x": 10.0, "y": 20.0}, index=12345)
+    assert custom_node_id == 12345
+
+    # Test add_node without custom index (auto-generated)
+    auto_node_id = graph_backend.add_node({"t": 0, "x": 15.0, "y": 25.0})
+    assert auto_node_id != 12345  # Should be different from custom
+
+    # Test bulk_add_nodes with custom indices
+    nodes = [{"t": 1, "x": 30.0, "y": 40.0}, {"t": 1, "x": 35.0, "y": 45.0}, {"t": 1, "x": 40.0, "y": 50.0}]
+    custom_indices = [50000, 60000, 70000]
+
+    returned_indices = graph_backend.bulk_add_nodes(nodes, indices=custom_indices)
+    assert returned_indices == custom_indices
+
+    # Test bulk_add_nodes without custom indices (auto-generated)
+    auto_nodes = [{"t": 2, "x": 100.0, "y": 200.0}, {"t": 2, "x": 150.0, "y": 250.0}]
+    auto_indices = graph_backend.bulk_add_nodes(auto_nodes)
+    assert len(auto_indices) == 2
+    assert all(idx not in custom_indices for idx in auto_indices)
+
+    # Verify all nodes exist in the graph
+    all_node_ids = graph_backend.node_ids()
+    expected_ids = [custom_node_id, auto_node_id, *custom_indices, *auto_indices]
+    for expected_id in expected_ids:
+        assert expected_id in all_node_ids, f"Node ID {expected_id} not found in graph"
+
+    # Test that custom indices work with queries
+    custom_node_df = graph_backend.filter(node_ids=[12345]).node_attrs(attr_keys=["x", "y"])
+    assert len(custom_node_df) == 1
+    assert custom_node_df["x"].to_list()[0] == 10.0
+    assert custom_node_df["y"].to_list()[0] == 20.0
+
+    # Test bulk_add_nodes with mismatched indices length
+    with pytest.raises(ValueError, match="Length of indices .* must match length of nodes"):
+        graph_backend.bulk_add_nodes([{"t": 3, "x": 1.0, "y": 1.0}], indices=[1, 2, 3])
+
+
 def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
     """Test geff roundtrip."""
 

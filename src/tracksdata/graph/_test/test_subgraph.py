@@ -957,3 +957,34 @@ def test_bulk_add_edges_returned_ids(graph_backend: BaseGraph, use_subgraph: boo
     empty_result = graph_with_data.bulk_add_edges([], return_ids=True)
     assert empty_result == []
     assert graph_with_data.num_edges == initial_edge_count + len(edges_to_add)  # No change
+
+
+@parametrize_subgraph_tests
+def test_custom_indices_subgraph(graph_backend: BaseGraph, use_subgraph: bool) -> None:
+    """Test custom node indices functionality in subgraphs."""
+
+    if not graph_backend.supports_custom_indices:
+        pytest.skip("Graph does not support custom indices")
+
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+
+    # Test add_node with custom index
+    custom_node_id = graph_with_data.add_node({"t": 0, "x": 10.0, "y": 20.0, "label": "custom_node"}, index=12345)
+    assert custom_node_id == 12345
+
+    # Test bulk_add_nodes with custom indices
+    nodes = [
+        {"t": 1, "x": 30.0, "y": 40.0, "label": "bulk_node_1"},
+        {"t": 1, "x": 35.0, "y": 45.0, "label": "bulk_node_2"},
+    ]
+    custom_indices = [50000, 60000]
+
+    returned_indices = graph_with_data.bulk_add_nodes(nodes, indices=custom_indices)
+    assert returned_indices == custom_indices
+
+    # Test that custom indices work with queries in subgraph
+    for graph in [graph_with_data, graph_backend]:
+        custom_node_df = graph.filter(node_ids=[12345]).node_attrs(attr_keys=["x", "y"])
+        assert len(custom_node_df) == 1
+        assert custom_node_df["x"].to_list()[0] == 10.0
+        assert custom_node_df["y"].to_list()[0] == 20.0
