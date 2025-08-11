@@ -990,6 +990,7 @@ def test_custom_indices_subgraph(graph_backend: BaseGraph, use_subgraph: bool) -
         assert custom_node_df["y"].to_list()[0] == 20.0
 
 
+@parametrize_subgraph_tests
 def test_remove_node_basic(graph_backend: BaseGraph, use_subgraph: bool) -> None:
     """Test basic remove_node functionality on both original graphs and subgraphs."""
     graph_with_data = create_test_graph(graph_backend, use_subgraph)
