@@ -1082,3 +1082,20 @@ def test_remove_node_updates_time_points(graph_backend: BaseGraph, use_subgraph:
         final_time_points = set(graph_with_data.time_points())
         assert single_node_time not in final_time_points
         assert len(final_time_points) == len(initial_time_points) - 1
+
+
+@parametrize_subgraph_tests
+def test_has_edge(graph_backend: BaseGraph, use_subgraph: bool) -> None:
+    """Test has_edge functionality on both original graphs and subgraphs."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+
+    # Add some edges
+    edge_attrs = graph_with_data.edge_attrs()
+
+    for src_id, tgt_id in zip(
+        edge_attrs[DEFAULT_ATTR_KEYS.EDGE_SOURCE], edge_attrs[DEFAULT_ATTR_KEYS.EDGE_TARGET], strict=False
+    ):
+        assert graph_with_data.has_edge(src_id, tgt_id)
+
+    assert not graph_with_data.has_edge(10, 15)
+    assert not graph_with_data.has_edge(graph_with_data._test_nodes[0], graph_with_data._test_nodes[-1])

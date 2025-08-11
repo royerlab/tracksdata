@@ -1253,3 +1253,9 @@ class BaseGraph(abc.ABC):
             edge_props=edge_dict,
             zarr_format=zarr_format,
         )
+
+    @abc.abstractmethod
+    def has_edge(self, source_id: int, target_id: int) -> bool:
+        """
+        Check if the graph has an edge between two nodes.
+        """
