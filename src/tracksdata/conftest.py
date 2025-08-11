@@ -36,19 +36,28 @@ def graph_backend(request) -> BaseGraph:
             self,
             attrs: dict[str, Any],
             validate_keys: bool = True,
+            index: int | None = None,
         ) -> int:
-            while True:
-                new_index = rng.integers(0, max_index).item()
-                if new_index not in self._external_to_local:
-                    break
+            if index is not None:
+                # Use the provided index
+                new_index = index
+            else:
+                # Generate a random index
+                while True:
+                    new_index = rng.integers(0, max_index).item()
+                    if new_index not in self._external_to_local:
+                        break
             return orig_add_node(self, attrs, validate_keys, new_index)
 
         def _bulk_add_nodes_with_index(
             self,
             nodes: list[dict[str, Any]],
+            indices: list[int] | None = None,
         ) -> list[int]:
-            current_max = max(self.node_ids()) + 1
-            indices = (rng.integers(current_max, max_index) + np.arange(len(nodes))).tolist()
+            if indices is None:
+                # Generate random indices
+                current_max = max(self.node_ids()) + 1 if self.num_nodes > 0 else 0
+                indices = (rng.integers(current_max, max_index) + np.arange(len(nodes))).tolist()
             return orig_bulk_add_nodes(self, nodes, indices)
 
         obj.add_node = MethodType(_add_node_with_index, obj)

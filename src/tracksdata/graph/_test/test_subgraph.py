@@ -957,3 +957,128 @@ def test_bulk_add_edges_returned_ids(graph_backend: BaseGraph, use_subgraph: boo
     empty_result = graph_with_data.bulk_add_edges([], return_ids=True)
     assert empty_result == []
     assert graph_with_data.num_edges == initial_edge_count + len(edges_to_add)  # No change
+
+
+@parametrize_subgraph_tests
+def test_custom_indices_subgraph(graph_backend: BaseGraph, use_subgraph: bool) -> None:
+    """Test custom node indices functionality in subgraphs."""
+
+    if not graph_backend.supports_custom_indices:
+        pytest.skip("Graph does not support custom indices")
+
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+
+    # Test add_node with custom index
+    custom_node_id = graph_with_data.add_node({"t": 0, "x": 10.0, "y": 20.0, "label": "custom_node"}, index=12345)
+    assert custom_node_id == 12345
+
+    # Test bulk_add_nodes with custom indices
+    nodes = [
+        {"t": 1, "x": 30.0, "y": 40.0, "label": "bulk_node_1"},
+        {"t": 1, "x": 35.0, "y": 45.0, "label": "bulk_node_2"},
+    ]
+    custom_indices = [50000, 60000]
+
+    returned_indices = graph_with_data.bulk_add_nodes(nodes, indices=custom_indices)
+    assert returned_indices == custom_indices
+
+    # Test that custom indices work with queries in subgraph
+    for graph in [graph_with_data, graph_backend]:
+        custom_node_df = graph.filter(node_ids=[12345]).node_attrs(attr_keys=["x", "y"])
+        assert len(custom_node_df) == 1
+        assert custom_node_df["x"].to_list()[0] == 10.0
+        assert custom_node_df["y"].to_list()[0] == 20.0
+
+
+@parametrize_subgraph_tests
+def test_remove_node_basic(graph_backend: BaseGraph, use_subgraph: bool) -> None:
+    """Test basic remove_node functionality on both original graphs and subgraphs."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+
+    initial_nodes = graph_with_data._test_nodes.copy()  # type: ignore
+    initial_node_count = graph_with_data.num_nodes
+
+    # Remove a node that has edges
+    node_to_remove = initial_nodes[1]
+    graph_with_data.remove_node(node_to_remove)
+
+    # Check node count decreased
+    assert graph_with_data.num_nodes == initial_node_count - 1
+
+    # Check that the node is no longer in the graph
+    current_nodes = graph_with_data.node_ids()
+    assert node_to_remove not in current_nodes
+
+    # Check that all other expected nodes are still there
+    remaining_expected_nodes = [n for n in initial_nodes if n != node_to_remove]
+    for node in remaining_expected_nodes:
+        assert node in current_nodes
+
+    # Check that edges involving the removed node are gone
+    current_edges = graph_with_data.edge_attrs()
+    for i in range(len(current_edges)):
+        source = current_edges[DEFAULT_ATTR_KEYS.EDGE_SOURCE].to_list()[i]
+        target = current_edges[DEFAULT_ATTR_KEYS.EDGE_TARGET].to_list()[i]
+        assert source != node_to_remove
+        assert target != node_to_remove
+
+
+@parametrize_subgraph_tests
+def test_remove_node_with_overlaps(graph_backend: BaseGraph, use_subgraph: bool) -> None:
+    """Test removing nodes that have overlaps."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+    nodes = graph_with_data._test_nodes  # type: ignore
+
+    # Add some overlaps
+    graph_with_data.add_overlap(nodes[0], nodes[1])
+    graph_with_data.add_overlap(nodes[1], nodes[2])
+
+    # Verify overlaps exist
+    overlaps_before = graph_with_data.overlaps()
+    assert len(overlaps_before) == 2
+
+    # Remove node that's involved in overlaps
+    graph_with_data.remove_node(nodes[1])
+
+    # Check that overlaps involving removed node are gone
+    overlaps_after = graph_with_data.overlaps()
+    for overlap in overlaps_after:
+        assert nodes[1] not in overlap
+
+
+@parametrize_subgraph_tests
+def test_remove_node_updates_time_points(graph_backend: BaseGraph, use_subgraph: bool) -> None:
+    """Test that time points are properly updated when nodes are removed."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+
+    initial_time_points = set(graph_with_data.time_points())
+    nodes = graph_with_data._test_nodes  # type: ignore
+
+    # Find a node that is the only one at its time point
+    # First check what time points have only one node
+    node_attrs = graph_with_data.node_attrs()
+    time_counts = {}
+    for row in node_attrs.iter_rows(named=True):
+        t = row["t"]
+        node_id = row[DEFAULT_ATTR_KEYS.NODE_ID]
+        if t not in time_counts:
+            time_counts[t] = []
+        time_counts[t].append(node_id)
+
+    # Find a time point with only one node
+    single_node_time = None
+    single_node_id = None
+    for t, node_list in time_counts.items():
+        if len(node_list) == 1 and node_list[0] in nodes:
+            single_node_time = t
+            single_node_id = node_list[0]
+            break
+
+    if single_node_time is not None:
+        # Remove the single node at this time point
+        graph_with_data.remove_node(single_node_id)
+
+        # Check that the time point was removed
+        final_time_points = set(graph_with_data.time_points())
+        assert single_node_time not in final_time_points
+        assert len(final_time_points) == len(initial_time_points) - 1

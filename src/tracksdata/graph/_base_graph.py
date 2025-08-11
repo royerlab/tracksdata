@@ -37,6 +37,13 @@ class BaseGraph(abc.ABC):
     Base class for a graph backend.
     """
 
+    @property
+    def supports_custom_indices(self) -> bool:
+        """
+        Whether the graph backend supports custom indices.
+        """
+        return False
+
     @staticmethod
     def _validate_attributes(
         attrs: dict[str, Any],
@@ -74,8 +81,7 @@ class BaseGraph(abc.ABC):
         self,
         attrs: dict[str, Any],
         validate_keys: bool = True,
-        *args: Any,
-        **kwargs: Any,
+        index: int | None = None,
     ) -> int:
         """
         Add a node to the graph at time t.
@@ -93,10 +99,9 @@ class BaseGraph(abc.ABC):
             Whether to check if the attributes keys are valid.
             If False, the attributes keys will not be checked,
             useful to speed up the operation when doing bulk insertions.
-        *args: Any
-            Unused arguments, included for compatibility with the child classes.
-        **kwargs: Any
-            Unused keyword arguments, included for compatibility with the child classes.
+        index : int | None
+            Optional node index/ID to use. If None, the backend will assign
+            an appropriate ID. Only supported by certain backends (e.g., SQLGraph).
 
         Returns
         -------
@@ -107,8 +112,7 @@ class BaseGraph(abc.ABC):
     def bulk_add_nodes(
         self,
         nodes: list[dict[str, Any]],
-        *args: Any,
-        **kwargs: Any,
+        indices: list[int] | None = None,
     ) -> list[int]:
         """
         Faster method to add multiple nodes to the graph with less overhead and fewer checks.
@@ -119,10 +123,10 @@ class BaseGraph(abc.ABC):
             The data of the nodes to be added.
             The keys of the data will be used as the attributes of the nodes.
             Must have "t" key.
-        *args: Any
-            Unused arguments, included for compatibility with the child classes.
-        **kwargs: Any
-            Unused keyword arguments, included for compatibility with the child classes.
+        indices : list[int] | None
+            Optional list of node indices/IDs to use. If None, the backend will assign
+            appropriate IDs. Only supported by certain backends (e.g., SQLGraph).
+            Must be the same length as nodes if provided.
 
         Returns
         -------
@@ -132,8 +136,35 @@ class BaseGraph(abc.ABC):
         if len(nodes) == 0:
             return []
 
+        if indices is not None and len(indices) != len(nodes):
+            raise ValueError(f"Length of indices ({len(indices)}) must match length of nodes ({len(nodes)})")
+
         # this method benefits the SQLGraph backend
-        return [self.add_node(node, validate_keys=False) for node in nodes]
+        if indices is None:
+            return [self.add_node(node, validate_keys=False) for node in nodes]
+        else:
+            return [
+                self.add_node(node, validate_keys=False, index=idx) for node, idx in zip(nodes, indices, strict=True)
+            ]
+
+    @abc.abstractmethod
+    def remove_node(self, node_id: int) -> None:
+        """
+        Remove a node from the graph.
+
+        This method removes the specified node and all edges connected to it
+        (both incoming and outgoing edges).
+
+        Parameters
+        ----------
+        node_id : int
+            The ID of the node to remove.
+
+        Raises
+        ------
+        ValueError
+            If the node_id does not exist in the graph.
+        """
 
     @abc.abstractmethod
     def add_edge(
@@ -796,7 +827,19 @@ class BaseGraph(abc.ABC):
             if col != DEFAULT_ATTR_KEYS.T:
                 graph.add_node_attr_key(col, node_attrs[col].first())
 
-        new_node_ids = graph.bulk_add_nodes(list(node_attrs.rows(named=True)))
+        if graph.supports_custom_indices:
+            new_node_ids = graph.bulk_add_nodes(
+                list(node_attrs.rows(named=True)),
+                indices=other_node_ids.to_list(),
+            )
+        else:
+            new_node_ids = graph.bulk_add_nodes(list(node_attrs.rows(named=True)))
+            if other.supports_custom_indices:
+                LOG.warning(
+                    f"Other graph ({type(other).__name__}) supports custom indices, but this graph "
+                    f"({type(graph).__name__}) does not, indexing automatically."
+                )
+
         # mapping from old node ids to new node ids
         node_map = dict(zip(other_node_ids, new_node_ids, strict=True))
 

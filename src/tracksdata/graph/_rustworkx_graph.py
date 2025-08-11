@@ -367,8 +367,7 @@ class RustWorkXGraph(BaseGraph):
         self,
         attrs: dict[str, Any],
         validate_keys: bool = True,
-        *args: Any,
-        **kwargs: Any,
+        index: int | None = None,
     ) -> int:
         """
         Add a node to the graph at time t.
@@ -386,11 +385,13 @@ class RustWorkXGraph(BaseGraph):
             Whether to check if the attributes keys are valid.
             If False, the attributes keys will not be checked,
             useful to speed up the operation when doing bulk insertions.
-        *args: Any
-            Unused arguments, included for compatibility with the child classes.
-        **kwargs: Any
-            Unused keyword arguments, included for compatibility with the child classes.
+        index : int | None
+            Optional node index. RustWorkXGraph does not support custom indices
+            and will raise an error if this parameter is provided.
         """
+        if index is not None:
+            raise ValueError("RustWorkXGraph does not support custom node indices. Use IndexedRXGraph instead.")
+
         # avoiding copying attributes on purpose, it could be a problem in the future
         if validate_keys:
             self._validate_attributes(attrs, self.node_attr_keys, "node")
@@ -402,7 +403,7 @@ class RustWorkXGraph(BaseGraph):
         self._time_to_nodes.setdefault(attrs["t"], []).append(node_id)
         return node_id
 
-    def bulk_add_nodes(self, nodes: list[dict[str, Any]], *args: Any, **kwargs: Any) -> list[int]:
+    def bulk_add_nodes(self, nodes: list[dict[str, Any]], indices: list[int] | None = None) -> list[int]:
         """
         Faster method to add multiple nodes to the graph with less overhead and fewer checks.
 
@@ -412,20 +413,58 @@ class RustWorkXGraph(BaseGraph):
             The data of the nodes to be added.
             The keys of the data will be used as the attributes of the nodes.
             Must have "t" key.
-        *args: Any
-            Unused arguments, included for compatibility with the child classes.
-        **kwargs: Any
-            Unused keyword arguments, included for compatibility with the child classes.
+        indices : list[int] | None
+            Optional list of node indices. RustWorkXGraph does not support custom indices
+            and will raise an error if this parameter is provided.
 
         Returns
         -------
         list[int]
             The IDs of the added nodes.
         """
-        indices = list(self.rx_graph.add_nodes_from(nodes))
-        for node, index in zip(nodes, indices, strict=True):
+        if indices is not None:
+            raise ValueError("RustWorkXGraph does not support custom node indices. Use IndexedRXGraph instead.")
+
+        node_indices = list(self.rx_graph.add_nodes_from(nodes))
+        for node, index in zip(nodes, node_indices, strict=True):
             self._time_to_nodes.setdefault(node["t"], []).append(index)
-        return indices
+        return node_indices
+
+    def remove_node(self, node_id: int) -> None:
+        """
+        Remove a node from the graph.
+
+        This method removes the specified node and all edges connected to it
+        (both incoming and outgoing edges). Also updates the time_to_nodes mapping.
+
+        Parameters
+        ----------
+        node_id : int
+            The ID of the node to remove.
+
+        Raises
+        ------
+        ValueError
+            If the node_id does not exist in the graph.
+        """
+        if node_id not in self.rx_graph.node_indices():
+            raise ValueError(f"Node {node_id} does not exist in the graph")
+
+        # Get the time value before removing the node
+        t = self.rx_graph[node_id]["t"]
+
+        # Remove the node from the graph (this also removes all connected edges)
+        self.rx_graph.remove_node(node_id)
+
+        # Update the time_to_nodes mapping
+        self._time_to_nodes[t].remove(node_id)
+        # Clean up empty time entries
+        if not self._time_to_nodes[t]:
+            del self._time_to_nodes[t]
+
+        # Remove from overlaps if present
+        if self._overlaps is not None:
+            self._overlaps = [overlap for overlap in self._overlaps if node_id != overlap[0] and node_id != overlap[1]]
 
     def add_edge(
         self,
@@ -516,6 +555,7 @@ class RustWorkXGraph(BaseGraph):
             The ID of the added overlap.
         """
         self._overlaps.append([source_id, target_id])
+        return len(self._overlaps) - 1
 
     def overlaps(
         self,
@@ -1228,6 +1268,10 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
         self._next_external_id += 1
         return next_id
 
+    @property
+    def supports_custom_indices(self) -> bool:
+        return True
+
     def add_node(
         self,
         attrs: dict[str, Any],
@@ -1285,6 +1329,9 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
         """
         if len(nodes) == 0:
             return []
+
+        if indices is not None and len(indices) != len(nodes):
+            raise ValueError(f"Length of indices ({len(indices)}) must match length of nodes ({len(nodes)})")
 
         graph_ids = super().bulk_add_nodes(nodes)
 
@@ -1545,6 +1592,27 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
         """
         node_ids = self._get_local_ids() if node_ids is None else self._map_to_local(node_ids)
         super().update_node_attrs(attrs=attrs, node_ids=node_ids)
+
+    def remove_node(self, node_id: int) -> None:
+        """
+        Remove a node from the graph.
+
+        Parameters
+        ----------
+        node_id : int
+            The external ID of the node to remove.
+
+        Raises
+        ------
+        ValueError
+            If the node_id does not exist in the graph.
+        """
+        if node_id not in self._external_to_local:
+            raise ValueError(f"Node {node_id} does not exist in the graph")
+
+        local_node_id = self._map_to_local(node_id)
+        super().remove_node(local_node_id)
+        self._remove_id_mapping(external_id=node_id)
 
     def filter(
         self,
