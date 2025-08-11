@@ -136,8 +136,7 @@ class BaseGraph(abc.ABC):
         if len(nodes) == 0:
             return []
 
-        if indices is not None and len(indices) != len(nodes):
-            raise ValueError(f"Length of indices ({len(indices)}) must match length of nodes ({len(nodes)})")
+        self._validate_indices_length(nodes, indices)
 
         # this method benefits the SQLGraph backend
         if indices is None:
@@ -146,6 +145,10 @@ class BaseGraph(abc.ABC):
             return [
                 self.add_node(node, validate_keys=False, index=idx) for node, idx in zip(nodes, indices, strict=True)
             ]
+
+    def _validate_indices_length(self, nodes: list[dict[str, Any]], indices: list[int] | None) -> None:
+        if indices is not None and len(indices) != len(nodes):
+            raise ValueError(f"Length of indices ({len(indices)}) must match length of nodes ({len(nodes)})")
 
     @abc.abstractmethod
     def remove_node(self, node_id: int) -> None:

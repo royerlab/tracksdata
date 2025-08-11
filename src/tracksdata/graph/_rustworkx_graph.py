@@ -1330,8 +1330,7 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
         if len(nodes) == 0:
             return []
 
-        if indices is not None and len(indices) != len(nodes):
-            raise ValueError(f"Length of indices ({len(indices)}) must match length of nodes ({len(nodes)})")
+        self._validate_indices_length(nodes, indices)
 
         graph_ids = super().bulk_add_nodes(nodes)
 
