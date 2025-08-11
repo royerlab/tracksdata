@@ -29,7 +29,7 @@ class MappedGraphMixin:
         Inverse mapping from external IDs to local IDs
     """
 
-    def __init__(self, id_map: dict[int, int] | None = None):
+    def __init__(self, id_map: dict[int, int] | bidict.bidict[int, int] | None = None):
         """
         Initialize the ID mapping.
 
@@ -39,8 +39,13 @@ class MappedGraphMixin:
             Mapping from local IDs to external IDs. If None, creates empty mapping.
         """
         if id_map is None:
-            id_map = {}
-        self._local_to_external = bidict.bidict(id_map)
+            self._local_to_external = bidict.bidict()
+        elif isinstance(id_map, bidict.bidict):
+            self._local_to_external = id_map
+        elif isinstance(id_map, dict):
+            self._local_to_external = bidict.bidict(id_map)
+        else:
+            raise ValueError(f"Invalid type for id_map: {type(id_map)}")
         self._external_to_local = self._local_to_external.inverse
 
     @overload

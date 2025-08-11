@@ -2,6 +2,7 @@ import operator
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
+import bidict
 import numpy as np
 import polars as pl
 import rustworkx as rx
@@ -1207,19 +1208,12 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
         if node_id_map is not None:
             # Validate for duplicate values before inverting
             # This will raise bidict.ValueDuplicationError if there are duplicates
-            import bidict
-
-            bidict.bidict(node_id_map)
-            # node_id_map is {external: local}, we need {local: external} for MappedGraphMixin
-            inverted_map = {v: k for k, v in node_id_map.items()}
-        MappedGraphMixin.__init__(self, inverted_map)
-
-        # Initialize next external ID counter for efficient ID generation
-        if node_id_map:
-            # Start counter after the highest existing external ID (keys of node_id_map)
+            inverted_map = bidict.bidict(node_id_map).inverse
             self._next_external_id = max(node_id_map.keys()) + 1
         else:
             self._next_external_id = 0
+
+        MappedGraphMixin.__init__(self, inverted_map)
 
     def _get_next_available_external_id(self) -> int:
         """
