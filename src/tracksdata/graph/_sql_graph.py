@@ -1519,3 +1519,14 @@ class SQLGraph(BaseGraph):
                 .count()
                 > 0
             )
+
+    def edge_id(self, source_id: int, target_id: int) -> int:
+        """
+        Return the edge id between two nodes.
+        """
+        with Session(self._engine) as session:
+            return (
+                session.query(self.Edge.edge_id)
+                .filter(self.Edge.source_id == source_id, self.Edge.target_id == target_id)
+                .scalar()
+            )

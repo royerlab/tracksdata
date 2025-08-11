@@ -1259,3 +1259,9 @@ class BaseGraph(abc.ABC):
         """
         Check if the graph has an edge between two nodes.
         """
+
+    @abc.abstractmethod
+    def edge_id(self, source_id: int, target_id: int) -> int:
+        """
+        Return the edge id between two nodes.
+        """

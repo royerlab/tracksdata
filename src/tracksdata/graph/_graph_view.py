@@ -661,3 +661,9 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
         Check if the graph has an edge between two nodes.
         """
         return self._root.has_edge(source_id, target_id)
+
+    def edge_id(self, source_id: int, target_id: int) -> int:
+        """
+        Return the edge id between two nodes.
+        """
+        return self._root.edge_id(source_id, target_id)
