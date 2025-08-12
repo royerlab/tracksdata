@@ -97,6 +97,11 @@ def test_add_node_with_none_index_avoids_collision() -> None:
 
 def test_add_node_none_index_empty_graph() -> None:
     """Test that add_node with index=None works correctly on empty graph."""
+
+    # test with empty graph and empty node_id_map
+    graph = IndexedRXGraph(rx_graph=rx.PyDiGraph(), node_id_map={})
+
+    # test with empty graph and no node_id_map
     graph = IndexedRXGraph()
 
     # First node with None index should get ID 0

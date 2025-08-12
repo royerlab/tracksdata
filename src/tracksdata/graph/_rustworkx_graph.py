@@ -1264,7 +1264,7 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
             # Validate for duplicate values before inverting
             # This will raise bidict.ValueDuplicationError if there are duplicates
             inverted_map = bidict.bidict(node_id_map).inverse
-            self._next_external_id = max(node_id_map.keys()) + 1
+            self._next_external_id = max(node_id_map.keys(), default=0) + 1
         else:
             self._next_external_id = 0
 
