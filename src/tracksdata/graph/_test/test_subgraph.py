@@ -1112,3 +1112,14 @@ def test_edge_id(graph_backend: BaseGraph, use_subgraph: bool) -> None:
     for attr in edge_attrs.rows(named=True):
         edge_id = graph_with_data.edge_id(attr[DEFAULT_ATTR_KEYS.EDGE_SOURCE], attr[DEFAULT_ATTR_KEYS.EDGE_TARGET])
         assert edge_id == attr[DEFAULT_ATTR_KEYS.EDGE_ID]
+
+@parametrize_subgraph_tests
+def test_copy(graph_backend: BaseGraph, use_subgraph: bool) -> None:
+    """Test copy functionality on both original graphs and subgraphs."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+
+    copied_graph = graph_with_data.copy()
+    assert copied_graph.num_nodes == graph_with_data.num_nodes
+    assert copied_graph.num_edges == graph_with_data.num_edges
+    assert copied_graph.node_ids() == graph_with_data.node_ids()
+    assert copied_graph.edge_ids() == graph_with_data.edge_ids()

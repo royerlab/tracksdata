@@ -1265,3 +1265,27 @@ class BaseGraph(abc.ABC):
         """
         Return the edge id between two nodes.
         """
+        
+    def copy(self, **kwargs) -> "BaseGraph":
+        """
+        Create a copy of this graph.
+
+        Returns
+        -------
+        BaseGraph
+            A new graph instance with the same nodes, edges, and attributes as this graph.
+        **kwargs : Any
+            Additional arguments to pass to the graph constructor.
+
+        Examples
+        --------
+        ```python
+        copied_graph = graph.copy()
+        ```
+
+        See Also
+        --------
+        [from_other][tracksdata.graph.BaseGraph.from_other]:
+            Create a graph from another graph.
+        """
+        return self.__class__.from_other(self, **kwargs)
