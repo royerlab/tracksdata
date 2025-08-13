@@ -36,8 +36,7 @@ dependencies = [
   "blosc2",
   "numpy > 2",
   "scikit-image >= 0.24.0",
-  # remove this once rustworkx 0.17.0 is released
-  "rustworkx @ git+https://github.com/qiskit/rustworkx.git@ac1082ca9d1774e6e9a91436a15a201b0c7baffd",
+  "rustworkx >= 0.17.1",
   "tqdm",
   "polars",
   "sqlalchemy>=2",
