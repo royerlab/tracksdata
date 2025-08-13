@@ -1100,6 +1100,18 @@ def test_has_edge(graph_backend: BaseGraph, use_subgraph: bool) -> None:
     assert not graph_with_data.has_edge(10, 15)
     assert not graph_with_data.has_edge(graph_with_data._test_nodes[0], graph_with_data._test_nodes[-1])
 
+    # check if filtered edges are not present in the subgraph (they are in the _root graph)
+    if isinstance(graph_with_data, GraphView):
+        parent = graph_with_data._root
+        parent_edges = parent.edge_attrs().select(["source_id", "target_id"]).to_numpy().tolist()
+        graph_edges = graph_with_data.edge_attrs().select(["source_id", "target_id"]).to_numpy().tolist()
+
+        for edge in parent_edges:
+            if edge not in graph_edges:
+                assert not graph_with_data.has_edge(edge[0], edge[1])
+            else:
+                assert graph_with_data.has_edge(edge[0], edge[1])
+
 
 @parametrize_subgraph_tests
 def test_edge_id(graph_backend: BaseGraph, use_subgraph: bool) -> None:
