@@ -6,8 +6,7 @@ import pytest
 
 from tracksdata.attrs import EdgeAttr, NodeAttr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
-from tracksdata.graph import GraphView
-from tracksdata.graph._base_graph import BaseGraph
+from tracksdata.graph import BaseGraph, GraphView, SQLGraph
 
 
 def parametrize_subgraph_tests(func: Callable[..., None]) -> Callable[..., None]:
@@ -1131,7 +1130,16 @@ def test_copy(graph_backend: BaseGraph, use_subgraph: bool) -> None:
     """Test copy functionality on both original graphs and subgraphs."""
     graph_with_data = create_test_graph(graph_backend, use_subgraph)
 
-    copied_graph = graph_with_data.copy()
+    if isinstance(graph_with_data, SQLGraph):
+        kwargs = {
+            "drivername": "sqlite",
+            "database": ":memory:",
+            "overwrite": True,
+        }
+    else:
+        kwargs = {}
+
+    copied_graph = graph_with_data.copy(**kwargs)
     assert copied_graph.num_nodes == graph_with_data.num_nodes
     assert copied_graph.num_edges == graph_with_data.num_edges
     assert copied_graph.node_ids() == graph_with_data.node_ids()

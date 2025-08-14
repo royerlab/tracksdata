@@ -718,6 +718,7 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
             node_map_to_root=dict(self._local_to_external.items()),
             root=self._root,
             sync=self._sync,
+            **kwargs,
         )
 
         # The constructor already sets up edge mappings correctly
