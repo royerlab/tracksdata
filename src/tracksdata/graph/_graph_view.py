@@ -703,44 +703,16 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
 
     def copy(self, **kwargs) -> "GraphView":
         """
-        Create a copy of this graph view.
+        Not supported for `GraphView`.
 
-        This method creates a new graph view that is a copy of the current one,
-        preserving all mappings, relationships, and attributes. The copy maintains
-        its relationship with the root graph but has its own independent state.
+        Use `detach` to create a new reference-less graph with the same nodes and edges.
 
-        Parameters
-        ----------
-        **kwargs : Any
-            Additional arguments to pass to the graph constructor.
-
-        Returns
-        -------
-        GraphView
-            A new graph view instance with the same nodes, edges, attributes,
-            and root graph relationship as this view.
-
-        Examples
+        See Also
         --------
-        ```python
-        copied_view = graph_view.copy()
-        ```
+        [detach][tracksdata.graph.GraphView.detach]
+            Create a new reference-less graph with the same nodes and edges.
         """
-        # Create a copy of the underlying rustworkx graph
-        rx_graph_copy = self.rx_graph.copy()
-
-        # Create a new view with the same root and mappings
-        copied_view = GraphView(
-            rx_graph=rx_graph_copy,
-            node_map_to_root=dict(self._local_to_external.items()),
-            root=self._root,
-            sync=self._sync,
-            **kwargs,
+        raise ValueError(
+            "`copy` is not supported for `GraphView`.\n"
+            "Use `detach` to create a new reference-less graph with the same nodes and edges."
         )
-
-        # The constructor already sets up edge mappings correctly
-        # but we need to copy other attributes
-        copied_view._is_root_rx_graph = self._is_root_rx_graph
-        copied_view._out_of_sync = self._out_of_sync
-
-        return copied_view

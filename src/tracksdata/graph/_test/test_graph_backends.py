@@ -8,8 +8,7 @@ from zarr.storage import MemoryStore
 
 from tracksdata.attrs import EdgeAttr, NodeAttr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
-from tracksdata.graph import RustWorkXGraph, SQLGraph
-from tracksdata.graph._base_graph import BaseGraph
+from tracksdata.graph import BaseGraph, RustWorkXGraph, SQLGraph
 from tracksdata.io._numpy_array import from_array
 from tracksdata.nodes._mask import Mask
 
@@ -1686,3 +1685,22 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
         rx_graph,
         geff_graph.rx_graph,
     )
+
+
+def test_graph_copy(graph_backend: BaseGraph) -> None:
+    """Test copy functionality on both original graphs and subgraphs."""
+
+    if isinstance(graph_backend, SQLGraph):
+        kwargs = {
+            "drivername": "sqlite",
+            "database": ":memory:",
+            "overwrite": True,
+        }
+    else:
+        kwargs = {}
+
+    copied_graph = graph_backend.copy(**kwargs)
+    assert copied_graph.num_nodes == graph_backend.num_nodes
+    assert copied_graph.num_edges == graph_backend.num_edges
+    assert copied_graph.node_ids() == graph_backend.node_ids()
+    assert copied_graph.edge_ids() == graph_backend.edge_ids()
