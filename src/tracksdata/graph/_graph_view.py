@@ -681,3 +681,48 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
         Return the edge id between two nodes.
         """
         return self._root.edge_id(source_id, target_id)
+
+    def copy(self, **kwargs) -> "GraphView":
+        """
+        Create a copy of this graph view.
+
+        This method creates a new graph view that is a copy of the current one,
+        preserving all mappings, relationships, and attributes. The copy maintains
+        its relationship with the root graph but has its own independent state.
+
+        Parameters
+        ----------
+        **kwargs : Any
+            Additional arguments to pass to the graph constructor.
+
+        Returns
+        -------
+        GraphView
+            A new graph view instance with the same nodes, edges, attributes,
+            and root graph relationship as this view.
+
+        Examples
+        --------
+        ```python
+        copied_view = graph_view.copy()
+        ```
+        """
+        # Create a copy of the underlying rustworkx graph
+        rx_graph_copy = rx.PyDiGraph(multigraph=self.rx_graph.multigraph)
+        rx_graph_copy.add_nodes_from(self.rx_graph.nodes())
+        rx_graph_copy.add_edges_from(self.rx_graph.weighted_edge_list())
+
+        # Create a new view with the same root and mappings
+        copied_view = GraphView(
+            rx_graph=rx_graph_copy,
+            node_map_to_root=dict(self._local_to_external.items()),
+            root=self._root,
+            sync=self._sync,
+        )
+
+        # The constructor already sets up edge mappings correctly
+        # but we need to copy other attributes
+        copied_view._is_root_rx_graph = self._is_root_rx_graph
+        copied_view._out_of_sync = self._out_of_sync
+
+        return copied_view

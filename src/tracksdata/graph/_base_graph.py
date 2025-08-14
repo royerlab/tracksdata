@@ -1265,7 +1265,7 @@ class BaseGraph(abc.ABC):
         """
         Return the edge id between two nodes.
         """
-        
+
     def copy(self, **kwargs) -> "BaseGraph":
         """
         Create a copy of this graph.
