@@ -8,7 +8,7 @@ import pytest
 
 from tracksdata.attrs import EdgeAttr, NodeAttr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
-from tracksdata.graph import BaseGraph, GraphView
+from tracksdata.graph import BaseGraph, GraphView, SQLGraph
 from tracksdata.utils._logging import LOG
 
 
