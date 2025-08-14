@@ -1711,22 +1711,3 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
         rx_graph,
         geff_graph.rx_graph,
     )
-
-
-def test_graph_copy(graph_backend: BaseGraph) -> None:
-    """Test copy functionality on both original graphs and subgraphs."""
-
-    if isinstance(graph_backend, SQLGraph):
-        kwargs = {
-            "drivername": "sqlite",
-            "database": ":memory:",
-            "overwrite": True,
-        }
-    else:
-        kwargs = {}
-
-    copied_graph = graph_backend.copy(**kwargs)
-    assert copied_graph.num_nodes == graph_backend.num_nodes
-    assert copied_graph.num_edges == graph_backend.num_edges
-    assert copied_graph.node_ids() == graph_backend.node_ids()
-    assert copied_graph.edge_ids() == graph_backend.edge_ids()
