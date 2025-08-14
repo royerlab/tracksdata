@@ -169,9 +169,14 @@ class Mask:
         offset : NDArray[np.integer] | int, optional
             The offset to add to the indices, should be used with bounding box information.
         """
-        # TODO: make it zarr and tensorstore compatible
-        indices = self.mask_indices(offset)
-        buffer[indices] = value
+        if isinstance(offset, int):
+            offset = np.full(self._mask.ndim, offset)
+
+        window = tuple(
+            slice(i + o, j + o)
+            for i, j, o in zip(self._bbox[: self._mask.ndim], self._bbox[self._mask.ndim :], offset, strict=True)
+        )
+        buffer[window][self._mask] = value
 
     def iou(self, other: "Mask") -> float:
         """

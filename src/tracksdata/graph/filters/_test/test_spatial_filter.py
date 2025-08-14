@@ -50,12 +50,12 @@ def test_spatial_filter_initialization(sample_graph: RustWorkXGraph) -> None:
     """Test SpatialFilter initialization with default and custom attributes."""
     # Test default attributes
     spatial_filter = SpatialFilter(sample_graph)
-    assert spatial_filter._df_filter._attrs_keys == ["t", "z", "y", "x"]
+    assert spatial_filter._df_filter._attr_keys == ["t", "z", "y", "x"]
 
     # Test custom attributes
     custom_attrs = ["t", "y", "x"]
-    spatial_filter = SpatialFilter(sample_graph, attrs_keys=custom_attrs)
-    assert spatial_filter._df_filter._attrs_keys == custom_attrs
+    spatial_filter = SpatialFilter(sample_graph, attr_keys=custom_attrs)
+    assert spatial_filter._df_filter._attr_keys == custom_attrs
 
 
 def test_spatial_filter_querying(sample_graph: RustWorkXGraph) -> None:
@@ -87,14 +87,14 @@ def test_spatial_filter_dimensions() -> None:
     graph.add_node({"t": 0, "z": 0, "y": 10, "x": 20})
 
     # Test 2D coordinates
-    spatial_filter_2d = SpatialFilter(graph, attrs_keys=["y", "x"])
-    assert spatial_filter_2d._df_filter._attrs_keys == ["y", "x"]
+    spatial_filter_2d = SpatialFilter(graph, attr_keys=["y", "x"])
+    assert spatial_filter_2d._df_filter._attr_keys == ["y", "x"]
     result = spatial_filter_2d[0:50, 0:50]
     assert not result.node_attrs().is_empty()
 
     # Test 3D coordinates
-    spatial_filter_3d = SpatialFilter(graph, attrs_keys=["z", "y", "x"])
-    assert spatial_filter_3d._df_filter._attrs_keys == ["z", "y", "x"]
+    spatial_filter_3d = SpatialFilter(graph, attr_keys=["z", "y", "x"])
+    assert spatial_filter_3d._df_filter._attr_keys == ["z", "y", "x"]
     result = spatial_filter_3d[0:2, 0:100, 0:100]
     assert not result.node_attrs().is_empty()
 
@@ -120,7 +120,7 @@ def test_spatial_filter_with_edges() -> None:
     node2_id = graph.add_node({"t": 1, "y": 30, "x": 40})
     graph.add_edge(node1_id, node2_id, {"weight": 1.0})
 
-    spatial_filter = SpatialFilter(graph, attrs_keys=["y", "x"])
+    spatial_filter = SpatialFilter(graph, attr_keys=["y", "x"])
     result = spatial_filter[0:50, 0:50]
 
     # Should preserve both nodes and the edge

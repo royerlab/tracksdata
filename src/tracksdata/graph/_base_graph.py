@@ -8,10 +8,16 @@ from typing import TYPE_CHECKING, Any, Literal, TypeVar, overload
 import numpy as np
 import polars as pl
 import rustworkx as rx
+from geff import GeffMetadata
+from geff.metadata_schema import Axis
+from geff.rustworkx.io import read_rx
+from geff.write_arrays import write_arrays
 from numpy.typing import ArrayLike
+from zarr.storage import StoreLike
 
 from tracksdata.attrs import AttrComparison, NodeAttr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
+from tracksdata.utils._dtypes import column_to_bytes, column_to_numpy
 from tracksdata.utils._logging import LOG
 from tracksdata.utils._multiprocessing import multiprocessing_apply
 
@@ -30,6 +36,13 @@ class BaseGraph(abc.ABC):
     """
     Base class for a graph backend.
     """
+
+    @property
+    def supports_custom_indices(self) -> bool:
+        """
+        Whether the graph backend supports custom indices.
+        """
+        return False
 
     @staticmethod
     def _validate_attributes(
@@ -68,8 +81,7 @@ class BaseGraph(abc.ABC):
         self,
         attrs: dict[str, Any],
         validate_keys: bool = True,
-        *args: Any,
-        **kwargs: Any,
+        index: int | None = None,
     ) -> int:
         """
         Add a node to the graph at time t.
@@ -87,10 +99,9 @@ class BaseGraph(abc.ABC):
             Whether to check if the attributes keys are valid.
             If False, the attributes keys will not be checked,
             useful to speed up the operation when doing bulk insertions.
-        *args: Any
-            Unused arguments, included for compatibility with the child classes.
-        **kwargs: Any
-            Unused keyword arguments, included for compatibility with the child classes.
+        index : int | None
+            Optional node index/ID to use. If None, the backend will assign
+            an appropriate ID. Only supported by certain backends (e.g., SQLGraph).
 
         Returns
         -------
@@ -101,8 +112,7 @@ class BaseGraph(abc.ABC):
     def bulk_add_nodes(
         self,
         nodes: list[dict[str, Any]],
-        *args: Any,
-        **kwargs: Any,
+        indices: list[int] | None = None,
     ) -> list[int]:
         """
         Faster method to add multiple nodes to the graph with less overhead and fewer checks.
@@ -113,10 +123,10 @@ class BaseGraph(abc.ABC):
             The data of the nodes to be added.
             The keys of the data will be used as the attributes of the nodes.
             Must have "t" key.
-        *args: Any
-            Unused arguments, included for compatibility with the child classes.
-        **kwargs: Any
-            Unused keyword arguments, included for compatibility with the child classes.
+        indices : list[int] | None
+            Optional list of node indices/IDs to use. If None, the backend will assign
+            appropriate IDs. Only supported by certain backends (e.g., SQLGraph).
+            Must be the same length as nodes if provided.
 
         Returns
         -------
@@ -126,8 +136,38 @@ class BaseGraph(abc.ABC):
         if len(nodes) == 0:
             return []
 
+        self._validate_indices_length(nodes, indices)
+
         # this method benefits the SQLGraph backend
-        return [self.add_node(node, validate_keys=False) for node in nodes]
+        if indices is None:
+            return [self.add_node(node, validate_keys=False) for node in nodes]
+        else:
+            return [
+                self.add_node(node, validate_keys=False, index=idx) for node, idx in zip(nodes, indices, strict=True)
+            ]
+
+    def _validate_indices_length(self, nodes: list[dict[str, Any]], indices: list[int] | None) -> None:
+        if indices is not None and len(indices) != len(nodes):
+            raise ValueError(f"Length of indices ({len(indices)}) must match length of nodes ({len(nodes)})")
+
+    @abc.abstractmethod
+    def remove_node(self, node_id: int) -> None:
+        """
+        Remove a node from the graph.
+
+        This method removes the specified node and all edges connected to it
+        (both incoming and outgoing edges).
+
+        Parameters
+        ----------
+        node_id : int
+            The ID of the node to remove.
+
+        Raises
+        ------
+        ValueError
+            If the node_id does not exist in the graph.
+        """
 
     @abc.abstractmethod
     def add_edge(
@@ -790,7 +830,19 @@ class BaseGraph(abc.ABC):
             if col != DEFAULT_ATTR_KEYS.T:
                 graph.add_node_attr_key(col, node_attrs[col].first())
 
-        new_node_ids = graph.bulk_add_nodes(list(node_attrs.rows(named=True)))
+        if graph.supports_custom_indices:
+            new_node_ids = graph.bulk_add_nodes(
+                list(node_attrs.rows(named=True)),
+                indices=other_node_ids.to_list(),
+            )
+        else:
+            new_node_ids = graph.bulk_add_nodes(list(node_attrs.rows(named=True)))
+            if other.supports_custom_indices:
+                LOG.warning(
+                    f"Other graph ({type(other).__name__}) supports custom indices, but this graph "
+                    f"({type(graph).__name__}) does not, indexing automatically."
+                )
+
         # mapping from old node ids to new node ids
         node_map = dict(zip(other_node_ids, new_node_ids, strict=True))
 
@@ -903,7 +955,7 @@ class BaseGraph(abc.ABC):
 
         return summary
 
-    def spatial_filter(self, attrs_keys: list[str] | None = None) -> "SpatialFilter":
+    def spatial_filter(self, attr_keys: list[str] | None = None) -> "SpatialFilter":
         """
         Create a spatial filter for efficient spatial queries of graph nodes.
 
@@ -912,7 +964,7 @@ class BaseGraph(abc.ABC):
 
         Parameters
         ----------
-        attrs_keys : list[str] | None, optional
+        attr_keys : list[str] | None, optional
             List of attribute keys to use as spatial coordinates. If None, defaults to
             ["t", "z", "y", "x"] filtered to only include keys present in the graph.
             Common combinations include:
@@ -931,7 +983,7 @@ class BaseGraph(abc.ABC):
         Create a 2D spatial filter for image coordinates:
 
         ```python
-        spatial_filter = graph.spatial_filter(attrs_keys=["y", "x"])
+        spatial_filter = graph.spatial_filter(attr_keys=["y", "x"])
         # Query nodes in region y=[10, 50), x=[20, 60)
         subgraph = spatial_filter[10:50, 20:60].subgraph()
         ```
@@ -952,7 +1004,7 @@ class BaseGraph(abc.ABC):
         """
         from tracksdata.graph.filters._spatial_filter import SpatialFilter
 
-        return SpatialFilter(self, attrs_keys=attrs_keys)
+        return SpatialFilter(self, attr_keys=attr_keys)
 
     def bbox_spatial_filter(
         self,
@@ -1087,6 +1139,132 @@ class BaseGraph(abc.ABC):
         )
 
         return graph
+
+    @classmethod
+    def from_geff(
+        cls: type[T],
+        geff_store: StoreLike,
+        **kwargs,
+    ) -> T:
+        """
+        Create a graph from a geff data directory.
+
+        Parameters
+        ----------
+        geff_store : StoreLike
+            The store or path to the geff data directory to read the graph from.
+        **kwargs
+            Additional keyword arguments to pass to the graph constructor.
+
+        Returns
+        -------
+        T
+            The loaded graph.
+        """
+        from tracksdata.graph import IndexedRXGraph
+
+        # this performs a roundtrip with the rustworkx graph
+        rx_graph, _ = read_rx(geff_store)
+
+        if not isinstance(rx_graph, rx.PyDiGraph):
+            LOG.warning("The graph is not a directed graph, converting to directed graph.")
+            rx_graph = rx_graph.to_directed()
+
+        indexed_graph = IndexedRXGraph(
+            rx_graph=rx_graph,
+            node_id_map=rx_graph.attrs["to_rx_id_map"],
+            **kwargs,
+        )
+
+        if cls == IndexedRXGraph:
+            return indexed_graph
+
+        return cls.from_other(indexed_graph, **kwargs)
+
+    def to_geff(
+        self,
+        geff_store: StoreLike,
+        geff_metadata: GeffMetadata | None = None,
+        zarr_format: Literal[2, 3] = 3,
+    ) -> None:
+        """
+        Write the graph to a geff data directory.
+
+        Parameters
+        ----------
+        geff_store : StoreLike
+            The store or path to the geff data directory to write the graph to.
+        geff_metadata : GeffMetadata | None
+            The geff metadata to write to the graph.
+            It automatically generates the metadata with:
+            - axes: time (t) and spatial axes ((z), y, x)
+            - tracklet node property: track_id
+        zarr_format : Literal[2, 3]
+            The zarr format to write the graph to.
+            Defaults to 3.
+        """
+
+        node_attrs = self.node_attrs()
+
+        if DEFAULT_ATTR_KEYS.MASK in node_attrs.columns:
+            node_attrs = column_to_bytes(node_attrs, DEFAULT_ATTR_KEYS.MASK)
+
+        if geff_metadata is None:
+            axes = [Axis(name=DEFAULT_ATTR_KEYS.T, type="time")]
+            axes.extend([Axis(name=c, type="space") for c in ("z", "y", "x") if c in node_attrs.columns])
+
+            if DEFAULT_ATTR_KEYS.TRACK_ID in node_attrs.columns:
+                track_node_props = {
+                    "tracklet": DEFAULT_ATTR_KEYS.TRACK_ID,
+                }
+            else:
+                track_node_props = None
+
+            geff_metadata = GeffMetadata(
+                directed=True,
+                axes=axes,
+                track_node_props=track_node_props,
+            )
+
+        edge_attrs = self.edge_attrs().drop(DEFAULT_ATTR_KEYS.EDGE_ID)
+
+        node_dict = {
+            k: (column_to_numpy(v), None) for k, v in node_attrs.drop(DEFAULT_ATTR_KEYS.NODE_ID).to_dict().items()
+        }
+
+        edge_ids = edge_attrs.select(DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET).to_numpy()
+
+        edge_dict = {
+            k: (column_to_numpy(v), None)
+            for k, v in edge_attrs.drop(
+                DEFAULT_ATTR_KEYS.EDGE_SOURCE,
+                DEFAULT_ATTR_KEYS.EDGE_TARGET,
+            )
+            .to_dict()
+            .items()
+        }
+
+        write_arrays(
+            geff_store,
+            metadata=geff_metadata,
+            node_ids=node_attrs[DEFAULT_ATTR_KEYS.NODE_ID].to_numpy(),
+            node_props=node_dict,
+            edge_ids=edge_ids,
+            edge_props=edge_dict,
+            zarr_format=zarr_format,
+        )
+
+    @abc.abstractmethod
+    def has_edge(self, source_id: int, target_id: int) -> bool:
+        """
+        Check if the graph has an edge between two nodes.
+        """
+
+    @abc.abstractmethod
+    def edge_id(self, source_id: int, target_id: int) -> int:
+        """
+        Return the edge id between two nodes.
+        """
 
     def __getitem__(self, node_id: int) -> "NodeInterface":
         """

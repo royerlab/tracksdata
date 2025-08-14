@@ -2,6 +2,7 @@ import operator
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
+import bidict
 import numpy as np
 import polars as pl
 import rustworkx as rx
@@ -366,8 +367,7 @@ class RustWorkXGraph(BaseGraph):
         self,
         attrs: dict[str, Any],
         validate_keys: bool = True,
-        *args: Any,
-        **kwargs: Any,
+        index: int | None = None,
     ) -> int:
         """
         Add a node to the graph at time t.
@@ -385,11 +385,13 @@ class RustWorkXGraph(BaseGraph):
             Whether to check if the attributes keys are valid.
             If False, the attributes keys will not be checked,
             useful to speed up the operation when doing bulk insertions.
-        *args: Any
-            Unused arguments, included for compatibility with the child classes.
-        **kwargs: Any
-            Unused keyword arguments, included for compatibility with the child classes.
+        index : int | None
+            Optional node index. RustWorkXGraph does not support custom indices
+            and will raise an error if this parameter is provided.
         """
+        if index is not None:
+            raise ValueError("RustWorkXGraph does not support custom node indices. Use IndexedRXGraph instead.")
+
         # avoiding copying attributes on purpose, it could be a problem in the future
         if validate_keys:
             self._validate_attributes(attrs, self.node_attr_keys, "node")
@@ -401,7 +403,7 @@ class RustWorkXGraph(BaseGraph):
         self._time_to_nodes.setdefault(attrs["t"], []).append(node_id)
         return node_id
 
-    def bulk_add_nodes(self, nodes: list[dict[str, Any]], *args: Any, **kwargs: Any) -> list[int]:
+    def bulk_add_nodes(self, nodes: list[dict[str, Any]], indices: list[int] | None = None) -> list[int]:
         """
         Faster method to add multiple nodes to the graph with less overhead and fewer checks.
 
@@ -411,20 +413,58 @@ class RustWorkXGraph(BaseGraph):
             The data of the nodes to be added.
             The keys of the data will be used as the attributes of the nodes.
             Must have "t" key.
-        *args: Any
-            Unused arguments, included for compatibility with the child classes.
-        **kwargs: Any
-            Unused keyword arguments, included for compatibility with the child classes.
+        indices : list[int] | None
+            Optional list of node indices. RustWorkXGraph does not support custom indices
+            and will raise an error if this parameter is provided.
 
         Returns
         -------
         list[int]
             The IDs of the added nodes.
         """
-        indices = list(self.rx_graph.add_nodes_from(nodes))
-        for node, index in zip(nodes, indices, strict=True):
+        if indices is not None:
+            raise ValueError("RustWorkXGraph does not support custom node indices. Use IndexedRXGraph instead.")
+
+        node_indices = list(self.rx_graph.add_nodes_from(nodes))
+        for node, index in zip(nodes, node_indices, strict=True):
             self._time_to_nodes.setdefault(node["t"], []).append(index)
-        return indices
+        return node_indices
+
+    def remove_node(self, node_id: int) -> None:
+        """
+        Remove a node from the graph.
+
+        This method removes the specified node and all edges connected to it
+        (both incoming and outgoing edges). Also updates the time_to_nodes mapping.
+
+        Parameters
+        ----------
+        node_id : int
+            The ID of the node to remove.
+
+        Raises
+        ------
+        ValueError
+            If the node_id does not exist in the graph.
+        """
+        if node_id not in self.rx_graph.node_indices():
+            raise ValueError(f"Node {node_id} does not exist in the graph")
+
+        # Get the time value before removing the node
+        t = self.rx_graph[node_id]["t"]
+
+        # Remove the node from the graph (this also removes all connected edges)
+        self.rx_graph.remove_node(node_id)
+
+        # Update the time_to_nodes mapping
+        self._time_to_nodes[t].remove(node_id)
+        # Clean up empty time entries
+        if not self._time_to_nodes[t]:
+            del self._time_to_nodes[t]
+
+        # Remove from overlaps if present
+        if self._overlaps is not None:
+            self._overlaps = [overlap for overlap in self._overlaps if node_id != overlap[0] and node_id != overlap[1]]
 
     def add_edge(
         self,
@@ -515,6 +555,7 @@ class RustWorkXGraph(BaseGraph):
             The ID of the added overlap.
         """
         self._overlaps.append([source_id, target_id])
+        return len(self._overlaps) - 1
 
     def overlaps(
         self,
@@ -1013,6 +1054,7 @@ class RustWorkXGraph(BaseGraph):
         self,
         output_key: str = DEFAULT_ATTR_KEYS.TRACK_ID,
         reset: bool = True,
+        track_id_offset: int = 1,
     ) -> rx.PyDiGraph:
         """
         Compute and assign track ids to nodes.
@@ -1023,6 +1065,8 @@ class RustWorkXGraph(BaseGraph):
             The key of the output track id attribute.
         reset : bool
             Whether to reset the track ids of the graph. If True, the track ids will be reset to -1.
+        track_id_offset : int
+            The starting track id, useful when assigning track ids to a subgraph.
 
         Returns
         -------
@@ -1030,7 +1074,7 @@ class RustWorkXGraph(BaseGraph):
             A compressed graph (parent -> child) with track ids lineage relationships.
         """
         try:
-            node_ids, track_ids, tracks_graph = _assign_track_ids(self.rx_graph)
+            node_ids, track_ids, tracks_graph = _assign_track_ids(self.rx_graph, track_id_offset)
         except RuntimeError as e:
             raise RuntimeError(
                 "Are you sure this graph is a valid lineage graph?\n"
@@ -1043,7 +1087,10 @@ class RustWorkXGraph(BaseGraph):
         elif reset:
             self.update_node_attrs(node_ids=self.node_ids(), attrs={output_key: -1})
 
-        self.update_node_attrs(
+        # node_ids are rustworkx graph ids, therefore we don't need node_id mapping
+        # and we must use RustWorkXGraph for IndexedRXGraph
+        RustWorkXGraph.update_node_attrs(
+            self,
             node_ids=node_ids,
             attrs={output_key: track_ids},
         )
@@ -1163,6 +1210,18 @@ class RustWorkXGraph(BaseGraph):
         rx_graph, node_map = self.rx_graph.subgraph_with_nodemap(node_ids)
         return rx_graph, node_map
 
+    def has_edge(self, source_id: int, target_id: int) -> bool:
+        """
+        Check if the graph has an edge between two nodes.
+        """
+        return self.rx_graph.has_edge(source_id, target_id)
+
+    def edge_id(self, source_id: int, target_id: int) -> int:
+        """
+        Return the edge id between two nodes.
+        """
+        return self.rx_graph.get_edge_data(source_id, target_id)[DEFAULT_ATTR_KEYS.EDGE_ID]
+
 
 class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
     """
@@ -1199,18 +1258,34 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
         # Initialize RustWorkXGraph
         RustWorkXGraph.__init__(self, rx_graph)
 
-        # Initialize MappedGraphMixin with inverted mapping (external -> local)
+        # Initialize MappedGraphMixin with inverted mapping (local -> external)
         inverted_map = None
         if node_id_map is not None:
             # Validate for duplicate values before inverting
             # This will raise bidict.ValueDuplicationError if there are duplicates
-            import bidict
+            inverted_map = bidict.bidict(node_id_map).inverse
+            self._next_external_id = max(node_id_map.keys(), default=0) + 1
+        else:
+            self._next_external_id = 0
 
-            bidict.bidict(node_id_map)
-            inverted_map = {v: k for k, v in node_id_map.items()}
         MappedGraphMixin.__init__(self, inverted_map)
 
-        # ID mapping handled by MappedGraphMixin
+    def _get_next_available_external_id(self) -> int:
+        """
+        Get the next available external ID in O(1) time using an internal counter.
+
+        Returns
+        -------
+        int
+            The next available external ID.
+        """
+        next_id = self._next_external_id
+        self._next_external_id += 1
+        return next_id
+
+    @property
+    def supports_custom_indices(self) -> bool:
+        return True
 
     def add_node(
         self,
@@ -1228,8 +1303,8 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
         validate_keys : bool
             Whether to validate the keys of the attributes.
         index : int | None
-            The index of the node. If None, the node id will be used.
-            This might cause issues if the node id is not unique.
+            The index of the node. If None, the next available index will be used
+            to avoid conflicts with existing node indices.
 
         Returns
         -------
@@ -1238,7 +1313,10 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
         """
         node_id = super().add_node(attrs, validate_keys)
         if index is None:
-            index = node_id
+            index = self._get_next_available_external_id()
+        else:
+            # Update counter if explicit index is higher to avoid future collisions
+            self._next_external_id = max(self._next_external_id, index + 1)
         # Add mapping using mixin
         self._add_id_mapping(node_id, index)
         return index
@@ -1256,18 +1334,31 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
         nodes : list[dict[str, Any]]
             The attributes of the nodes.
         indices : list[int] | None
-            The indices of the nodes. If None, the node ids will be used.
-            This might cause issues if the node ids are not unique.
+            The indices of the nodes. If None, all nodes will get auto-generated indices.
+            If provided, must have same length as nodes and all indices must be specified.
 
         Returns
         -------
         list[int]
             The indices of the nodes.
         """
+        if len(nodes) == 0:
+            return []
+
+        self._validate_indices_length(nodes, indices)
+
         graph_ids = super().bulk_add_nodes(nodes)
 
         if indices is None:
-            indices = graph_ids
+            # All nodes get auto-generated indices
+            indices = [self._get_next_available_external_id() for _ in nodes]
+        else:
+            # All indices are explicitly provided
+            if len(indices) != len(nodes):
+                raise ValueError(f"Length of indices ({len(indices)}) must match nodes ({len(nodes)})")
+
+            # Update counter to be after the highest explicit index
+            self._next_external_id = max(self._next_external_id, max(indices) + 1)
 
         self._add_id_mappings(list(zip(graph_ids, indices, strict=True)))
 
@@ -1322,7 +1413,6 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
     def node_attrs(
         self,
         *,
-        node_ids: Sequence[int] | None = None,
         attr_keys: Sequence[str] | str | None = None,
         unpack: bool = False,
     ) -> pl.DataFrame:
@@ -1331,8 +1421,6 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
 
         Parameters
         ----------
-        node_ids : Sequence[int] | None
-            The node ids to include in the subgraph.
         attr_keys : Sequence[str] | str | None
             The attributes to include in the subgraph.
         unpack : bool
@@ -1343,7 +1431,7 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
         pl.DataFrame
             The node attributes of the graph.
         """
-        node_ids = self._get_local_ids() if node_ids is None else self._map_to_local(node_ids)
+        node_ids = self._get_local_ids()
         df = super()._node_attrs_from_node_ids(node_ids=node_ids, attr_keys=attr_keys, unpack=unpack)
         df = self._map_df_to_external(df, [DEFAULT_ATTR_KEYS.NODE_ID])
         return df
@@ -1519,6 +1607,27 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
         node_ids = self._get_local_ids() if node_ids is None else self._map_to_local(node_ids)
         super().update_node_attrs(attrs=attrs, node_ids=node_ids)
 
+    def remove_node(self, node_id: int) -> None:
+        """
+        Remove a node from the graph.
+
+        Parameters
+        ----------
+        node_id : int
+            The external ID of the node to remove.
+
+        Raises
+        ------
+        ValueError
+            If the node_id does not exist in the graph.
+        """
+        if node_id not in self._external_to_local:
+            raise ValueError(f"Node {node_id} does not exist in the graph")
+
+        local_node_id = self._map_to_local(node_id)
+        super().remove_node(local_node_id)
+        self._remove_id_mapping(external_id=node_id)
+
     def filter(
         self,
         *attr_filters: AttrComparison,
@@ -1535,3 +1644,29 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
             include_targets=include_targets,
             include_sources=include_sources,
         )
+
+    def has_edge(self, source_id: int, target_id: int) -> bool:
+        """
+        Check if the graph has an edge between two nodes.
+        """
+        try:
+            source_id = self._map_to_local(source_id)
+        except KeyError:
+            LOG.warning(f"`source_id` {source_id} not found in index map.")
+            return False
+
+        try:
+            target_id = self._map_to_local(target_id)
+        except KeyError:
+            LOG.warning(f"`target_id` {target_id} not found in index map.")
+            return False
+
+        return self.rx_graph.has_edge(source_id, target_id)
+
+    def edge_id(self, source_id: int, target_id: int) -> int:
+        """
+        Return the edge id between two nodes.
+        """
+        source_id = self._map_to_local(source_id)
+        target_id = self._map_to_local(target_id)
+        return super().edge_id(source_id, target_id)

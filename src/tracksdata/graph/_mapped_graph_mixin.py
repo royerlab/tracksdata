@@ -29,7 +29,7 @@ class MappedGraphMixin:
         Inverse mapping from external IDs to local IDs
     """
 
-    def __init__(self, id_map: dict[int, int] | None = None):
+    def __init__(self, id_map: dict[int, int] | bidict.bidict[int, int] | None = None):
         """
         Initialize the ID mapping.
 
@@ -39,8 +39,13 @@ class MappedGraphMixin:
             Mapping from local IDs to external IDs. If None, creates empty mapping.
         """
         if id_map is None:
-            id_map = {}
-        self._local_to_external = bidict.bidict(id_map)
+            self._local_to_external = bidict.bidict()
+        elif isinstance(id_map, bidict.bidict):
+            self._local_to_external = id_map
+        elif isinstance(id_map, dict):
+            self._local_to_external = bidict.bidict(id_map)
+        else:
+            raise ValueError(f"Invalid type for id_map: {type(id_map)}")
         self._external_to_local = self._local_to_external.inverse
 
     @overload
@@ -186,6 +191,29 @@ class MappedGraphMixin:
             Sequence of (local_id, external_id) pairs
         """
         self._local_to_external.putall(mappings)
+
+    def _remove_id_mapping(
+        self,
+        *,
+        local_id: int | None = None,
+        external_id: int | None = None,
+    ) -> None:
+        """
+        Remove an ID mapping.
+
+        Parameters
+        ----------
+        local_id : int
+            Local node ID to remove from mapping
+        external_id : int
+            External node ID to remove from mapping
+        """
+        if local_id is not None:
+            del self._local_to_external[local_id]
+        elif external_id is not None:
+            del self._external_to_local[external_id]
+        else:
+            raise ValueError("Either local_id or external_id must be provided")
 
     def _get_external_ids(self) -> list[int]:
         """
