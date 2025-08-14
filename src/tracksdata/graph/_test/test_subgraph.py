@@ -1,4 +1,6 @@
+import re
 from collections.abc import Callable
+from contextlib import contextmanager
 from copy import deepcopy
 
 import polars as pl
@@ -6,8 +8,8 @@ import pytest
 
 from tracksdata.attrs import EdgeAttr, NodeAttr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
-from tracksdata.graph import GraphView
-from tracksdata.graph._base_graph import BaseGraph
+from tracksdata.graph import BaseGraph, GraphView
+from tracksdata.utils._logging import LOG
 
 
 def parametrize_subgraph_tests(func: Callable[..., None]) -> Callable[..., None]:
@@ -1087,6 +1089,18 @@ def test_remove_node_updates_time_points(graph_backend: BaseGraph, use_subgraph:
 @parametrize_subgraph_tests
 def test_has_edge(graph_backend: BaseGraph, use_subgraph: bool) -> None:
     """Test has_edge functionality on both original graphs and subgraphs."""
+
+    @contextmanager
+    def _ignore_index_map_warnings():
+        def flt(r) -> bool:
+            return not re.search(r"not found in index map", r.getMessage())
+
+        LOG.addFilter(flt)
+        try:
+            yield
+        finally:
+            LOG.removeFilter(flt)
+
     graph_with_data = create_test_graph(graph_backend, use_subgraph)
 
     # Add some edges
@@ -1097,7 +1111,9 @@ def test_has_edge(graph_backend: BaseGraph, use_subgraph: bool) -> None:
     ):
         assert graph_with_data.has_edge(src_id, tgt_id)
 
-    assert not graph_with_data.has_edge(10, 15)
+    with _ignore_index_map_warnings():
+        assert not graph_with_data.has_edge(10, 15)
+
     assert not graph_with_data.has_edge(graph_with_data._test_nodes[0], graph_with_data._test_nodes[-1])
 
     # check if filtered edges are not present in the subgraph (they are in the _root graph)
@@ -1108,7 +1124,8 @@ def test_has_edge(graph_backend: BaseGraph, use_subgraph: bool) -> None:
 
         for edge in parent_edges:
             if edge not in graph_edges:
-                assert not graph_with_data.has_edge(edge[0], edge[1])
+                with _ignore_index_map_warnings():
+                    assert not graph_with_data.has_edge(edge[0], edge[1])
             else:
                 assert graph_with_data.has_edge(edge[0], edge[1])
 
