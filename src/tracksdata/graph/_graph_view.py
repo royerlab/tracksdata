@@ -708,9 +708,7 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
         ```
         """
         # Create a copy of the underlying rustworkx graph
-        rx_graph_copy = rx.PyDiGraph(multigraph=self.rx_graph.multigraph)
-        rx_graph_copy.add_nodes_from(self.rx_graph.nodes())
-        rx_graph_copy.add_edges_from(self.rx_graph.weighted_edge_list())
+        rx_graph_copy = self.rx_graph.copy()
 
         # Create a new view with the same root and mappings
         copied_view = GraphView(
