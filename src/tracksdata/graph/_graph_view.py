@@ -1,5 +1,5 @@
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import Any, Literal, overload
 
 import bidict
 import polars as pl
@@ -10,7 +10,7 @@ from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.functional._rx import _assign_track_ids
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.graph._mapped_graph_mixin import MappedGraphMixin
-from tracksdata.graph._rustworkx_graph import RustWorkXGraph, RXFilter
+from tracksdata.graph._rustworkx_graph import IndexedRXGraph, RustWorkXGraph, RXFilter
 from tracksdata.graph.filters._indexed_filter import IndexRXFilter
 from tracksdata.utils._logging import LOG
 
@@ -628,12 +628,31 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
 
         return subgraph
 
-    def detach(self) -> RustWorkXGraph:
+    @overload
+    def detach(self, reset_ids: Literal[False]) -> IndexedRXGraph: ...
+
+    @overload
+    def detach(self, reset_ids: Literal[True]) -> RustWorkXGraph: ...
+
+    def detach(self, reset_ids: bool = False) -> IndexedRXGraph | RustWorkXGraph:
         """
         Detach the graph view from the root graph, returning a new graph with the same nodes and edges
         without the view's mapping and indenpendent ids.
+
+        Parameters
+        ----------
+        reset_ids : bool
+            Whether to reset the ids of the graph.
+
+        Returns
+        -------
+        IndexedRXGraph | RustWorkXGraph
+            The detached graph.
         """
-        return RustWorkXGraph.from_other(self)
+        if reset_ids:
+            return RustWorkXGraph.from_other(self)
+        else:
+            return IndexedRXGraph.from_other(self)
 
     def _rx_subgraph_with_nodemap(
         self,
