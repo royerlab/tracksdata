@@ -312,7 +312,7 @@ def evaluate_ctc_metrics(
 
     if input_graph.num_nodes == 0:
         LOG.warning("Input graph has no nodes, returning 0.0 for all metrics.")
-        return dict.fromkeys(metrics, 0.0)
+        return dict.fromkeys(metrics, -1.0)
 
     if input_track_id_key not in input_graph.node_attr_keys:
         input_graph.assign_track_ids(input_track_id_key, reset=input_reset)
