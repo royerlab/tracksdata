@@ -165,8 +165,8 @@ def _matching_data(
 
     n_time_points = (
         max(
-            max(groups_by_time["ref"].keys()),
-            max(groups_by_time["comp"].keys()),
+            max(groups_by_time["ref"].keys(), default=-1),
+            max(groups_by_time["comp"].keys(), default=-1),
         )
         + 1
     )
