@@ -64,7 +64,7 @@ def compressed_tracks_table(graph: BaseGraph) -> np.ndarray:
         if len(df) > 0:
             track_id[3] = df[DEFAULT_ATTR_KEYS.TRACK_ID].item()
 
-    out_array = np.asarray(tracks_data, dtype=int)
+    out_array = np.atleast_2d(np.asarray(tracks_data, dtype=int))
     out_array = out_array[np.argsort(out_array[:, 0])]
 
     return out_array
