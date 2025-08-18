@@ -311,7 +311,7 @@ def evaluate_ctc_metrics(
         LOG.warning("IMPORTANT! 'SEG' metric results are based on TRA masks, not the SEG masks.")
 
     if input_graph.num_nodes == 0:
-        LOG.warning("Input graph has no nodes, returning 0.0 for all metrics.")
+        LOG.warning("Input graph has no nodes, returning -1.0 for all metrics.")
         return dict.fromkeys(metrics, -1.0)
 
     if input_track_id_key not in input_graph.node_attr_keys:
