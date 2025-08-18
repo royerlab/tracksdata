@@ -304,6 +304,16 @@ def evaluate_ctc_metrics(
             "`py-ctcmetrics` is required to evaluate CTC metrics.\nPlease install it with `pip install py-ctcmetrics`."
         ) from e
 
+    if metrics is None:
+        metrics: list[str] = ALL_METRICS.copy()
+
+    if "SEG" in metrics:
+        LOG.warning("IMPORTANT! 'SEG' metric results are based on TRA masks, not the SEG masks.")
+
+    if input_graph.num_nodes == 0:
+        LOG.warning("Input graph has no nodes, returning 0.0 for all metrics.")
+        return dict.fromkeys(metrics, 0.0)
+
     if input_track_id_key not in input_graph.node_attr_keys:
         input_graph.assign_track_ids(input_track_id_key, reset=input_reset)
 
@@ -313,12 +323,6 @@ def evaluate_ctc_metrics(
     input_tracks, reference_tracks, matching_data = compute_ctc_metrics_data(
         input_graph, reference_graph, input_track_id_key, reference_track_id_key
     )
-
-    if metrics is None:
-        metrics: list[str] = ALL_METRICS.copy()
-
-    if "SEG" in metrics:
-        LOG.warning("IMPORTANT! 'SEG' metric results are based on TRA masks, not the SEG masks.")
 
     results = calculate_metrics(
         comp_tracks=input_tracks,
