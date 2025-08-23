@@ -173,10 +173,10 @@ def test_bbox_spatial_filter_with_edges() -> None:
 def test_bbox_spatial_filter_initialization(sample_bbox_graph: RustWorkXGraph) -> None:
     """Test BoundingBoxSpatialFilter initialization with default and custom attributes."""
     spatial_filter = BBoxSpatialFilter(sample_bbox_graph)
-    assert spatial_filter._node_rtree is not None
+    assert spatial_filter._df_filter._node_rtree is not None
 
     spatial_filter = BBoxSpatialFilter(sample_bbox_graph, frame_attr_key="t", bbox_attr_key="bbox")
-    assert spatial_filter._node_rtree is not None
+    assert spatial_filter._df_filter._node_rtree is not None
 
 
 def test_bbox_spatial_filter_querying(sample_bbox_graph: RustWorkXGraph) -> None:
