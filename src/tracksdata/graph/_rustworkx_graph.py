@@ -315,6 +315,7 @@ class RustWorkXGraph(BaseGraph):
 
         if rx_graph is None:
             self._graph = rx.PyDiGraph()
+            self._node_attr_keys.append(DEFAULT_ATTR_KEYS.NODE_ID)
             self._node_attr_keys.append(DEFAULT_ATTR_KEYS.T)
 
         else:

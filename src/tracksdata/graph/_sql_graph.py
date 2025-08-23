@@ -1183,7 +1183,6 @@ class SQLGraph(BaseGraph):
     @property
     def node_attr_keys(self) -> list[str]:
         keys = list(self.Node.__table__.columns.keys())
-        keys.remove(DEFAULT_ATTR_KEYS.NODE_ID)
         return keys
 
     @property
