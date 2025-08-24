@@ -104,7 +104,7 @@ def to_napari_format(
         solution_graph = graph
 
     tracks_graph = solution_graph.assign_track_ids(output_track_id_key)
-    dict_graph = {child: parent for parent, child in tracks_graph.edge_list()}
+    dict_graph = {tracks_graph[child]: tracks_graph[parent] for parent, child in tracks_graph.edge_list()}
 
     spatial_cols = ["z", "y", "x"][-len(shape) + 1 :]
 

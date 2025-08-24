@@ -27,7 +27,7 @@ def test_single_path() -> None:
     assert np.array_equal(node_ids, [0, 1, 2])
     assert np.array_equal(track_ids, [1, 1, 1])
     assert isinstance(tracks_graph, rx.PyDiGraph)
-    assert tracks_graph.num_nodes() == 1 + 1  # Single track (includes null node (0))
+    assert tracks_graph.num_nodes() == 1  # Single track
 
 
 def test_symmetric_branching_path() -> None:
@@ -53,7 +53,7 @@ def test_symmetric_branching_path() -> None:
     assert len(track_ids) == 3
     assert len(np.unique(track_ids)) == 3  # Three unique track IDs
     assert isinstance(tracks_graph, rx.PyDiGraph)
-    assert tracks_graph.num_nodes() == 3 + 1  # Three tracks (includes null node (0))
+    assert tracks_graph.num_nodes() == 3  # Three tracks
 
 
 def test_asymmetric_branching_path() -> None:
@@ -83,7 +83,7 @@ def test_asymmetric_branching_path() -> None:
     assert len(track_ids) == 4
     assert len(np.unique(track_ids)) == 3  # Three unique track IDs
     assert isinstance(tracks_graph, rx.PyDiGraph)
-    assert tracks_graph.num_nodes() == 3 + 1  # Three tracks (includes null node (0))
+    assert tracks_graph.num_nodes() == 3  # Three tracks
 
 
 def test_invalid_multiple_parents() -> None:
@@ -139,15 +139,19 @@ def test_complex_valid_branching() -> None:
     np.testing.assert_array_equal(node_ids, [0, 1, 3, 4, 2, 5])
     np.testing.assert_array_equal(track_ids, [1, 2, 2, 2, 3, 4])
 
-    assert set(tracks_graph.successor_indices(1)) == {2, 3}
-    assert set(tracks_graph.successor_indices(3)) == {4}
+    assert set(tracks_graph.successor_indices(tracks_graph.find_node_by_weight(1))) == set(
+        map(tracks_graph.find_node_by_weight, {2, 3})
+    )
+    assert set(tracks_graph.successor_indices(tracks_graph.find_node_by_weight(3))) == set(
+        map(tracks_graph.find_node_by_weight, {4})
+    )
     assert tracks_graph.num_edges() == 3
 
     assert len(node_ids) == 6
     assert len(track_ids) == 6
     assert len(np.unique(track_ids)) == 4  # {0, {1, 3, 4}, 2, 5}
     assert isinstance(tracks_graph, rx.PyDiGraph)
-    assert tracks_graph.num_nodes() == 4 + 1  # Five tracks (includes null node (0))
+    assert tracks_graph.num_nodes() == 4  # Four tracks
 
 
 def test_three_children() -> None:
@@ -169,7 +173,9 @@ def test_three_children() -> None:
     graph.add_edge(nodes[0], nodes[3], None)
 
     _, track_ids, tracks_graph = _assign_track_ids(graph, track_id_offset=1)
-    assert set(tracks_graph.successor_indices(track_ids[0])) == set(track_ids[1:])
+    track_graphs_node_id = tracks_graph.find_node_by_weight(track_ids[0])
+    successor_node_ids = tracks_graph.successor_indices(track_graphs_node_id)
+    assert {tracks_graph[i] for i in successor_node_ids} == set(track_ids[1:])
 
 
 def test_multiple_roots() -> None:
@@ -188,4 +194,4 @@ def test_multiple_roots() -> None:
     assert len(track_ids) == 4
     assert len(np.unique(track_ids)) == 2  # Two unique track IDs
     assert isinstance(tracks_graph, rx.PyDiGraph)
-    assert tracks_graph.num_nodes() == 2 + 1  # Two separate tracks (includes null node (0))
+    assert tracks_graph.num_nodes() == 2  # Two separate tracks
