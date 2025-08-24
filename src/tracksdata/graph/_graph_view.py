@@ -518,8 +518,29 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
         rx.PyDiGraph
             A compressed graph (parent -> child) with track ids lineage relationships.
         """
+
+        # Extend the graph so that it include all tracklets containing the nodes in the view.
+        node_ids = set()
+        active_ids = set(self.node_ids())
+        while len(active_ids) > 0:
+            node_ids.update(active_ids)
+            successors = [
+                df[DEFAULT_ATTR_KEYS.NODE_ID].first()
+                for df in self._root.successors(node_ids=active_ids).values()
+                if len(df) == 1
+            ]  # Only consider non-branching nodes
+            predecessors = [
+                df[DEFAULT_ATTR_KEYS.NODE_ID].first()
+                for df in self._root.predecessors(node_ids=active_ids).values()
+                if len(df) == 1  # Only consider non-branching nodes
+            ]
+            out_degrees = self._root.out_degree(predecessors)
+            predecessors = [node for node, degree in zip(predecessors, out_degrees, strict=False) if degree == 1]
+            active_ids = set(successors + predecessors) - node_ids
+
+        extended_graph = self._root.filter(node_ids=list(node_ids)).subgraph()
         try:
-            node_ids, track_ids, tracks_graph = _assign_track_ids(self.rx_graph, track_id_offset)
+            node_ids, track_ids, tracks_graph = _assign_track_ids(extended_graph.rx_graph, track_id_offset)
         except RuntimeError as e:
             raise RuntimeError(
                 "Are you sure this graph is a valid lineage graph?\n"
@@ -527,14 +548,14 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
                 "Often used from `graph.subgraph(edge_attr_filter={'solution': True})`"
             ) from e
 
-        node_ids = self._map_to_external(node_ids)
+        node_ids = extended_graph._map_to_external(node_ids)
 
-        if output_key not in self.node_attr_keys:
-            self.add_node_attr_key(output_key, -1)
+        if output_key not in extended_graph.node_attr_keys:
+            extended_graph.add_node_attr_key(output_key, -1)
         elif reset:
-            self.update_node_attrs(attrs={output_key: -1})
+            extended_graph.update_node_attrs(attrs={output_key: -1})
 
-        self.update_node_attrs(
+        extended_graph.update_node_attrs(
             node_ids=node_ids,
             attrs={output_key: track_ids},
         )

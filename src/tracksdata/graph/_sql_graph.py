@@ -1395,6 +1395,40 @@ class SQLGraph(BaseGraph):
 
         return [degree.get(node_id, 0) for node_id in node_ids]
 
+    def assign_track_ids(
+        self,
+        output_key: str = DEFAULT_ATTR_KEYS.TRACK_ID,
+        reset: bool = True,
+        track_id_offset: int = 1,
+    ) -> rx.PyDiGraph:
+        """
+        Compute and assign track ids to nodes.
+
+        Parameters
+        ----------
+        output_key : str
+            The key of the output track id attribute.
+        reset : bool
+            Whether to reset the track ids of the graph. If True, the track ids will be reset to -1.
+        track_id_offset : int
+            The starting track id, useful when assigning track ids to a subgraph.
+
+        Returns
+        -------
+        rx.PyDiGraph
+            A compressed graph (parent -> child) with track ids lineage relationships.
+            If node_ids is provided, it will only include linages including those nodes.
+        """
+        return (
+            self.filter()
+            .subgraph(node_attr_keys=[output_key], edge_attr_keys=[])
+            .assign_track_ids(
+                output_key=output_key,
+                reset=reset,
+                track_id_offset=track_id_offset,
+            )
+        )
+
     def in_degree(self, node_ids: list[int] | int | None = None) -> list[int] | int:
         """
         Get the in-degree of a list of nodes.

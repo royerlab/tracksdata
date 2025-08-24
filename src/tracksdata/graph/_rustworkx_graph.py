@@ -1050,6 +1050,7 @@ class RustWorkXGraph(BaseGraph):
             for key, value in attrs.items():
                 edge_attr[key] = value[i]
 
+    # Do I map the previous and re-calculated track IDs?
     def assign_track_ids(
         self,
         output_key: str = DEFAULT_ATTR_KEYS.TRACK_ID,
@@ -1067,7 +1068,6 @@ class RustWorkXGraph(BaseGraph):
             Whether to reset the track ids of the graph. If True, the track ids will be reset to -1.
         track_id_offset : int
             The starting track id, useful when assigning track ids to a subgraph.
-
         Returns
         -------
         rx.PyDiGraph
