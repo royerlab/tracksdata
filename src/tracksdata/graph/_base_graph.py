@@ -70,6 +70,7 @@ class BaseGraph(abc.ABC):
                     f"`graph.add_{mode}_attr_key(key, default_value)`"
                 )
 
+        
         for ref_key in reference_keys:
             if ref_key not in attrs.keys():
                 raise ValueError(

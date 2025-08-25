@@ -54,6 +54,7 @@ class IndexRXFilter(RXFilter):
         edge_attr_keys: Sequence[str] | str | None = None,
     ) -> "GraphView":
         from tracksdata.graph._graph_view import GraphView
+        from tracksdata.graph._utils import normalize_attr_keys
 
         node_ids = self.node_ids()
 
@@ -64,6 +65,22 @@ class IndexRXFilter(RXFilter):
                 if not _filter_func(attr):
                     rx_graph.remove_edge(src, tgt)
 
+        node_attr_keys = normalize_attr_keys(
+            node_attr_keys,
+            self._graph.node_attr_keys,
+            [DEFAULT_ATTR_KEYS.NODE_ID],
+        )
+
+        edge_attr_keys = normalize_attr_keys(
+            edge_attr_keys,
+            self._graph.edge_attr_keys,
+            [
+                DEFAULT_ATTR_KEYS.EDGE_ID,
+                DEFAULT_ATTR_KEYS.EDGE_SOURCE,
+                DEFAULT_ATTR_KEYS.EDGE_TARGET,
+            ],
+        )
+
         root = self._graph
         if hasattr(self._graph, "_root"):
             root = self._graph._root
@@ -72,6 +89,8 @@ class IndexRXFilter(RXFilter):
             rx_graph,
             node_map_to_root=dict(node_map.items()),
             root=root,
+            node_attr_keys=node_attr_keys,
+            edge_attr_keys=edge_attr_keys,
         )
 
         return graph_view

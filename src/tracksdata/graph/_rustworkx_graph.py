@@ -145,8 +145,14 @@ class RXFilter(BaseFilter):
         # only edges are filtered return nodes that pass edge filters
         sources = []
         targets = []
-        data = {k: [] for k in self._graph.edge_attr_keys}
-        data[DEFAULT_ATTR_KEYS.EDGE_ID] = []
+        exclude_keys = {
+            DEFAULT_ATTR_KEYS.EDGE_ID,
+            DEFAULT_ATTR_KEYS.EDGE_SOURCE,
+            DEFAULT_ATTR_KEYS.EDGE_TARGET,
+        }
+        data_keys = [k for k in self._graph.edge_attr_keys if k not in exclude_keys]
+        data = {k: [] for k in data_keys}
+        edge_ids = []
 
         check_node_ids = None
         if self._node_ids is not None and not (self._include_targets or self._include_sources):
@@ -164,10 +170,12 @@ class RXFilter(BaseFilter):
 
                         sources.append(src)
                         targets.append(tgt)
-                        for k in data.keys():
+                        edge_ids.append(attr[DEFAULT_ATTR_KEYS.EDGE_ID])
+                        for k in data_keys:
                             data[k].append(attr[k])
 
         df = pl.DataFrame(data).with_columns(
+            pl.Series(edge_ids, dtype=pl.Int64).alias(DEFAULT_ATTR_KEYS.EDGE_ID),
             pl.Series(sources, dtype=pl.Int64).alias(DEFAULT_ATTR_KEYS.EDGE_SOURCE),
             pl.Series(targets, dtype=pl.Int64).alias(DEFAULT_ATTR_KEYS.EDGE_TARGET),
         )
@@ -222,6 +230,7 @@ class RXFilter(BaseFilter):
         edge_attr_keys: Sequence[str] | str | None = None,
     ) -> "GraphView":
         from tracksdata.graph._graph_view import GraphView
+        from tracksdata.graph._utils import normalize_attr_keys
 
         node_ids = self.node_ids()
 
@@ -232,10 +241,28 @@ class RXFilter(BaseFilter):
                 if not _filter_func(attr):
                     rx_graph.remove_edge(src, tgt)
 
+        node_attr_keys = normalize_attr_keys(
+            node_attr_keys,
+            self._graph.node_attr_keys,
+            [DEFAULT_ATTR_KEYS.NODE_ID],
+        )
+
+        edge_attr_keys = normalize_attr_keys(
+            edge_attr_keys,
+            self._graph.edge_attr_keys,
+            [
+                DEFAULT_ATTR_KEYS.EDGE_ID,
+                DEFAULT_ATTR_KEYS.EDGE_SOURCE,
+                DEFAULT_ATTR_KEYS.EDGE_TARGET,
+            ],
+        )
+
         graph_view = GraphView(
             rx_graph,
             node_map_to_root=dict(node_map.items()),
             root=self._graph,
+            node_attr_keys=node_attr_keys,
+            edge_attr_keys=edge_attr_keys,
         )
 
         return graph_view

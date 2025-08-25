@@ -1,6 +1,6 @@
 import abc
 import functools
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, TypeVar
 
 import polars as pl
@@ -51,8 +51,8 @@ class BaseFilter(abc.ABC):
     @abc.abstractmethod
     def subgraph(
         self,
-        node_attr_keys: list[str] | None = None,
-        edge_attr_keys: list[str] | None = None,
+        node_attr_keys: Sequence[str] | str | None = None,
+        edge_attr_keys: Sequence[str] | str | None = None,
     ) -> "GraphView":
         """
         Get a subgraph of the graph resulting from the filter.
