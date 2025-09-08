@@ -342,7 +342,7 @@ class RustWorkXGraph(BaseGraph):
                 unique_edge_attr_keys.update(attr.keys())
                 attr[DEFAULT_ATTR_KEYS.EDGE_ID] = edge_idx
 
-            self._node_attr_keys = list(unique_node_attr_keys)
+            self._node_attr_keys = [DEFAULT_ATTR_KEYS.NODE_ID, *unique_node_attr_keys]
             self._edge_attr_keys = list(unique_edge_attr_keys)
 
     @property
@@ -785,14 +785,14 @@ class RustWorkXGraph(BaseGraph):
         """
         Get the keys of the attributes of the nodes.
         """
-        return self._node_attr_keys
+        return self._node_attr_keys.copy()
 
     @property
     def edge_attr_keys(self) -> list[str]:
         """
         Get the keys of the attributes of the edges.
         """
-        return self._edge_attr_keys
+        return self._edge_attr_keys.copy()
 
     def add_node_attr_key(self, key: str, default_value: Any) -> None:
         """
@@ -865,7 +865,7 @@ class RustWorkXGraph(BaseGraph):
             node_ids = list(rx_graph.node_indices())
 
         if attr_keys is None:
-            attr_keys = [DEFAULT_ATTR_KEYS.NODE_ID, *self.node_attr_keys]
+            attr_keys = self.node_attr_keys
 
         if isinstance(attr_keys, str):
             attr_keys = [attr_keys]
