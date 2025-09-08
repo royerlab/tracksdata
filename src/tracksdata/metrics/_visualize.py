@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Optional
 import numpy as np
 
 from tracksdata.constants import DEFAULT_ATTR_KEYS
+from tracksdata.functional._edges import join_node_attrs_to_edges
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.utils._logging import LOG
 
@@ -168,20 +169,12 @@ def visualize_matches(
     edge_attrs = input_graph.edge_attrs(attr_keys=[matched_edge_mask_key])
     source_pos = [f"source_{p}" for p in pos]
     target_pos = [f"target_{p}" for p in pos]
+    source_matched_key = f"source_{matched_node_id_key}"
+    target_matched_key = f"target_{matched_node_id_key}"
 
-    source_mapping = dict(zip(pos, source_pos, strict=False))
-    source_mapping[matched_node_id_key] = "matched_source"
-    target_mapping = dict(zip(pos, target_pos, strict=False))
-    target_mapping[matched_node_id_key] = "matched_target"
-
-    edge_attrs = edge_attrs.join(
-        node_attrs.select(DEFAULT_ATTR_KEYS.NODE_ID, matched_node_id_key, *pos).rename(source_mapping),
-        left_on=DEFAULT_ATTR_KEYS.EDGE_SOURCE,
-        right_on=DEFAULT_ATTR_KEYS.NODE_ID,
-    ).join(
-        node_attrs.select(DEFAULT_ATTR_KEYS.NODE_ID, matched_node_id_key, *pos).rename(target_mapping),
-        left_on=DEFAULT_ATTR_KEYS.EDGE_TARGET,
-        right_on=DEFAULT_ATTR_KEYS.NODE_ID,
+    edge_attrs = join_node_attrs_to_edges(
+        node_attrs.select(DEFAULT_ATTR_KEYS.NODE_ID, matched_node_id_key, *pos),
+        edge_attrs,
     )
 
     # target positions is just the difference between source and target
@@ -230,28 +223,18 @@ def visualize_matches(
     ref_edge_attrs = ref_edge_attrs.join(
         edge_attrs.select(
             matched_edge_mask_key,
-            "matched_source",
-            "matched_target",
+            source_matched_key,
+            target_matched_key,
         ),
         left_on=[DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET],
-        right_on=["matched_source", "matched_target"],
+        right_on=[source_matched_key, target_matched_key],
         how="left",
     )
 
     unmatched_ref_edge_attrs = ref_edge_attrs.filter(ref_edge_attrs[matched_edge_mask_key].is_null())
-
-    # not necessary anymore
-    del source_mapping[matched_node_id_key]
-    del target_mapping[matched_node_id_key]
-
-    unmatched_ref_edge_attrs = unmatched_ref_edge_attrs.join(
-        ref_node_attrs.select(DEFAULT_ATTR_KEYS.NODE_ID, *pos).rename(source_mapping),
-        left_on=DEFAULT_ATTR_KEYS.EDGE_SOURCE,
-        right_on=DEFAULT_ATTR_KEYS.NODE_ID,
-    ).join(
-        ref_node_attrs.select(DEFAULT_ATTR_KEYS.NODE_ID, *pos).rename(target_mapping),
-        left_on=DEFAULT_ATTR_KEYS.EDGE_TARGET,
-        right_on=DEFAULT_ATTR_KEYS.NODE_ID,
+    unmatched_ref_edge_attrs = join_node_attrs_to_edges(
+        ref_node_attrs.select(DEFAULT_ATTR_KEYS.NODE_ID, *pos),
+        unmatched_ref_edge_attrs,
     )
 
     # same as above, target positions is just the difference between source and target

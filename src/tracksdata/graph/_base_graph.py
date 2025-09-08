@@ -1094,6 +1094,7 @@ class BaseGraph(abc.ABC):
         [rx_digraph_to_napari_dict][tracksdata.functional.rx_digraph_to_napari_dict]:
             Convert a tracklet graph to a napari-ready dictionary.
         """
+        from tracksdata.functional._edges import join_node_attrs_to_edges
 
         if track_id_key not in self.node_attr_keys:
             raise ValueError(f"Track id key '{track_id_key}' not found in graph. Expected '{self.node_attr_keys}'")
@@ -1113,21 +1114,11 @@ class BaseGraph(abc.ABC):
             ).alias("rx_id"),
         )
 
-        edges_df = (
-            edges_df.join(
-                nodes_df.rename({track_id_key: "source_track_id", "rx_id": "source_rx_id"}),
-                left_on=DEFAULT_ATTR_KEYS.EDGE_SOURCE,
-                right_on=DEFAULT_ATTR_KEYS.NODE_ID,
-                how="right",
-            )
-            .join(
-                nodes_df.rename({track_id_key: "target_track_id", "rx_id": "target_rx_id"}),
-                left_on=DEFAULT_ATTR_KEYS.EDGE_TARGET,
-                right_on=DEFAULT_ATTR_KEYS.NODE_ID,
-                how="right",
-            )
-            .filter(~pl.col(DEFAULT_ATTR_KEYS.EDGE_ID).is_null())
-        )
+        edges_df = join_node_attrs_to_edges(
+            nodes_df,
+            edges_df,
+            how="right",
+        ).filter(~pl.col(DEFAULT_ATTR_KEYS.EDGE_ID).is_null())
 
         graph.add_edges_from(
             zip(
