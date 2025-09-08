@@ -71,12 +71,11 @@ class BaseGraph(abc.ABC):
                 )
 
         for ref_key in reference_keys:
-            if ref_key is not DEFAULT_ATTR_KEYS.NODE_ID:
-                if ref_key not in attrs.keys():
-                    raise ValueError(
-                        f"Attribute '{ref_key}' not found in attrs: '{attrs.keys()}'\n"
-                        f"Requested keys: '{reference_keys}'"
-                    )
+            if ref_key not in attrs.keys() and ref_key != DEFAULT_ATTR_KEYS.NODE_ID:
+                raise ValueError(
+                    f"Attribute '{ref_key}' not found in attrs: '{attrs.keys()}'\n"
+                    f"Requested keys: '{reference_keys}'"
+                )
 
     @abc.abstractmethod
     def add_node(
