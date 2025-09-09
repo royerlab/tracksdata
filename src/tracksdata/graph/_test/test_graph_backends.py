@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import cloudpickle
 import numpy as np
 import polars as pl
 import pytest
@@ -1717,3 +1718,42 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
         rx_graph,
         geff_graph.rx_graph,
     )
+
+
+def test_pickle_roundtrip(graph_backend: BaseGraph) -> None:
+    if isinstance(graph_backend, SQLGraph):
+        pytest.skip("SQLGraph does not support pickle roundtrip")
+
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
+    graph_backend.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+
+    bbox = np.array([0, 0, 2, 2])
+    mask = Mask(np.array([[True, True], [True, True]], dtype=bool), bbox=bbox)
+
+    node_1 = graph_backend.add_node(
+        {
+            DEFAULT_ATTR_KEYS.T: 0,
+            DEFAULT_ATTR_KEYS.BBOX: bbox,
+            DEFAULT_ATTR_KEYS.MASK: mask,
+        }
+    )
+
+    node_2 = graph_backend.add_node(
+        {
+            DEFAULT_ATTR_KEYS.T: 1,
+            DEFAULT_ATTR_KEYS.BBOX: bbox,
+            DEFAULT_ATTR_KEYS.MASK: mask,
+        }
+    )
+
+    graph_backend.add_edge(node_1, node_2, {DEFAULT_ATTR_KEYS.EDGE_DIST: 1.0})
+
+    pickled_graph = cloudpickle.dumps(graph_backend)
+    unpickled_graph = cloudpickle.loads(pickled_graph)
+
+    assert unpickled_graph.num_nodes == graph_backend.num_nodes
+    assert unpickled_graph.num_edges == graph_backend.num_edges
+
+    assert unpickled_graph.node_attr_keys == graph_backend.node_attr_keys
+    assert unpickled_graph.edge_attr_keys == graph_backend.edge_attr_keys
