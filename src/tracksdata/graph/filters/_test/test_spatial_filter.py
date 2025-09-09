@@ -229,3 +229,35 @@ def test_bbox_spatial_filter_error_handling() -> None:
     # Test mismatched min/max attributes length
     with pytest.raises(ValueError, match="Bounding box coordinates must have even number of dimensions"):
         BBoxSpatialFilter(graph, frame_attr_key="t", bbox_attr_key="bbox")
+
+
+def test_add_and_remove_node() -> None:
+    graph = RustWorkXGraph()
+    graph.add_node_attr_key("bbox", [0, 0, 0, 0])
+
+    graph.add_node({"t": 0, "bbox": [1, 1, 5, 5]})
+    graph.add_node({"t": 1, "bbox": [10, 10, 15, 15]})
+
+    spatial_filter = BBoxSpatialFilter(graph, frame_attr_key="t", bbox_attr_key="bbox")
+
+    empty_region = spatial_filter[0:3, 6:9, 6:9].node_attrs()
+    assert empty_region.is_empty()
+
+    new_node_id = graph.add_node({"t": 2, "bbox": [7, 7, 8, 8]})
+    spatial_filter._add_node(new_node_id)
+
+    assert len(spatial_filter._node_rtree) == 3
+
+    result = spatial_filter[0:3, 6:9, 6:9].node_attrs()
+    assert len(result) == 1
+    assert result["t"].item() == 2
+
+    size = graph.num_nodes
+
+    spatial_filter._remove_node(new_node_id)
+    graph.remove_node(new_node_id)
+
+    assert graph.num_nodes == size - 1
+
+    empty_region = spatial_filter[0:3, 6:9, 6:9].node_attrs()
+    assert empty_region.is_empty()

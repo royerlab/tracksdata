@@ -1,5 +1,5 @@
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import polars as pl
@@ -226,6 +226,8 @@ class BBoxSpatialFilter:
         from spatial_graph import PointRTree
 
         self._graph = graph
+        self._frame_attr_key = frame_attr_key
+        self._bbox_attr_key = bbox_attr_key
 
         if frame_attr_key is None:
             attr_keys = [DEFAULT_ATTR_KEYS.NODE_ID, bbox_attr_key]
@@ -321,3 +323,67 @@ class BBoxSpatialFilter:
             )
         )
         return self._graph.filter(node_ids=node_ids)
+
+    def _attrs_to_bb_window(self, attrs: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Convert attributes to bounding box window.
+
+        Parameters
+        ----------
+        attrs : dict[str, Any]
+            The attributes of the node to convert to a bounding box window.
+
+        Returns
+        -------
+        tuple[np.ndarray, np.ndarray]
+            The minimum and maximum bounding box window.
+        """
+        bbox = attrs[self._bbox_attr_key]
+        pos_size = len(bbox) // 2
+        positions_min = bbox[:pos_size]
+        positions_max = bbox[pos_size:]
+
+        if self._frame_attr_key is not None:
+            positions_min = np.hstack((np.atleast_1d(attrs[self._frame_attr_key]), positions_min))
+            positions_max = np.hstack((np.atleast_1d(attrs[self._frame_attr_key]), positions_max))
+
+        positions_min = np.ascontiguousarray([positions_min], dtype=np.float32)
+        positions_max = np.ascontiguousarray([positions_max], dtype=np.float32)
+
+        return positions_min, positions_max
+
+    def _add_node(self, node_id: int) -> None:
+        """
+        Add a node to the spatial filter.
+
+        Parameters
+        ----------
+        node_id : int
+            The ID of the node to add.
+        """
+        attrs = self._graph[node_id].to_dict()
+        positions_min, positions_max = self._attrs_to_bb_window(attrs)
+
+        self._node_rtree.insert_bb_items(
+            np.atleast_1d(node_id).astype(np.int64),
+            positions_min,
+            positions_max,
+        )
+
+    def _remove_node(self, node_id: int) -> None:
+        """
+        Remove a node from the spatial filter.
+
+        Parameters
+        ----------
+        node_id : int
+            The ID of the node to remove.
+        """
+        attrs = self._graph[node_id].to_dict()
+        positions_min, positions_max = self._attrs_to_bb_window(attrs)
+
+        self._node_rtree.delete_items(
+            np.atleast_1d(node_id).astype(np.int64),
+            positions_min,
+            positions_max,
+        )
