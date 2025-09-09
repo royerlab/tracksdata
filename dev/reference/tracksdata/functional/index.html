@@ -22,7 +22,7 @@
     
     
       
-        <title>tracksdata.functional - tracksdata</title>
+        <title>functional - tracksdata</title>
       
     
     
@@ -114,7 +114,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              tracksdata.functional
+              functional
             
           </span>
         </div>
@@ -889,7 +889,7 @@
   
   
   <span class="md-ellipsis">
-    tracksdata.graph
+    graph
     
   </span>
   
@@ -2037,7 +2037,7 @@ If None, the default buffer cache size is used.</p>
 </span><span id="__span-0-104"><a id="__codelineno-0-104" name="__codelineno-0-104"></a>        <span class="n">solution_graph</span> <span class="o">=</span> <span class="n">graph</span>
 </span><span id="__span-0-105"><a id="__codelineno-0-105" name="__codelineno-0-105"></a>
 </span><span id="__span-0-106"><a id="__codelineno-0-106" name="__codelineno-0-106"></a>    <span class="n">tracks_graph</span> <span class="o">=</span> <span class="n">solution_graph</span><span class="o">.</span><span class="n">assign_track_ids</span><span class="p">(</span><span class="n">output_track_id_key</span><span class="p">)</span>
-</span><span id="__span-0-107"><a id="__codelineno-0-107" name="__codelineno-0-107"></a>    <span class="n">dict_graph</span> <span class="o">=</span> <span class="p">{</span><span class="n">child</span><span class="p">:</span> <span class="n">parent</span> <span class="k">for</span> <span class="n">parent</span><span class="p">,</span> <span class="n">child</span> <span class="ow">in</span> <span class="n">tracks_graph</span><span class="o">.</span><span class="n">edge_list</span><span class="p">()}</span>
+</span><span id="__span-0-107"><a id="__codelineno-0-107" name="__codelineno-0-107"></a>    <span class="n">dict_graph</span> <span class="o">=</span> <span class="p">{</span><span class="n">tracks_graph</span><span class="p">[</span><span class="n">child</span><span class="p">]:</span> <span class="n">tracks_graph</span><span class="p">[</span><span class="n">parent</span><span class="p">]</span> <span class="k">for</span> <span class="n">parent</span><span class="p">,</span> <span class="n">child</span> <span class="ow">in</span> <span class="n">tracks_graph</span><span class="o">.</span><span class="n">edge_list</span><span class="p">()}</span>
 </span><span id="__span-0-108"><a id="__codelineno-0-108" name="__codelineno-0-108"></a>
 </span><span id="__span-0-109"><a id="__codelineno-0-109" name="__codelineno-0-109"></a>    <span class="n">spatial_cols</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;z&quot;</span><span class="p">,</span> <span class="s2">&quot;y&quot;</span><span class="p">,</span> <span class="s2">&quot;x&quot;</span><span class="p">][</span><span class="o">-</span><span class="nb">len</span><span class="p">(</span><span class="n">shape</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span> <span class="p">:]</span>
 </span><span id="__span-0-110"><a id="__codelineno-0-110" name="__codelineno-0-110"></a>
