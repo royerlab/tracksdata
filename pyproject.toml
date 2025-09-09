@@ -15,6 +15,7 @@ authors = [
   { name = "Ilan Theodoro", email = "ilan.silva@czbiohub.org" },
   { name = "Alexander Nguyen", email = "nguyencalex3@gmail.com" },
   { name = "Teun Huijben", email = "teun.huijben@czbiohub.org" },
+  { name = "Yohsuke T. Fukai", email = "ysk@yfukai.net" },
   { name = "Caroline Malin-Mayor", email = "malinmayorc@janelia.hhmi.org" },
   { name = "Anniek Stokkermans", email = "a.stokkermans@hubrecht.eu" },
 ]
