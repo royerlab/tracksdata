@@ -361,6 +361,9 @@ class BBoxSpatialFilter:
         node_id : int
             The ID of the node to add.
         """
+        if self._node_rtree is None:
+            raise ValueError("Spatial filter is not initialized")
+
         attrs = self._graph[node_id].to_dict()
         positions_min, positions_max = self._attrs_to_bb_window(attrs)
 
@@ -379,6 +382,9 @@ class BBoxSpatialFilter:
         node_id : int
             The ID of the node to remove.
         """
+        if self._node_rtree is None:
+            raise ValueError("Spatial filter is not initialized")
+
         attrs = self._graph[node_id].to_dict()
         positions_min, positions_max = self._attrs_to_bb_window(attrs)
 
