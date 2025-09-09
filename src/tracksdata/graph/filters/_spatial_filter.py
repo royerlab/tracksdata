@@ -225,6 +225,8 @@ class BBoxSpatialFilter:
     ) -> None:
         from spatial_graph import PointRTree
 
+        from tracksdata.graph._graph_view import GraphView
+
         self._graph = graph
         self._frame_attr_key = frame_attr_key
         self._bbox_attr_key = bbox_attr_key
@@ -263,6 +265,11 @@ class BBoxSpatialFilter:
                 dims=self._ndims,
             )
             self._node_rtree.insert_bb_items(node_ids, positions_min, positions_max)
+
+        # setup signal connections
+        graph_source = self._graph._root if isinstance(self._graph, GraphView) else self._graph
+        graph_source.node_added.connect(self._add_node)
+        graph_source.node_removed.connect(self._remove_node)
 
     def __getitem__(self, keys: tuple[slice, ...]) -> "BaseFilter":
         """

@@ -15,6 +15,7 @@ from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.graph.filters._base_filter import BaseFilter, cache_method
 from tracksdata.utils._dataframe import unpack_array_attrs, unpickle_bytes_columns
 from tracksdata.utils._logging import LOG
+from tracksdata.utils._signal import is_signal_on
 
 if TYPE_CHECKING:
     from tracksdata.graph._graph_view import GraphView
@@ -609,6 +610,8 @@ class SQLGraph(BaseGraph):
         if index is None:
             self._max_id_per_time[time] = node_id
 
+        self.node_added.emit_fast(node_id)
+
         return node_id
 
     def bulk_add_nodes(
@@ -675,6 +678,10 @@ class SQLGraph(BaseGraph):
             session.execute(sa.insert(self.Node), nodes)
             session.commit()
 
+        if is_signal_on(self.node_added):
+            for node_id in node_ids:
+                self.node_added.emit_fast(node_id)
+
         return node_ids
 
     def remove_node(self, node_id: int) -> None:
@@ -695,6 +702,8 @@ class SQLGraph(BaseGraph):
         ValueError
             If the node_id does not exist in the graph.
         """
+        self.node_removed.emit_fast(node_id)
+
         with Session(self._engine) as session:
             # Check if the node exists
             node = session.query(self.Node).filter(self.Node.node_id == node_id).first()
