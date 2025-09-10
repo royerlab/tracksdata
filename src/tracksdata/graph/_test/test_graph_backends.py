@@ -1258,10 +1258,10 @@ def test_compute_overlaps_multiple_timepoints(graph_backend: BaseGraph) -> None:
 
 def test_compute_overlaps_invalid_threshold(graph_backend: BaseGraph) -> None:
     """Test compute_overlaps with invalid threshold values."""
-    with pytest.raises(ValueError, match="iou_threshold must be between 0.0 and 1.0"):
+    with pytest.raises(ValueError, match=r"iou_threshold must be between 0.0 and 1.0"):
         graph_backend.compute_overlaps(iou_threshold=-0.1)
 
-    with pytest.raises(ValueError, match="iou_threshold must be between 0.0 and 1.0"):
+    with pytest.raises(ValueError, match=r"iou_threshold must be between 0.0 and 1.0"):
         graph_backend.compute_overlaps(iou_threshold=1.1)
 
 
@@ -1490,7 +1490,7 @@ def test_custom_indices(graph_backend: BaseGraph) -> None:
     assert custom_node_df["y"].to_list()[0] == 20.0
 
     # Test bulk_add_nodes with mismatched indices length
-    with pytest.raises(ValueError, match="Length of indices .* must match length of nodes"):
+    with pytest.raises(ValueError, match=r"Length of indices .* must match length of nodes"):
         graph_backend.bulk_add_nodes([{"t": 3, "x": 1.0, "y": 1.0}], indices=[1, 2, 3])
 
 
@@ -1548,11 +1548,11 @@ def test_remove_node(graph_backend: BaseGraph) -> None:
     assert [node1, node3] in remaining_overlaps
 
     # Test error when removing non-existent node
-    with pytest.raises(ValueError, match="Node .* does not exist in the graph"):
+    with pytest.raises(ValueError, match=r"Node .* does not exist in the graph"):
         graph_backend.remove_node(99999)
 
     # Test error when removing already removed node
-    with pytest.raises(ValueError, match="Node .* does not exist in the graph"):
+    with pytest.raises(ValueError, match=r"Node .* does not exist in the graph"):
         graph_backend.remove_node(node2)
 
 

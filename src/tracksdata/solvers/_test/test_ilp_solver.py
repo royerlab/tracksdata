@@ -76,7 +76,7 @@ def test_ilp_solver_solve_empty_graph() -> None:
     solver = ILPSolver()
 
     # Should not raise an error on empty graph
-    with pytest.raises(ValueError, match="Empty ILPSolver model, there is nothing to solve."):
+    with pytest.raises(ValueError, match=r"Empty ILPSolver model, there is nothing to solve."):
         solver.solve(graph)
 
 
