@@ -278,10 +278,11 @@ class GraphArrayView(BaseReadOnlyArray):
                 time = time.item()  # convert from numpy.int to int
             except AttributeError:
                 pass
-            return self._cache.get(
+            result = self._cache.get(
                 time=time,
                 volume_slicing=volume_slicing,
             ).astype(dtype or self.dtype)
+            return np.array(result) if np.isscalar(result) else result
         else:
             if isinstance(time, slice):
                 time = range(self.original_shape[0])[time]

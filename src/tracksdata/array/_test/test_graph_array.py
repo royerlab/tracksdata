@@ -112,6 +112,10 @@ def test_graph_array_view_getitem_with_nodes() -> None:
     assert np.asarray(result)[11, 20] == 5  # Bottom-left of mask
     assert np.asarray(result)[11, 21] == 0  # Bottom-right should be 0 (mask is False there)
 
+    # Test indexing on grapharrayview BEFORE conversion to numpy array, especially when slicing a single value
+    assert np.array_equal(result[10, 20], 5)
+    assert np.array_equal(result[10, 20:22], np.array([5, 5]))
+
     # Other areas should be 0
     assert np.asarray(result)[0, 0] == 0
     assert np.asarray(result)[50, 50] == 0

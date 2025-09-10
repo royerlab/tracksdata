@@ -147,3 +147,8 @@ omit = [
   "src/tracksdata/conftest.py",
   "**/_test/*.py",
 ]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.13.0",
+]
