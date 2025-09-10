@@ -68,10 +68,17 @@ class IndexRXFilter(RXFilter):
         if hasattr(self._graph, "_root"):
             root = self._graph._root
 
+        # Ensure the time key is in the node attributes
+        if node_attr_keys is not None:
+            node_attr_keys = [DEFAULT_ATTR_KEYS.T, *node_attr_keys]
+            node_attr_keys = list(dict.fromkeys(node_attr_keys))
+
         graph_view = GraphView(
             rx_graph,
             node_map_to_root=dict(node_map.items()),
             root=root,
+            node_attr_keys=node_attr_keys,
+            edge_attr_keys=edge_attr_keys,
         )
 
         return graph_view
