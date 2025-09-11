@@ -317,10 +317,10 @@ class ILPSolver(BaseSolver):
 
     def _solve(self) -> Solution:
         if self._count == 0:
-            raise ValueError("Empty ILPSolver model, there is nothing to solve.")
+            raise ValueError(r"Empty ILPSolver model, there is nothing to solve.")
 
         elif len(self._edge_vars) == 0:
-            raise ValueError("No edges found in the graph, there is nothing to solve.")
+            raise ValueError(r"No edges found in the graph, there is nothing to solve.")
 
         solution = None
         for preference in [Preference.Gurobi, Preference.Scip]:

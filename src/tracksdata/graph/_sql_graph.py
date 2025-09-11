@@ -1376,6 +1376,32 @@ class SQLGraph(BaseGraph):
     ) -> None:
         self._update_table(self.Edge, edge_ids, DEFAULT_ATTR_KEYS.EDGE_ID, attrs)
 
+    def assign_track_ids(
+        self,
+        output_key: str = DEFAULT_ATTR_KEYS.TRACK_ID,
+        reset: bool = True,
+        track_id_offset: int | None = None,
+        node_ids: list[int] | None = None,
+    ) -> rx.PyDiGraph:
+        if node_ids is not None:
+            track_node_ids = list(set(self._compute_track_node_ids(node_ids)))
+        else:
+            track_node_ids = None
+        if output_key in self.node_attr_keys:
+            node_attr_keys = [output_key]
+        else:
+            node_attr_keys = []
+
+        return (
+            self.filter(node_ids=track_node_ids)
+            .subgraph(node_attr_keys=node_attr_keys)
+            .assign_track_ids(
+                output_key=output_key,
+                reset=reset,
+                track_id_offset=track_id_offset,
+            )
+        )
+
     def _get_degree(
         self,
         node_ids: list[int] | int | None,
@@ -1541,3 +1567,31 @@ class SQLGraph(BaseGraph):
                 .filter(self.Edge.source_id == source_id, self.Edge.target_id == target_id)
                 .scalar()
             )
+
+    def remove_edge(
+        self,
+        source_id: int | None = None,
+        target_id: int | None = None,
+        *,
+        edge_id: int | None = None,
+    ) -> None:
+        """
+        Remove an edge from the graph either by its ID or by its endpoints.
+        """
+        with Session(self._engine) as session:
+            if edge_id is not None:
+                deleted = session.query(self.Edge).filter(self.Edge.edge_id == edge_id).delete()
+            else:
+                if source_id is None or target_id is None:
+                    raise ValueError("Provide either edge_id or both source_id and target_id")
+                deleted = (
+                    session.query(self.Edge)
+                    .filter(self.Edge.source_id == source_id, self.Edge.target_id == target_id)
+                    .delete()
+                )
+            if deleted == 0:
+                session.rollback()
+                if edge_id is not None:
+                    raise ValueError(f"Edge {edge_id} does not exist in the graph")
+                raise ValueError(f"Edge {source_id}->{target_id} does not exist in the graph")
+            session.commit()

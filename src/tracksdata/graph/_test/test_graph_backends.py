@@ -103,6 +103,70 @@ def test_add_edge(graph_backend: BaseGraph) -> None:
     assert df["weight"].to_list() == [0.5, 0.1]
 
 
+def test_remove_edge_by_id(graph_backend: BaseGraph) -> None:
+    """Test removing an edge by ID across backends using unified API."""
+    # Setup
+    graph_backend.add_node_attr_key("x", None)
+    graph_backend.add_edge_attr_key("weight", 0.0)
+
+    n1 = graph_backend.add_node({"t": 0, "x": 1.0})
+    n2 = graph_backend.add_node({"t": 1, "x": 2.0})
+    n3 = graph_backend.add_node({"t": 2, "x": 3.0})
+
+    e1 = graph_backend.add_edge(n1, n2, {"weight": 0.5})
+    e2 = graph_backend.add_edge(n2, n3, {"weight": 0.7})
+
+    assert graph_backend.num_edges == 2
+    assert graph_backend.has_edge(n1, n2)
+    assert graph_backend.has_edge(n2, n3)
+
+    # Delete first edge
+    graph_backend.remove_edge(edge_id=e1)
+    assert graph_backend.num_edges == 1
+    assert not graph_backend.has_edge(n1, n2)
+    assert graph_backend.has_edge(n2, n3)
+
+    remaining_ids = set(graph_backend.edge_ids())
+    assert e1 not in remaining_ids
+    assert e2 in remaining_ids
+
+    # Delete non-existing edge should raise
+    with pytest.raises(ValueError):
+        graph_backend.remove_edge(edge_id=e1)
+
+    with pytest.raises(ValueError):
+        graph_backend.remove_edge(edge_id=999999)
+
+
+def test_remove_edge_by_nodes(graph_backend: BaseGraph) -> None:
+    """Test removing an edge by its source/target IDs."""
+    graph_backend.add_node_attr_key("x", None)
+    graph_backend.add_edge_attr_key("weight", 0.0)
+
+    a = graph_backend.add_node({"t": 0, "x": 0.0})
+    b = graph_backend.add_node({"t": 1, "x": 1.0})
+    c = graph_backend.add_node({"t": 2, "x": 2.0})
+
+    graph_backend.add_edge(a, b, {"weight": 0.2})
+    graph_backend.add_edge(b, c, {"weight": 0.8})
+
+    assert graph_backend.has_edge(a, b)
+    assert graph_backend.has_edge(b, c)
+
+    # Remove a->b
+    graph_backend.remove_edge(a, b)
+    assert not graph_backend.has_edge(a, b)
+    assert graph_backend.has_edge(b, c)
+
+    # Removing again should raise
+    with pytest.raises(ValueError):
+        graph_backend.remove_edge(a, b)
+
+    # Removing non-existent pair should raise
+    with pytest.raises(ValueError):
+        graph_backend.remove_edge(a, c)
+
+
 def test_node_ids(graph_backend: BaseGraph) -> None:
     """Test retrieving node IDs."""
     graph_backend.add_node({"t": 0})
@@ -1258,10 +1322,10 @@ def test_compute_overlaps_multiple_timepoints(graph_backend: BaseGraph) -> None:
 
 def test_compute_overlaps_invalid_threshold(graph_backend: BaseGraph) -> None:
     """Test compute_overlaps with invalid threshold values."""
-    with pytest.raises(ValueError, match="iou_threshold must be between 0.0 and 1.0"):
+    with pytest.raises(ValueError, match=r"iou_threshold must be between 0.0 and 1\.0"):
         graph_backend.compute_overlaps(iou_threshold=-0.1)
 
-    with pytest.raises(ValueError, match="iou_threshold must be between 0.0 and 1.0"):
+    with pytest.raises(ValueError, match=r"iou_threshold must be between 0.0 and 1\.0"):
         graph_backend.compute_overlaps(iou_threshold=1.1)
 
 
@@ -1317,9 +1381,6 @@ def test_spatial_filter_basic(graph_backend: BaseGraph) -> None:
 
 
 def test_assign_track_ids(graph_backend: BaseGraph):
-    if isinstance(graph_backend, SQLGraph):
-        pytest.skip("`assign_track_ids` is not available for `SQLGraph`")
-
     # Add nodes:
     #     0
     #    / \
@@ -1346,6 +1407,109 @@ def test_assign_track_ids(graph_backend: BaseGraph):
     assert min(track_ids[DEFAULT_ATTR_KEYS.TRACK_ID]) == 100
     assert isinstance(tracks_graph, rx.PyDiGraph)
     assert tracks_graph.num_nodes() == 3  # Three tracks
+
+    filtered_graph = graph_backend.filter(node_ids=nodes[1:3]).subgraph()
+    tracks_graph = filtered_graph.assign_track_ids(track_id_offset=200)
+    track_ids = filtered_graph.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.TRACK_ID])
+    assert len(track_ids) == 2
+    assert len(set(track_ids[DEFAULT_ATTR_KEYS.TRACK_ID])) == 2
+    assert min(track_ids[DEFAULT_ATTR_KEYS.TRACK_ID]) == 200
+    assert isinstance(tracks_graph, rx.PyDiGraph)
+    assert tracks_graph.num_nodes() == 2  # Two tracks
+
+
+def test_assign_track_ids_node_id_filter(graph_backend: BaseGraph):
+    """Assign track IDs for subsets selected via node_ids and validate exact non-branching closure.
+
+    Graph:
+      - A: linear chain A0 -> A1 -> A2 -> A3
+      - B: B0 -> B1 with B1 -> {B2, B4}, and B2 -> B3, B4 -> B5
+
+    Cases:
+      1) node_ids=[A1] -> closure = {A0, A1, A2, A3}
+      2) node_ids=[B2] -> closure = {B2, B3}
+      3) node_ids=[B1] -> closure = {B0, B1}
+      3) node_ids=[A1, B4] -> closure = {A0, A1, A2, A3, B4, B5}
+    """
+
+    # Build graph components
+    # A chain
+    A0 = graph_backend.add_node({DEFAULT_ATTR_KEYS.T: 0})
+    A1 = graph_backend.add_node({DEFAULT_ATTR_KEYS.T: 1})
+    A2 = graph_backend.add_node({DEFAULT_ATTR_KEYS.T: 2})
+    A3 = graph_backend.add_node({DEFAULT_ATTR_KEYS.T: 3})
+    graph_backend.add_edge(A0, A1, {})
+    graph_backend.add_edge(A1, A2, {})
+    graph_backend.add_edge(A2, A3, {})
+
+    # B branched with parent and children
+    B0 = graph_backend.add_node({DEFAULT_ATTR_KEYS.T: 0})
+    B1 = graph_backend.add_node({DEFAULT_ATTR_KEYS.T: 1})
+    B2 = graph_backend.add_node({DEFAULT_ATTR_KEYS.T: 2})
+    B4 = graph_backend.add_node({DEFAULT_ATTR_KEYS.T: 2})
+    B3 = graph_backend.add_node({DEFAULT_ATTR_KEYS.T: 3})
+    B5 = graph_backend.add_node({DEFAULT_ATTR_KEYS.T: 3})
+    graph_backend.add_edge(B0, B1, {})
+    graph_backend.add_edge(B1, B2, {})
+    graph_backend.add_edge(B1, B4, {})
+    graph_backend.add_edge(B2, B3, {})
+    graph_backend.add_edge(B4, B5, {})
+
+    # Ensure track_id attribute exists after nodes were added
+    if DEFAULT_ATTR_KEYS.TRACK_ID not in graph_backend.node_attr_keys:
+        graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACK_ID, -1)
+
+    for seeds, expected in (
+        ([A1], [[A0, A1, A2, A3]]),
+        ([B2], [[B2, B3]]),
+        ([B1], [[B0, B1]]),
+        ([A1, B4], [[A0, A1, A2, A3], [B4, B5]]),
+    ):
+        # Ensure all nodes start unassigned across backends (avoid NULL/default discrepancies)
+        graph_backend.update_node_attrs(attrs={DEFAULT_ATTR_KEYS.TRACK_ID: -1})
+
+        tracks_graph = graph_backend.assign_track_ids(node_ids=seeds)
+        ids_df = graph_backend.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.TRACK_ID])
+        ids_map = dict(
+            zip(
+                ids_df[DEFAULT_ATTR_KEYS.NODE_ID].to_list(),
+                ids_df[DEFAULT_ATTR_KEYS.TRACK_ID].to_list(),
+                strict=True,
+            )
+        )
+        assigned = {}
+        for node_id, track_id in ids_map.items():
+            if track_id == -1:
+                continue
+            if track_id not in assigned:
+                assigned[track_id] = []
+            assigned[track_id].append(node_id)
+        assigned = {frozenset(group) for group in assigned.values()}
+        expected = {frozenset(group) for group in expected}
+        assert assigned == expected
+        assert isinstance(tracks_graph, rx.PyDiGraph)
+
+    # Check that re-assigning track IDs without reset works as expected
+    graph_backend.update_node_attrs(attrs={DEFAULT_ATTR_KEYS.TRACK_ID: -1})
+    tracks_graph = graph_backend.assign_track_ids()
+    ids_df = graph_backend.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.TRACK_ID])
+    assert tracks_graph.num_nodes() == 4
+
+    tracks_graph_reassign = graph_backend.assign_track_ids(node_ids=[A1, B4], reset=False)
+    ids_df_reassign = graph_backend.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.TRACK_ID])
+    assert tracks_graph_reassign.num_nodes() == 2
+    # Full reassignment should yield same result as previous partial reassignment
+    # df must be sorted by node_id for direct comparison
+    ids_df = ids_df.sort(DEFAULT_ATTR_KEYS.NODE_ID)
+    ids_df_reassign = ids_df_reassign.sort(DEFAULT_ATTR_KEYS.NODE_ID)
+    assert ids_df.equals(ids_df_reassign)
+
+    # Changing the topology
+    A4 = graph_backend.add_node({DEFAULT_ATTR_KEYS.T: 1, DEFAULT_ATTR_KEYS.TRACK_ID: -1})
+    A5 = graph_backend.add_node({DEFAULT_ATTR_KEYS.T: 3, DEFAULT_ATTR_KEYS.TRACK_ID: -1})
+    graph_backend.add_edge(A0, A4, {})
+    graph_backend.add_edge(A2, A5, {})
+    tracks_graph_reassign = graph_backend.assign_track_ids(node_ids=[A1, A5, B4], reset=False)
 
 
 def test_tracklet_graph_basic(graph_backend: BaseGraph) -> None:
@@ -1490,7 +1654,7 @@ def test_custom_indices(graph_backend: BaseGraph) -> None:
     assert custom_node_df["y"].to_list()[0] == 20.0
 
     # Test bulk_add_nodes with mismatched indices length
-    with pytest.raises(ValueError, match="Length of indices .* must match length of nodes"):
+    with pytest.raises(ValueError, match=r"Length of indices .* must match length of nodes"):
         graph_backend.bulk_add_nodes([{"t": 3, "x": 1.0, "y": 1.0}], indices=[1, 2, 3])
 
 
@@ -1548,11 +1712,11 @@ def test_remove_node(graph_backend: BaseGraph) -> None:
     assert [node1, node3] in remaining_overlaps
 
     # Test error when removing non-existent node
-    with pytest.raises(ValueError, match="Node .* does not exist in the graph"):
+    with pytest.raises(ValueError, match=r"Node .* does not exist in the graph"):
         graph_backend.remove_node(99999)
 
     # Test error when removing already removed node
-    with pytest.raises(ValueError, match="Node .* does not exist in the graph"):
+    with pytest.raises(ValueError, match=r"Node .* does not exist in the graph"):
         graph_backend.remove_node(node2)
 
 
@@ -1726,3 +1890,4 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
         rx_graph,
         geff_graph.rx_graph,
     )
+    # Ensure SQLGraph matches RX behavior as well

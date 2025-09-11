@@ -541,6 +541,30 @@ class RustWorkXGraph(BaseGraph):
         # return indices
         return super().bulk_add_edges(edges, return_ids=return_ids)
 
+    def remove_edge(
+        self,
+        source_id: int | None = None,
+        target_id: int | None = None,
+        *,
+        edge_id: int | None = None,
+    ) -> None:
+        """
+        Remove an edge by ID or by endpoints.
+        """
+        if edge_id is not None:
+            edge_map = self.rx_graph.edge_index_map()
+            if edge_id not in edge_map:
+                raise ValueError(f"Edge {edge_id} does not exist in the graph")
+            src, tgt, _ = edge_map[edge_id]
+            self.rx_graph.remove_edge(src, tgt)
+            return
+
+        if source_id is None or target_id is None:
+            raise ValueError("Provide either edge_id or both source_id and target_id")
+        if not self.rx_graph.has_edge(source_id, target_id):
+            raise ValueError(f"Edge {source_id}->{target_id} does not exist in the graph")
+        self.rx_graph.remove_edge(source_id, target_id)
+
     def add_overlap(
         self,
         source_id: int,
@@ -1062,48 +1086,70 @@ class RustWorkXGraph(BaseGraph):
         self,
         output_key: str = DEFAULT_ATTR_KEYS.TRACK_ID,
         reset: bool = True,
-        track_id_offset: int = 1,
+        track_id_offset: int | None = None,
+        node_ids: list[int] | None = None,
     ) -> rx.PyDiGraph:
-        """
-        Compute and assign track ids to nodes.
+        if node_ids is not None:
+            track_node_ids = set(self._compute_track_node_ids(node_ids))
+            return (
+                self.filter(node_ids=list(track_node_ids))
+                .subgraph(node_attr_keys=[output_key], edge_attr_keys=[])
+                .assign_track_ids(
+                    output_key=output_key,
+                    reset=reset,
+                    track_id_offset=track_id_offset,
+                )
+            )
+        else:
+            if output_key not in self.node_attr_keys:
+                self.add_node_attr_key(output_key, -1)
+                previous_id_df = None
+                if track_id_offset is None:
+                    track_id_offset = 1
+            elif reset:
+                self.update_node_attrs(attrs={output_key: -1})
+                previous_id_df = None
+                if track_id_offset is None:
+                    track_id_offset = 1
+            else:
+                previous_id_df = self.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, output_key])
+                if track_id_offset is None:
+                    existing_ids = previous_id_df[output_key].unique().to_list()
+                    existing_ids = [i for i in existing_ids if i != -1]
+                    track_id_offset: int = max(existing_ids, default=0) + 1
 
-        Parameters
-        ----------
-        output_key : str
-            The key of the output track id attribute.
-        reset : bool
-            Whether to reset the track ids of the graph. If True, the track ids will be reset to -1.
-        track_id_offset : int
-            The starting track id, useful when assigning track ids to a subgraph.
+            try:
+                track_node_ids, track_ids, tracks_graph = _assign_track_ids(self.rx_graph, track_id_offset)
+            except RuntimeError as e:
+                raise RuntimeError(
+                    "Are you sure this graph is a valid lineage graph?\n"
+                    "This function expects a solved graph.\n"
+                    "Often used from `graph.subgraph(edge_attr_filter={'solution': True})`"
+                ) from e
 
-        Returns
-        -------
-        rx.PyDiGraph
-            A compressed graph (parent -> child) with track ids lineage relationships.
-        """
-        try:
-            node_ids, track_ids, tracks_graph = _assign_track_ids(self.rx_graph, track_id_offset)
-        except RuntimeError as e:
-            raise RuntimeError(
-                "Are you sure this graph is a valid lineage graph?\n"
-                "This function expects a solved graph.\n"
-                "Often used from `graph.subgraph(edge_attr_filter={'solution': True})`"
-            ) from e
+            # For the IndexedRXGraph, we need to map the track_node_ids to the external node ids
+            if hasattr(self, "_map_to_external"):
+                track_node_ids = self._map_to_external(track_node_ids)  # type: ignore
 
-        if output_key not in self.node_attr_keys:
-            self.add_node_attr_key(output_key, -1)
-        elif reset:
-            self.update_node_attrs(node_ids=self.node_ids(), attrs={output_key: -1})
+            # mapping to already existing track IDs as much as possible
+            if previous_id_df is not None:
+                new_id_df = pl.DataFrame({DEFAULT_ATTR_KEYS.NODE_ID: track_node_ids, output_key + "_new": track_ids})
+                merged = new_id_df.join(
+                    previous_id_df,
+                    left_on=DEFAULT_ATTR_KEYS.NODE_ID,
+                    right_on=DEFAULT_ATTR_KEYS.NODE_ID,
+                    how="left",
+                ).filter(pl.col(output_key) != -1)
+                if merged.height > 0:
+                    track_id_map = merged.unique(output_key + "_new", keep="first")
+                    track_id_map = dict(zip(track_id_map[output_key + "_new"], track_id_map[output_key], strict=True))
+                    track_ids = [track_id_map.get(tid, tid) for tid in track_ids]  # type: ignore
+            self.update_node_attrs(
+                node_ids=track_node_ids,  # type: ignore
+                attrs={output_key: track_ids},
+            )
 
-        # node_ids are rustworkx graph ids, therefore we don't need node_id mapping
-        # and we must use RustWorkXGraph for IndexedRXGraph
-        RustWorkXGraph.update_node_attrs(
-            self,
-            node_ids=node_ids,
-            attrs={output_key: track_ids},
-        )
-
-        return tracks_graph
+            return tracks_graph
 
     def in_degree(self, node_ids: list[int] | int | None = None) -> list[int] | int:
         """
@@ -1533,6 +1579,27 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
         source_id = self._map_to_local(source_id)
         target_id = self._map_to_local(target_id)
         return super().add_edge(source_id, target_id, attrs, validate_keys)
+
+    def remove_edge(
+        self,
+        source_id: int | None = None,
+        target_id: int | None = None,
+        *,
+        edge_id: int | None = None,
+    ) -> None:
+        """
+        Remove an edge by endpoints (external IDs) or by edge_id.
+        """
+        if edge_id is not None:
+            return super().remove_edge(edge_id=edge_id)
+        if source_id is None or target_id is None:
+            raise ValueError("Provide either edge_id or both source_id and target_id")
+        try:
+            local_source = self._map_to_local(source_id)
+            local_target = self._map_to_local(target_id)
+        except KeyError:
+            raise ValueError(f"Edge {source_id}->{target_id} does not exist in the graph") from None
+        return super().remove_edge(local_source, local_target)
 
     def add_overlap(self, source_id: int, target_id: int) -> int:
         """
