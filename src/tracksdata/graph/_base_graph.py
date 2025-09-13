@@ -199,6 +199,35 @@ class BaseGraph(abc.ABC):
             The ID of the added edge.
         """
 
+    @abc.abstractmethod
+    def remove_edge(
+        self,
+        source_id: int | None = None,
+        target_id: int | None = None,
+        *,
+        edge_id: int | None = None,
+    ) -> None:
+        """
+        Remove an edge from the graph.
+
+        Either provide `edge_id` to remove by edge identifier, or
+        provide both `source_id` and `target_id` to remove by endpoints.
+
+        Parameters
+        ----------
+        source_id : int | None
+            The ID of the source node (when removing by endpoints).
+        target_id : int | None
+            The ID of the target node (when removing by endpoints).
+        edge_id : int | None
+            The ID of the edge to delete (when removing by ID).
+
+        Raises
+        ------
+        ValueError
+            If the specified edge does not exist or insufficient identifiers are provided.
+        """
+
     @overload
     def bulk_add_edges(
         self,
