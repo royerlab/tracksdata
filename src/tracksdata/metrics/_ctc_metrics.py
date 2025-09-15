@@ -17,6 +17,19 @@ if TYPE_CHECKING:
     from tracksdata.graph._base_graph import BaseGraph
 
 
+def _fill_empty(weights: sp.csr_array, eps: float = 1e-10) -> None:
+    """
+    Fill empty rows and columns of a sparse matrix with a small value.
+    """
+    empty_rows = weights.sum(axis=1) == 0
+    if empty_rows.any():
+        weights[empty_rows, :] = eps
+
+    empty_cols = weights.sum(axis=0) == 0
+    if empty_cols.any():
+        weights[:, empty_cols] = eps
+
+
 def _match_single_frame(
     t: int,
     *,
@@ -90,7 +103,12 @@ def _match_single_frame(
         LOG.info("Solving optimal matching ...")
 
         weights = sp.csr_array((_ious, (_rows, _cols)), dtype=np.float32)
-        rows_id, cols_id = sp.csgraph.min_weight_full_bipartite_matching(weights, maximize=True)
+
+        try:
+            rows_id, cols_id = sp.csgraph.min_weight_full_bipartite_matching(weights, maximize=True)
+        except ValueError:
+            _fill_empty(weights)
+            rows_id, cols_id = sp.csgraph.min_weight_full_bipartite_matching(weights, maximize=True)
 
         # loading original group ids and filtering by the matches
         _mapped_ref = ref_group[reference_graph_key][rows_id].to_list()
