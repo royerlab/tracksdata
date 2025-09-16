@@ -6,6 +6,7 @@ import scipy.sparse as sp
 from toolz import curry
 
 from tracksdata.constants import DEFAULT_ATTR_KEYS
+from tracksdata.graph.filters._spatial_filter import DataFrameBBoxFilter
 from tracksdata.io._ctc import compressed_tracks_table
 from tracksdata.options import get_options
 from tracksdata.utils._dtypes import column_from_bytes, column_to_bytes
@@ -79,12 +80,30 @@ def _match_single_frame(
     _rows = []
     _cols = []
 
-    for i, (ref_id, ref_mask) in enumerate(
-        zip(ref_group[reference_graph_key], ref_group[DEFAULT_ATTR_KEYS.MASK], strict=True)
+    comp_indices = np.arange(len(comp_group))
+    bbox_filter = DataFrameBBoxFilter(
+        indices=pl.Series(comp_indices),
+        bboxes=comp_group[DEFAULT_ATTR_KEYS.BBOX],
+        frames=None,
+    )
+
+    for i, (ref_id, ref_mask, ref_bbox) in enumerate(
+        zip(
+            ref_group[reference_graph_key],
+            ref_group[DEFAULT_ATTR_KEYS.MASK],
+            ref_group[DEFAULT_ATTR_KEYS.BBOX].to_numpy(),
+            strict=True,
+        )
     ):
-        for j, (comp_id, comp_mask) in enumerate(
-            zip(comp_group[input_graph_key], comp_group[DEFAULT_ATTR_KEYS.MASK], strict=True)
-        ):
+        ndim = ref_bbox.size // 2
+        overlap_comp_idx = bbox_filter[
+            tuple(slice(s, e) for s, e in zip(ref_bbox[:ndim], ref_bbox[ndim:], strict=False))
+        ]
+        if len(overlap_comp_idx) == 0:
+            continue
+        comp_track_ids = comp_group[input_graph_key][overlap_comp_idx]
+        comp_masks = comp_group[DEFAULT_ATTR_KEYS.MASK][overlap_comp_idx]
+        for j, comp_id, comp_mask in zip(overlap_comp_idx, comp_track_ids, comp_masks, strict=False):
             # intersection over reference is used to select the matches
             inter = ref_mask.intersection(comp_mask)
             ctc_score = inter / ref_mask.size
@@ -168,7 +187,9 @@ def _matching_data(
         ("ref", reference_graph, reference_graph_key),
         ("comp", input_graph, input_graph_key),
     ]:
-        nodes_df = graph.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.T, track_id_key, DEFAULT_ATTR_KEYS.MASK])
+        nodes_df = graph.node_attrs(
+            attr_keys=[DEFAULT_ATTR_KEYS.T, track_id_key, DEFAULT_ATTR_KEYS.BBOX, DEFAULT_ATTR_KEYS.MASK]
+        )
         if n_workers > 1:
             # required by multiprocessing
             nodes_df = column_to_bytes(nodes_df, DEFAULT_ATTR_KEYS.MASK)
