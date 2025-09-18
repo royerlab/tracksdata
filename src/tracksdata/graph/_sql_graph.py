@@ -1541,3 +1541,31 @@ class SQLGraph(BaseGraph):
                 .filter(self.Edge.source_id == source_id, self.Edge.target_id == target_id)
                 .scalar()
             )
+
+    def remove_edge(
+        self,
+        source_id: int | None = None,
+        target_id: int | None = None,
+        *,
+        edge_id: int | None = None,
+    ) -> None:
+        """
+        Remove an edge from the graph either by its ID or by its endpoints.
+        """
+        with Session(self._engine) as session:
+            if edge_id is not None:
+                deleted = session.query(self.Edge).filter(self.Edge.edge_id == edge_id).delete()
+            else:
+                if source_id is None or target_id is None:
+                    raise ValueError("Provide either edge_id or both source_id and target_id")
+                deleted = (
+                    session.query(self.Edge)
+                    .filter(self.Edge.source_id == source_id, self.Edge.target_id == target_id)
+                    .delete()
+                )
+            if deleted == 0:
+                session.rollback()
+                if edge_id is not None:
+                    raise ValueError(f"Edge {edge_id} does not exist in the graph")
+                raise ValueError(f"Edge {source_id}->{target_id} does not exist in the graph")
+            session.commit()

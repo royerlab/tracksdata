@@ -8,7 +8,7 @@ from zarr.storage import MemoryStore
 
 from tracksdata.attrs import EdgeAttr, NodeAttr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
-from tracksdata.graph import BaseGraph, RustWorkXGraph, SQLGraph
+from tracksdata.graph import BaseGraph, GraphView, RustWorkXGraph, SQLGraph
 from tracksdata.io._numpy_array import from_array
 from tracksdata.nodes._mask import Mask
 
@@ -101,6 +101,121 @@ def test_add_edge(graph_backend: BaseGraph) -> None:
     df = graph_backend.edge_attrs()
     assert df["new_attribute"].to_list() == [0.0, 1.0]
     assert df["weight"].to_list() == [0.5, 0.1]
+
+
+def test_remove_edge_by_id(graph_backend: BaseGraph) -> None:
+    """Test removing an edge by ID across backends using unified API."""
+    # Setup
+    graph_backend.add_node_attr_key("x", None)
+    graph_backend.add_edge_attr_key("weight", 0.0)
+
+    n1 = graph_backend.add_node({"t": 0, "x": 1.0})
+    n2 = graph_backend.add_node({"t": 1, "x": 2.0})
+    n3 = graph_backend.add_node({"t": 2, "x": 3.0})
+
+    e1 = graph_backend.add_edge(n1, n2, {"weight": 0.5})
+    e2 = graph_backend.add_edge(n2, n3, {"weight": 0.7})
+
+    assert graph_backend.num_edges == 2
+    assert graph_backend.has_edge(n1, n2)
+    assert graph_backend.has_edge(n2, n3)
+
+    # Delete first edge
+    graph_backend.remove_edge(edge_id=e1)
+    assert graph_backend.num_edges == 1
+    assert not graph_backend.has_edge(n1, n2)
+    assert graph_backend.has_edge(n2, n3)
+
+    remaining_ids = set(graph_backend.edge_ids())
+    assert e1 not in remaining_ids
+    assert e2 in remaining_ids
+
+    # Delete non-existing edge should raise
+    with pytest.raises(ValueError):
+        graph_backend.remove_edge(edge_id=e1)
+
+    with pytest.raises(ValueError):
+        graph_backend.remove_edge(edge_id=999999)
+
+    with pytest.raises(ValueError):
+        graph_backend.remove_edge()
+
+
+def test_remove_edge_by_nodes(graph_backend: BaseGraph) -> None:
+    """Test removing an edge by its source/target IDs."""
+    graph_backend.add_node_attr_key("x", None)
+    graph_backend.add_edge_attr_key("weight", 0.0)
+
+    a = graph_backend.add_node({"t": 0, "x": 0.0})
+    b = graph_backend.add_node({"t": 1, "x": 1.0})
+    c = graph_backend.add_node({"t": 2, "x": 2.0})
+
+    graph_backend.add_edge(a, b, {"weight": 0.2})
+    graph_backend.add_edge(b, c, {"weight": 0.8})
+
+    assert graph_backend.has_edge(a, b)
+    assert graph_backend.has_edge(b, c)
+
+    # Remove a->b
+    graph_backend.remove_edge(a, b)
+    assert not graph_backend.has_edge(a, b)
+    assert graph_backend.has_edge(b, c)
+
+    # Removing again should raise
+    with pytest.raises(ValueError):
+        graph_backend.remove_edge(a, b)
+
+    # Removing non-existent pair should raise
+    with pytest.raises(ValueError):
+        graph_backend.remove_edge(a, c)
+
+
+def test_graph_view_remove_edge(graph_backend: BaseGraph) -> None:
+    """Ensure GraphView.remove_edge updates both the view and the root graph.
+
+    Tests removal by endpoints and by edge_id with the view in sync mode.
+    """
+    # Setup root graph with attributes
+    graph_backend.add_node_attr_key("x", None)
+    graph_backend.add_edge_attr_key("weight", 0.0)
+
+    # Nodes and edges
+    n0 = graph_backend.add_node({"t": 0, "x": 0.0})
+    n1 = graph_backend.add_node({"t": 1, "x": 1.0})
+    n2 = graph_backend.add_node({"t": 2, "x": 2.0})
+
+    graph_backend.add_edge(n0, n1, {"weight": 0.2})
+    graph_backend.add_edge(n1, n2, {"weight": 0.8})
+
+    # Create a view containing nodes t <= 1 (n0, n1) which includes edge n0->n1
+    view = graph_backend.filter(NodeAttr("t") <= 1).subgraph()
+    assert isinstance(view, GraphView)
+
+    # Sanity: edge present in both root and view
+    assert graph_backend.has_edge(n0, n1)
+    assert view.has_edge(n0, n1)
+
+    # Remove by endpoints in the view
+    view.remove_edge(n0, n1)
+    assert not graph_backend.has_edge(n0, n1)
+    assert not view.has_edge(n0, n1)
+
+    # Re-add in the view (which syncs to root) and get the edge id from the view
+    view.add_edge(n0, n1, {"weight": 0.9})
+    vid = view.edge_attrs()[DEFAULT_ATTR_KEYS.EDGE_ID].to_list()[0]
+
+    # Remove by edge_id via the view
+    view.remove_edge(edge_id=vid)
+    assert not view.has_edge(n0, n1)
+    assert not graph_backend.has_edge(n0, n1)
+
+    # Removing a non-existent edge via the view raises
+    with pytest.raises(ValueError):
+        view.remove_edge(n0, n1)
+    with pytest.raises(ValueError):
+        view.remove_edge(edge_id=vid)
+    with pytest.raises(ValueError):
+        view.remove_edge()
 
 
 def test_node_ids(graph_backend: BaseGraph) -> None:
@@ -1258,10 +1373,10 @@ def test_compute_overlaps_multiple_timepoints(graph_backend: BaseGraph) -> None:
 
 def test_compute_overlaps_invalid_threshold(graph_backend: BaseGraph) -> None:
     """Test compute_overlaps with invalid threshold values."""
-    with pytest.raises(ValueError, match=r"iou_threshold must be between 0.0 and 1.0"):
+    with pytest.raises(ValueError, match=r"iou_threshold must be between 0.0 and 1\.0"):
         graph_backend.compute_overlaps(iou_threshold=-0.1)
 
-    with pytest.raises(ValueError, match=r"iou_threshold must be between 0.0 and 1.0"):
+    with pytest.raises(ValueError, match=r"iou_threshold must be between 0.0 and 1\.0"):
         graph_backend.compute_overlaps(iou_threshold=1.1)
 
 

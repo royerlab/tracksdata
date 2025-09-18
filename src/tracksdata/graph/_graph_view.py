@@ -365,6 +365,53 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
     def bulk_add_edges(self, edges: list[dict[str, Any]], return_ids: bool = False) -> list[int] | None:
         return BaseGraph.bulk_add_edges(self, edges, return_ids=return_ids)
 
+    def remove_edge(
+        self,
+        source_id: int | None = None,
+        target_id: int | None = None,
+        *,
+        edge_id: int | None = None,
+    ) -> None:
+        """
+        Remove an edge by ID or by endpoints in both the root and (if present) the view.
+        """
+        if edge_id is not None:
+            # Remove from root first
+            self._root.remove_edge(edge_id=edge_id)
+            if self.sync:
+                if edge_id in self._edge_map_from_root:
+                    local_edge_id = self._edge_map_from_root[edge_id]
+                    edge_map = self.rx_graph.edge_index_map()
+                    if local_edge_id in edge_map:
+                        src, tgt, _ = edge_map[local_edge_id]
+                        self.rx_graph.remove_edge(src, tgt)
+                    if local_edge_id in self._edge_map_to_root:
+                        del self._edge_map_to_root[local_edge_id]
+            else:
+                self._out_of_sync = True
+            return
+
+        if source_id is None or target_id is None:
+            raise ValueError("Provide either edge_id or both source_id and target_id")
+
+        self._root.remove_edge(source_id, target_id)
+        parent_edge_id = self._root.edge_id(source_id, target_id)
+
+        if self.sync:
+            try:
+                local_source = self._map_to_local(source_id)
+                local_target = self._map_to_local(target_id)
+                if self.rx_graph.has_edge(local_source, local_target):
+                    self.rx_graph.remove_edge(local_source, local_target)
+            except KeyError:
+                pass
+            if parent_edge_id in self._edge_map_from_root:
+                local_edge_id = self._edge_map_from_root[parent_edge_id]
+                if local_edge_id in self._edge_map_to_root:
+                    del self._edge_map_to_root[local_edge_id]
+        else:
+            self._out_of_sync = True
+
     def _get_neighbors(
         self,
         neighbors_func: Callable[[rx.PyDiGraph, int], rx.NodeIndices],
