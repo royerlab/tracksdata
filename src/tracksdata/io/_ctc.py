@@ -4,6 +4,7 @@ from typing import Any
 
 import numpy as np
 import polars as pl
+import pyarrow as pa
 import tifffile as tiff
 from dask.array.image import imread as dask_imread
 
@@ -91,12 +92,23 @@ def _load_tracks_file(tracks_file: Path) -> dict[int, int]:
     """
     track_id_graph = {}
 
-    df = pl.read_csv(
-        tracks_file,
-        separator=" ",
-        has_header=False,
-        use_pyarrow=True,
-    ).rename(
+    try:
+        df = pl.read_csv(
+            tracks_file,
+            separator=" ",
+            has_header=False,
+            use_pyarrow=True,
+        )
+    except pa.ArrowInvalid:
+        # pyarrow cannot read csv with a single row
+        df = pl.read_csv(
+            tracks_file,
+            separator=" ",
+            has_header=False,
+            use_pyarrow=False,
+        )
+
+    df = df.rename(
         {
             "column_1": "track_id",
             "column_4": "parent_track_id",
