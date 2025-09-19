@@ -281,6 +281,7 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
             self._out_of_sync = True
 
         self._root.node_added.emit_fast(parent_node_id)
+        self.node_added.emit_fast(parent_node_id)
 
         return parent_node_id
 
@@ -298,6 +299,10 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
         if is_signal_on(self._root.node_added):
             for node_id in parent_node_ids:
                 self._root.node_added.emit_fast(node_id)
+
+        if is_signal_on(self.node_added):
+            for node_id in parent_node_ids:
+                self.node_added.emit_fast(node_id)
 
         return parent_node_ids
 
@@ -321,8 +326,9 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
         if node_id not in self._external_to_local:
             raise ValueError(f"Node {node_id} does not exist in the graph")
 
-        # Remove from root graph first
+        # Remove from root graph first, because removing bounding box requires node attrs
         self._root.remove_node(node_id)
+        self.node_removed.emit_fast(node_id)
 
         if self.sync:
             # Get the local node ID and remove from local graph

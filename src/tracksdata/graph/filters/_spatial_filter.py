@@ -225,8 +225,6 @@ class BBoxSpatialFilter:
     ) -> None:
         from spatial_graph import PointRTree
 
-        from tracksdata.graph._graph_view import GraphView
-
         self._graph = graph
         self._frame_attr_key = frame_attr_key
         self._bbox_attr_key = bbox_attr_key
@@ -267,9 +265,8 @@ class BBoxSpatialFilter:
             self._node_rtree.insert_bb_items(node_ids, positions_min, positions_max)
 
         # setup signal connections
-        graph_source = self._graph._root if isinstance(self._graph, GraphView) else self._graph
-        graph_source.node_added.connect(self._add_node)
-        graph_source.node_removed.connect(self._remove_node)
+        self._graph.node_added.connect(self._add_node)
+        self._graph.node_removed.connect(self._remove_node)
 
     def __getitem__(self, keys: tuple[slice, ...]) -> "BaseFilter":
         """
@@ -368,8 +365,26 @@ class BBoxSpatialFilter:
         node_id : int
             The ID of the node to add.
         """
+        from spatial_graph import PointRTree
+
         if self._node_rtree is None:
-            raise ValueError("Spatial filter is not initialized")
+            if self._graph.num_nodes > 0:
+                nodes_df = self._graph.node_attrs()
+                bboxes = nodes_df[self._bbox_attr_key].to_numpy()
+                num_dims = bboxes.shape[1] // 2
+
+                if self._frame_attr_key is None:
+                    self._ndims = num_dims
+                else:
+                    self._ndims = num_dims + 1  # +1 for the frame dimension
+
+                self._node_rtree = PointRTree(
+                    item_dtype="int64",
+                    coord_dtype="float32",
+                    dims=self._ndims,
+                )
+            else:
+                raise ValueError("Spatial filter is not initialized")
 
         attrs = self._graph[node_id].to_dict()
         positions_min, positions_max = self._attrs_to_bb_window(attrs)
