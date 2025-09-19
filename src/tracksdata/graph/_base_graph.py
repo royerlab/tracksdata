@@ -13,6 +13,7 @@ from geff.metadata_schema import Axis
 from geff.rustworkx.io import read_rx
 from geff.write_arrays import write_arrays
 from numpy.typing import ArrayLike
+from psygnal import Signal
 from zarr.storage import StoreLike
 
 from tracksdata.attrs import AttrComparison, NodeAttr
@@ -36,6 +37,9 @@ class BaseGraph(abc.ABC):
     """
     Base class for a graph backend.
     """
+
+    node_added = Signal(int)
+    node_removed = Signal(int)
 
     @property
     def supports_custom_indices(self) -> bool:
