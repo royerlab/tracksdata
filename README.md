@@ -22,16 +22,8 @@ A common data structure and basic tools for multi-object tracking.
 
 ## Installation
 
-Until rustworkx 0.17.0 is released, you need to have rust installed to compile the latest rustworkx.
-
 ```console
-conda install -c conda-forge rust
-```
-
-Then install tracksdata with the following command:
-
-```console
-pip install .
+pip install tracksdata
 ```
 
 ## Why tracksdata?

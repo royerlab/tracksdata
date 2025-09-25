@@ -4,15 +4,13 @@
 
 TracksData requires Python 3.10 or later.
 
-## Installing Rust (Required)
+## Install TracksData
 
-Until rustworkx 0.17.0 is released, you need to have Rust installed to compile the latest rustworkx:
+### From pypi
 
 ```bash
-conda install -c conda-forge rust
+pip install tracksdata
 ```
-
-## Install TracksData
 
 ### From Source (Development)
 
