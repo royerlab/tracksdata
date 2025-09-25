@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from functools import cached_property, lru_cache
+from typing import Any
 
 import blosc2
 import numpy as np
@@ -277,6 +278,11 @@ class Mask:
             bbox = np.concatenate([processed_start, processed_end])
 
         return cls(mask, bbox)
+
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, Mask):
+            return False
+        return np.array_equal(self.bbox, other.bbox) and np.array_equal(self.mask, other.mask)
 
 
 class MaskDiskAttrs(GenericFuncNodeAttrs):

@@ -48,7 +48,7 @@ dependencies = [
   "ilpy >= 0.5.1",
   "pyarrow",
   "bidict>=0.23.1",
-  "geff @ git+https://github.com/live-image-tracking-tools/geff.git@b751718f81d107e1fdda2df2afb62253039c137b",
+  "geff>=1.0.0",
 ]
 
 [project.optional-dependencies]

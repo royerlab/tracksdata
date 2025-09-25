@@ -48,6 +48,9 @@ def polars_dtype_to_numpy_dtype(polars_dtype: DataType) -> np.dtype:
     np.dtype
         The numpy dtype.
     """
+    while isinstance(polars_dtype, pl.Array):
+        polars_dtype = polars_dtype.inner
+
     try:
         return _POLARS_DTYPE_TO_NUMPY_DTYPE[polars_dtype]
     except KeyError as e:

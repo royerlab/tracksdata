@@ -8,7 +8,7 @@ from zarr.storage import MemoryStore
 
 from tracksdata.attrs import EdgeAttr, NodeAttr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
-from tracksdata.graph import BaseGraph, RustWorkXGraph, SQLGraph
+from tracksdata.graph import BaseGraph, IndexedRXGraph, RustWorkXGraph, SQLGraph
 from tracksdata.io._numpy_array import from_array
 from tracksdata.nodes._mask import Mask
 
@@ -1712,7 +1712,7 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
 
     graph_backend.to_geff(geff_store=output_store)
 
-    geff_graph = RustWorkXGraph.from_geff(output_store)
+    geff_graph = IndexedRXGraph.from_geff(output_store)
 
     assert geff_graph.num_nodes == 3
     assert geff_graph.num_edges == 2
@@ -1721,6 +1721,9 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
 
     assert set(graph_backend.node_attr_keys) == set(geff_graph.node_attr_keys)
     assert set(graph_backend.edge_attr_keys) == set(geff_graph.edge_attr_keys)
+
+    for node_id in geff_graph.node_ids():
+        assert geff_graph[node_id].to_dict() == graph_backend[node_id].to_dict()
 
     assert rx.is_isomorphic(
         rx_graph,

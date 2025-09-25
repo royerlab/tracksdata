@@ -5,19 +5,18 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, overload
 
+import geff
 import numpy as np
 import polars as pl
 import rustworkx as rx
-from geff import GeffMetadata
-from geff.metadata_schema import Axis
-from geff.rustworkx.io import read_rx
-from geff.write_arrays import write_arrays
+from geff.core_io import construct_var_len_props, write_arrays
+from geff_spec import Axis, PropMetadata
 from numpy.typing import ArrayLike
 from zarr.storage import StoreLike
 
 from tracksdata.attrs import AttrComparison, NodeAttr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
-from tracksdata.utils._dtypes import column_to_bytes, column_to_numpy
+from tracksdata.utils._dtypes import column_to_numpy, polars_dtype_to_numpy_dtype
 from tracksdata.utils._logging import LOG
 from tracksdata.utils._multiprocessing import multiprocessing_apply
 
@@ -1155,7 +1154,7 @@ class BaseGraph(abc.ABC):
         from tracksdata.graph import IndexedRXGraph
 
         # this performs a roundtrip with the rustworkx graph
-        rx_graph, _ = read_rx(geff_store)
+        rx_graph, _ = geff.read(geff_store, backend="rustworkx")
 
         if not isinstance(rx_graph, rx.PyDiGraph):
             LOG.warning("The graph is not a directed graph, converting to directed graph.")
@@ -1167,6 +1166,16 @@ class BaseGraph(abc.ABC):
             **kwargs,
         )
 
+        if DEFAULT_ATTR_KEYS.MASK in indexed_graph.node_attr_keys:
+            from tracksdata.nodes._mask import Mask
+
+            # unsafe operation, changing graph content inplace
+            for node_attr in indexed_graph.rx_graph.nodes():
+                node_attr[DEFAULT_ATTR_KEYS.MASK] = Mask(
+                    node_attr[DEFAULT_ATTR_KEYS.MASK].astype(bool),
+                    bbox=node_attr[DEFAULT_ATTR_KEYS.BBOX],
+                )
+
         if cls == IndexedRXGraph:
             return indexed_graph
 
@@ -1175,7 +1184,7 @@ class BaseGraph(abc.ABC):
     def to_geff(
         self,
         geff_store: StoreLike,
-        geff_metadata: GeffMetadata | None = None,
+        geff_metadata: geff.GeffMetadata | None = None,
         zarr_format: Literal[2, 3] = 3,
     ) -> None:
         """
@@ -1196,9 +1205,12 @@ class BaseGraph(abc.ABC):
         """
 
         node_attrs = self.node_attrs()
+        node_ids = node_attrs[DEFAULT_ATTR_KEYS.NODE_ID].to_numpy()
+        node_attrs = node_attrs.drop(DEFAULT_ATTR_KEYS.NODE_ID)
 
-        if DEFAULT_ATTR_KEYS.MASK in node_attrs.columns:
-            node_attrs = column_to_bytes(node_attrs, DEFAULT_ATTR_KEYS.MASK)
+        edge_attrs = self.edge_attrs().drop(DEFAULT_ATTR_KEYS.EDGE_ID)
+        edge_ids = edge_attrs.select(DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET).to_numpy()
+        edge_attrs = edge_attrs.drop(DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET)
 
         if geff_metadata is None:
             axes = [Axis(name=DEFAULT_ATTR_KEYS.T, type="time")]
@@ -1211,37 +1223,47 @@ class BaseGraph(abc.ABC):
             else:
                 track_node_props = None
 
-            geff_metadata = GeffMetadata(
+            node_props_metadata = {
+                k: PropMetadata(
+                    identifier=k,
+                    dtype=polars_dtype_to_numpy_dtype(v.dtype) if k != DEFAULT_ATTR_KEYS.MASK else np.uint64,
+                    varlength=k == DEFAULT_ATTR_KEYS.MASK,
+                )
+                for k, v in node_attrs.to_dict().items()
+            }
+            edge_props_metadata = {
+                k: PropMetadata(identifier=k, dtype=polars_dtype_to_numpy_dtype(v.dtype))
+                for k, v in edge_attrs.to_dict().items()
+            }
+
+            geff_metadata = geff.GeffMetadata(
                 directed=True,
                 axes=axes,
+                node_props_metadata=node_props_metadata,
+                edge_props_metadata=edge_props_metadata,
                 track_node_props=track_node_props,
             )
 
-        edge_attrs = self.edge_attrs().drop(DEFAULT_ATTR_KEYS.EDGE_ID)
-
         node_dict = {
-            k: (column_to_numpy(v), None) for k, v in node_attrs.drop(DEFAULT_ATTR_KEYS.NODE_ID).to_dict().items()
+            k: {"values": column_to_numpy(v), "missing": None}
+            for k, v in node_attrs.to_dict().items()
+            if k != DEFAULT_ATTR_KEYS.MASK
         }
 
-        edge_ids = edge_attrs.select(DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET).to_numpy()
-
-        edge_dict = {
-            k: (column_to_numpy(v), None)
-            for k, v in edge_attrs.drop(
-                DEFAULT_ATTR_KEYS.EDGE_SOURCE,
-                DEFAULT_ATTR_KEYS.EDGE_TARGET,
+        if DEFAULT_ATTR_KEYS.MASK in node_attrs.columns:
+            node_dict[DEFAULT_ATTR_KEYS.MASK] = construct_var_len_props(
+                [mask.mask.astype(np.uint64) for mask in node_attrs[DEFAULT_ATTR_KEYS.MASK]]
             )
-            .to_dict()
-            .items()
-        }
+
+        edge_dict = {k: {"values": column_to_numpy(v), "missing": None} for k, v in edge_attrs.to_dict().items()}
 
         write_arrays(
             geff_store,
-            metadata=geff_metadata,
-            node_ids=node_attrs[DEFAULT_ATTR_KEYS.NODE_ID].to_numpy(),
+            node_ids=node_ids.astype(np.uint64),
             node_props=node_dict,
-            edge_ids=edge_ids,
+            edge_ids=edge_ids.astype(np.uint64),
             edge_props=edge_dict,
+            metadata=geff_metadata,
             zarr_format=zarr_format,
         )
 
