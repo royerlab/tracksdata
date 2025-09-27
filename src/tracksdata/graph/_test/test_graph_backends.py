@@ -1731,6 +1731,7 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACK_ID, -1)
+    graph_backend.add_node_attr_key("ndfeature", None)
 
     graph_backend.add_edge_attr_key("weight", 0.0)
 
@@ -1743,6 +1744,7 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
             "bbox": np.array([6, 6, 8, 8]),
             "mask": Mask(np.array([[True, True], [True, True]], dtype=bool), bbox=np.array([6, 6, 8, 8])),
             DEFAULT_ATTR_KEYS.TRACK_ID: 1,
+            "ndfeature": np.asarray([[1.0], [2.0], [3.0]]),
         }
     )
     node2 = graph_backend.add_node(
@@ -1757,6 +1759,7 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
                 bbox=np.array([0, 0, 3, 3]),
             ),
             DEFAULT_ATTR_KEYS.TRACK_ID: 1,
+            "ndfeature": np.asarray([[9.0], [10.0], [11.0]]),
         }
     )
 
@@ -1769,6 +1772,7 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
             "bbox": np.array([2, 2, 4, 4]),
             "mask": Mask(np.array([[True, True], [True, True]], dtype=bool), bbox=np.array([2, 2, 4, 4])),
             DEFAULT_ATTR_KEYS.TRACK_ID: 1,
+            "ndfeature": np.asarray([[5.0], [6.0], [7.0]]),
         }
     )
 
