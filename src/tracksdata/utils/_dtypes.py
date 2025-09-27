@@ -48,7 +48,7 @@ def polars_dtype_to_numpy_dtype(polars_dtype: DataType) -> np.dtype:
     np.dtype
         The numpy dtype.
     """
-    if isinstance(polars_dtype, pl.Array | pl.List):
+    while isinstance(polars_dtype, pl.Array | pl.List):
         polars_dtype = polars_dtype.inner
 
     try:
