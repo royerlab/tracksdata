@@ -7,7 +7,6 @@ import rustworkx as rx
 
 from tracksdata.attrs import AttrComparison
 from tracksdata.constants import DEFAULT_ATTR_KEYS
-from tracksdata.functional._rx import _assign_track_ids
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.graph._mapped_graph_mixin import MappedGraphMixin
 from tracksdata.graph._rustworkx_graph import IndexedRXGraph, RustWorkXGraph, RXFilter
@@ -533,52 +532,6 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
                 )
             else:
                 self._out_of_sync = True
-
-    def assign_track_ids(
-        self,
-        output_key: str = DEFAULT_ATTR_KEYS.TRACK_ID,
-        reset: bool = True,
-        track_id_offset: int = 1,
-    ) -> rx.PyDiGraph:
-        """
-        Compute and assign track ids to nodes.
-
-        Parameters
-        ----------
-        output_key : str
-            The key of the output track id attribute.
-        reset : bool
-            Whether to reset all track ids before assigning new ones.
-        track_id_offset : int
-            The starting track id, useful when assigning track ids to a subgraph.
-
-        Returns
-        -------
-        rx.PyDiGraph
-            A compressed graph (parent -> child) with track ids lineage relationships.
-        """
-        try:
-            node_ids, track_ids, tracks_graph = _assign_track_ids(self.rx_graph, track_id_offset)
-        except RuntimeError as e:
-            raise RuntimeError(
-                "Are you sure this graph is a valid lineage graph?\n"
-                "This function expects a solved graph.\n"
-                "Often used from `graph.subgraph(edge_attr_filter={'solution': True})`"
-            ) from e
-
-        node_ids = self._map_to_external(node_ids)
-
-        if output_key not in self.node_attr_keys:
-            self.add_node_attr_key(output_key, -1)
-        elif reset:
-            self.update_node_attrs(attrs={output_key: -1})
-
-        self.update_node_attrs(
-            node_ids=node_ids,
-            attrs={output_key: track_ids},
-        )
-
-        return tracks_graph
 
     def in_degree(self, node_ids: list[int] | int | None = None) -> list[int] | int:
         """

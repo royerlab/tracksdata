@@ -1092,6 +1092,84 @@ class BaseGraph(abc.ABC):
 
         return BBoxSpatialFilter(self, frame_attr_key=frame_attr_key, bbox_attr_key=bbox_attr_key)
 
+    @abc.abstractmethod
+    def assign_track_ids(
+        self,
+        output_key: str = DEFAULT_ATTR_KEYS.TRACK_ID,
+        reset: bool = True,
+        track_id_offset: int | None = None,
+        node_ids: list[int] | None = None,
+    ) -> rx.PyDiGraph:
+        """
+        Compute and assign track ids to nodes.
+        Parameters
+        ----------
+        output_key : str
+            The key of the output track id attribute.
+        reset : bool
+            Whether to reset the track ids of the graph. If True, the track ids will be reset to -1.
+        track_id_offset : int | None
+            The starting track id, useful when assigning track ids to a subgraph.
+            If None, the track ids will start from 1 or from the maximum existing track id + 1
+            if the output_key already exists and reset is False.
+        node_ids : list[int] | None
+            The node ids to assign track ids to. If None, all nodes are used.
+
+        Returns
+        -------
+        rx.PyDiGraph
+            A compressed graph (parent -> child) with track ids lineage relationships.
+            If node_ids is provided, it will only include linages including those nodes.
+        """
+        raise NotImplementedError(f"{self.__class__.__name__} backend does not support track id assignment.")
+
+    # Internal utility to compute the exact set of nodes to assign when a subset is requested
+    def _compute_track_node_ids(self, seeds: list[int] | None) -> list[int]:
+        """
+        Compute the non-branching tracklets around the provided seed node_ids.
+
+        Walks forward to successors only through nodes with exactly one successor,
+        and backward to predecessors that also have out_degree == 1, until closure.
+
+        Parameters
+        ----------
+        seeds : list[int]
+            Seed node IDs where to start the closure.
+
+        Returns
+        -------
+        list[int]
+            Sorted unique node IDs forming the closure.
+        """
+        # NOTE: if this function becomes a bottleneck in the future it might be worth having
+        # a specialized version per backend
+        if seeds is None or len(seeds) == 0:
+            return []
+
+        track_node_ids: set[int] = set()
+        active_ids: set[int] = set(seeds)
+
+        while len(active_ids) > 0:
+            track_node_ids.update(active_ids)
+
+            # Successors: only nodes with exactly one successor
+            succ_map = self.successors(node_ids=list(active_ids))
+            successors = [int(df[DEFAULT_ATTR_KEYS.NODE_ID].first()) for df in succ_map.values() if len(df) == 1]
+
+            # Predecessors: only nodes with exactly one predecessor and predecessor out_degree == 1
+            pred_map = self.predecessors(node_ids=list(active_ids))
+            predecessors = [int(df[DEFAULT_ATTR_KEYS.NODE_ID].first()) for df in pred_map.values() if len(df) == 1]
+
+            if len(predecessors) > 0:
+                out_degrees = self.out_degree(predecessors)
+                if isinstance(out_degrees, int):
+                    out_degrees = [out_degrees]
+                predecessors = [node for node, degree in zip(predecessors, out_degrees, strict=True) if degree == 1]
+
+            active_ids = (set(successors) | set(predecessors)) - track_node_ids
+
+        return sorted(track_node_ids)
+
     def tracklet_graph(
         self,
         track_id_key: str = DEFAULT_ATTR_KEYS.TRACK_ID,
