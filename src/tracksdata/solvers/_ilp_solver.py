@@ -50,6 +50,8 @@ class ILPSolver(BaseSolver):
         Cost for track disappearances (tracks ending).
     division_weight : str | ExprInput, default 0.0
         Cost for track divisions (one track splitting into two).
+    merge_weight : None | str | ExprInput
+        Disable when None, otherwise it's the cost for track merges (one track merging into another).
     output_key : str, default DEFAULT_ATTR_KEYS.SOLUTION
         Attribute key to store the solution (True/False for selected items).
     num_threads : int, default 1
@@ -75,6 +77,8 @@ class ILPSolver(BaseSolver):
         Compiled disappearance weight expression.
     division_weight_expr : NodeAttr
         Compiled division weight expression.
+    merge_weight_expr : NodeAttr | None
+        Compiled merge weight expression by default is None and merges are disabled.
 
     See Also
     --------
@@ -135,6 +139,7 @@ class ILPSolver(BaseSolver):
         appearance_weight: str | ExprInput = 0.0,
         disappearance_weight: str | ExprInput = 0.0,
         division_weight: str | ExprInput = 0.0,
+        merge_weight: None | str | ExprInput = None,
         output_key: str = DEFAULT_ATTR_KEYS.SOLUTION,
         num_threads: int = 1,
         reset: bool = True,
@@ -148,6 +153,7 @@ class ILPSolver(BaseSolver):
         self.appearance_weight_expr = NodeAttr(appearance_weight)
         self.disappearance_weight_expr = NodeAttr(disappearance_weight)
         self.division_weight_expr = NodeAttr(division_weight)
+        self.merge_weight_expr = None if merge_weight is None else NodeAttr(merge_weight)
         self.num_threads = num_threads
         self.gap = gap
         self.timeout = timeout
@@ -161,6 +167,7 @@ class ILPSolver(BaseSolver):
         self._appear_vars = {}
         self._disappear_vars = {}
         self._division_vars = {}
+        self._merge_vars = {}
         self._edge_vars = {}
 
     def _evaluate_expr(
@@ -210,21 +217,27 @@ class ILPSolver(BaseSolver):
     ) -> None:
         node_ids = nodes_df[DEFAULT_ATTR_KEYS.NODE_ID].to_list()
 
-        num_new_variables = len(node_ids) * 4 + len(edges_df)
+        n_var_per_node = 4 if self.merge_weight_expr is None else 5
+        num_new_variables = len(node_ids) * n_var_per_node + len(edges_df)
 
         self._objective.resize(self._count + num_new_variables)
 
         for name, variables, expr in zip(
-            ["node", "appear", "disappear", "division"],
-            [self._node_vars, self._appear_vars, self._disappear_vars, self._division_vars],
+            ["node", "appear", "disappear", "division", "merge"],
+            [self._node_vars, self._appear_vars, self._disappear_vars, self._division_vars, self._merge_vars],
             [
                 self.node_weight_expr,
                 self.appearance_weight_expr,
                 self.disappearance_weight_expr,
                 self.division_weight_expr,
+                self.merge_weight_expr,
             ],
             strict=True,
         ):
+            if expr is None:
+                # currently this is only used for merge weights
+                continue
+
             weights = self._evaluate_expr(expr, nodes_df)
 
             for node_id, weight in zip(node_ids, weights, strict=True):
@@ -281,12 +294,14 @@ class ILPSolver(BaseSolver):
             edge_ids = group[DEFAULT_ATTR_KEYS.EDGE_ID].to_list()
             self._constraints.add(
                 self._appear_vars[target_id] + sum(self._edge_vars[edge_id] for edge_id in edge_ids)
-                == self._node_vars[target_id]
+                == self._node_vars[target_id] + self._merge_vars.get(target_id, 0.0)
             )
             unseen_in_nodes.remove(target_id)
 
         for node_id in unseen_in_nodes:
-            self._constraints.add(self._appear_vars[node_id] == self._node_vars[node_id])
+            self._constraints.add(
+                self._appear_vars[node_id] == self._node_vars[node_id] + self._merge_vars.get(node_id, 0.0)
+            )
 
         # outgoing flow
         for (source_id,), group in edges_df.group_by(DEFAULT_ATTR_KEYS.EDGE_SOURCE):
@@ -358,18 +373,19 @@ class ILPSolver(BaseSolver):
         self,
         graph: BaseGraph,
     ) -> GraphView | None:
-        nodes_df = graph.node_attrs(
-            attr_keys=[
-                DEFAULT_ATTR_KEYS.NODE_ID,
-                *self.node_weight_expr.columns,
-                *self.appearance_weight_expr.columns,
-                *self.disappearance_weight_expr.columns,
-                *self.division_weight_expr.columns,
-            ],
-        )
-        edges_df = graph.edge_attrs(
-            attr_keys=self.edge_weight_expr.columns,
-        )
+        node_attr_keys = [
+            DEFAULT_ATTR_KEYS.NODE_ID,
+            *self.node_weight_expr.columns,
+            *self.appearance_weight_expr.columns,
+            *self.disappearance_weight_expr.columns,
+            *self.division_weight_expr.columns,
+        ]
+
+        if self.merge_weight_expr is not None:
+            node_attr_keys.extend(self.merge_weight_expr.columns)
+
+        nodes_df = graph.node_attrs(attr_keys=node_attr_keys)
+        edges_df = graph.edge_attrs(attr_keys=self.edge_weight_expr.columns)
 
         self._add_objective_and_variables(nodes_df, edges_df)
         self._add_continuous_flow_constraints(nodes_df[DEFAULT_ATTR_KEYS.NODE_ID].to_list(), edges_df)
