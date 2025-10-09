@@ -10,7 +10,7 @@ import numpy as np
 import polars as pl
 import rustworkx as rx
 from geff.core_io import construct_var_len_props, write_arrays
-from geff_spec import Axis, PropMetadata
+from geff_spec import Axis, GeffMetadata, PropMetadata
 from numpy.typing import ArrayLike
 from zarr.storage import StoreLike
 
@@ -1240,8 +1240,9 @@ class BaseGraph(abc.ABC):
     def from_geff(
         cls: type[T],
         geff_store: StoreLike,
+        geff_read_kwargs: dict[str, Any] | None = None,
         **kwargs,
-    ) -> T:
+    ) -> tuple[T, GeffMetadata]:
         """
         Create a graph from a geff data directory.
 
@@ -1249,6 +1250,8 @@ class BaseGraph(abc.ABC):
         ----------
         geff_store : StoreLike
             The store or path to the geff data directory to read the graph from.
+        geff_read_kwargs : dict[str, Any] | None
+            Additional keyword arguments to pass to the `geff.read` function.
         **kwargs
             Additional keyword arguments to pass to the graph constructor.
 
@@ -1256,11 +1259,16 @@ class BaseGraph(abc.ABC):
         -------
         T
             The loaded graph.
+        geff_metadata : GeffMetadata
+            The geff metadata of the graph.
         """
         from tracksdata.graph import IndexedRXGraph
 
+        if geff_read_kwargs is None:
+            geff_read_kwargs = {}
+
         # this performs a roundtrip with the rustworkx graph
-        rx_graph, _ = geff.read(geff_store, backend="rustworkx")
+        rx_graph, geff_metadata = geff.read(geff_store, backend="rustworkx", **geff_read_kwargs)
 
         if not isinstance(rx_graph, rx.PyDiGraph):
             LOG.warning("The graph is not a directed graph, converting to directed graph.")
@@ -1283,9 +1291,9 @@ class BaseGraph(abc.ABC):
                 )
 
         if cls == IndexedRXGraph:
-            return indexed_graph
+            return indexed_graph, geff_metadata
 
-        return cls.from_other(indexed_graph, **kwargs)
+        return cls.from_other(indexed_graph, **kwargs), geff_metadata
 
     def to_geff(
         self,

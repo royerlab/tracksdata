@@ -1893,7 +1893,7 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
 
     graph_backend.to_geff(geff_store=output_store)
 
-    geff_graph = IndexedRXGraph.from_geff(output_store)
+    geff_graph, _ = IndexedRXGraph.from_geff(output_store)
 
     assert geff_graph.num_nodes == 3
     assert geff_graph.num_edges == 2
