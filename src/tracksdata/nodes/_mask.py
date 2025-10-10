@@ -120,7 +120,7 @@ class Mask:
             center = (self._bbox[: self._mask.ndim] + self._bbox[self._mask.ndim :]) // 2
             half_shape = np.asarray(shape) // 2
             start = np.maximum(center - half_shape, 0)
-            end = np.minimum(center + half_shape, image.shape)
+            end = np.minimum(center + shape - half_shape, image.shape)
             slicing = tuple(slice(s, e) for s, e in zip(start, end, strict=True))
 
         return image[slicing]

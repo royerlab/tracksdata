@@ -254,6 +254,9 @@ def test_mask_crop_with_shape() -> None:
     cropped_image = mask.crop(image, shape=(2, 4))
     assert np.array_equal(cropped_image, image[1:3, 0:4])
 
+    cropped_image = mask.crop(image, shape=(1, 4))
+    assert np.array_equal(cropped_image, image[2:3, 0:4])
+
 
 def test_mask_from_coordinates_2d_basic() -> None:
     """Test 2D mask creation and bbox without cropping."""
