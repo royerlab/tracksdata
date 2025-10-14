@@ -1162,13 +1162,13 @@ class SQLGraph(BaseGraph):
                     *[getattr(self.Node, key) for key in attr_keys],
                 )
 
-        nodes_df = pl.read_database(
-            self._raw_query(query),
-            connection=session.connection(),
-            schema_overrides=self._polars_schema_override(self.Node),
-        )
-        nodes_df = unpickle_bytes_columns(nodes_df)
-        nodes_df = self._cast_array_columns(self.Node, nodes_df)
+            nodes_df = pl.read_database(
+                self._raw_query(query),
+                connection=session.connection(),
+                schema_overrides=self._polars_schema_override(self.Node),
+            )
+            nodes_df = unpickle_bytes_columns(nodes_df)
+            nodes_df = self._cast_array_columns(self.Node, nodes_df)
 
         # indices are included by default and must be removed
         if attr_keys is not None:
@@ -1407,6 +1407,32 @@ class SQLGraph(BaseGraph):
         edge_ids: Sequence[int] | None = None,
     ) -> None:
         self._update_table(self.Edge, edge_ids, DEFAULT_ATTR_KEYS.EDGE_ID, attrs)
+
+    def assign_track_ids(
+        self,
+        output_key: str = DEFAULT_ATTR_KEYS.TRACK_ID,
+        reset: bool = True,
+        track_id_offset: int | None = None,
+        node_ids: list[int] | None = None,
+    ) -> rx.PyDiGraph:
+        if node_ids is not None:
+            track_node_ids = list(set(self.tracklet_nodes(node_ids)))
+        else:
+            track_node_ids = None
+        if output_key in self.node_attr_keys:
+            node_attr_keys = [output_key]
+        else:
+            node_attr_keys = []
+
+        return (
+            self.filter(node_ids=track_node_ids)
+            .subgraph(node_attr_keys=node_attr_keys)
+            .assign_track_ids(
+                output_key=output_key,
+                reset=reset,
+                track_id_offset=track_id_offset,
+            )
+        )
 
     def _get_degree(
         self,

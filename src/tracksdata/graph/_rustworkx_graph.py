@@ -1086,48 +1086,72 @@ class RustWorkXGraph(BaseGraph):
         self,
         output_key: str = DEFAULT_ATTR_KEYS.TRACK_ID,
         reset: bool = True,
-        track_id_offset: int = 1,
+        track_id_offset: int | None = None,
+        node_ids: list[int] | None = None,
     ) -> rx.PyDiGraph:
-        """
-        Compute and assign track ids to nodes.
+        if node_ids is not None:
+            track_node_ids = set(self.tracklet_nodes(node_ids))
+            return (
+                self.filter(node_ids=list(track_node_ids))
+                .subgraph(node_attr_keys=[output_key], edge_attr_keys=[])
+                .assign_track_ids(
+                    output_key=output_key,
+                    reset=reset,
+                    track_id_offset=track_id_offset,
+                )
+            )
+        else:
+            if output_key not in self.node_attr_keys:
+                self.add_node_attr_key(output_key, -1)
+                previous_id_df = None
+                if track_id_offset is None:
+                    track_id_offset = 1
+            elif reset:
+                self.update_node_attrs(attrs={output_key: -1})
+                previous_id_df = None
+                if track_id_offset is None:
+                    track_id_offset = 1
+            else:
+                previous_id_df = self.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, output_key])
+                if track_id_offset is None:
+                    track_id_offset: int = max(previous_id_df[output_key].max(), 0) + 1
 
-        Parameters
-        ----------
-        output_key : str
-            The key of the output track id attribute.
-        reset : bool
-            Whether to reset the track ids of the graph. If True, the track ids will be reset to -1.
-        track_id_offset : int
-            The starting track id, useful when assigning track ids to a subgraph.
+            try:
+                track_node_ids, track_ids, tracks_graph = _assign_track_ids(self.rx_graph, track_id_offset)
+            except RuntimeError as e:
+                raise RuntimeError(
+                    "Are you sure this graph is a valid lineage graph?\n"
+                    "This function expects a solved graph.\n"
+                    "Often used from `graph.subgraph(edge_attr_filter={'solution': True})`"
+                ) from e
 
-        Returns
-        -------
-        rx.PyDiGraph
-            A compressed graph (parent -> child) with track ids lineage relationships.
-        """
-        try:
-            node_ids, track_ids, tracks_graph = _assign_track_ids(self.rx_graph, track_id_offset)
-        except RuntimeError as e:
-            raise RuntimeError(
-                "Are you sure this graph is a valid lineage graph?\n"
-                "This function expects a solved graph.\n"
-                "Often used from `graph.subgraph(edge_attr_filter={'solution': True})`"
-            ) from e
+            # For the IndexedRXGraph, we need to map the track_node_ids to the external node ids
+            if hasattr(self, "_map_to_external"):
+                track_node_ids = self._map_to_external(track_node_ids)  # type: ignore
 
-        if output_key not in self.node_attr_keys:
-            self.add_node_attr_key(output_key, -1)
-        elif reset:
-            self.update_node_attrs(node_ids=self.node_ids(), attrs={output_key: -1})
+            # mapping to already existing track IDs as much as possible
+            if previous_id_df is not None:
+                new_id_df = pl.DataFrame({DEFAULT_ATTR_KEYS.NODE_ID: track_node_ids, output_key + "_new": track_ids})
+                merged = new_id_df.join(
+                    previous_id_df,
+                    left_on=DEFAULT_ATTR_KEYS.NODE_ID,
+                    right_on=DEFAULT_ATTR_KEYS.NODE_ID,
+                    how="left",
+                ).filter(pl.col(output_key) != -1)
+                if merged.height > 0:
+                    track_id_map = merged.unique(output_key + "_new", keep="first").unique(output_key, keep="first")
+                    track_id_map = dict(zip(track_id_map[output_key + "_new"], track_id_map[output_key], strict=True))
+                else:
+                    track_id_map = {}
+                # Ensure that the result is a list of integers (using numpy integer causes issues with SQLGraph)
+                # Later on, we will make it safe to use numpy integers everywhere for updating attributes.
+                track_ids = [int(track_id_map.get(tid, tid)) for tid in track_ids]  # type: ignore
+            self.update_node_attrs(
+                node_ids=track_node_ids,  # type: ignore
+                attrs={output_key: track_ids},
+            )
 
-        # node_ids are rustworkx graph ids, therefore we don't need node_id mapping
-        # and we must use RustWorkXGraph for IndexedRXGraph
-        RustWorkXGraph.update_node_attrs(
-            self,
-            node_ids=node_ids,
-            attrs={output_key: track_ids},
-        )
-
-        return tracks_graph
+            return tracks_graph
 
     def in_degree(self, node_ids: list[int] | int | None = None) -> list[int] | int:
         """
