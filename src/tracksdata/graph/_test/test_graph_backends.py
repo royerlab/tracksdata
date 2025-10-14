@@ -1731,7 +1731,7 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACK_ID, -1)
-    graph_backend.add_node_attr_key("ndfeature", None)
+    graph_backend.add_node_attr_key("ndfeature", np.asarray([[1.0], [2.0], [3.0]]))
 
     graph_backend.add_edge_attr_key("weight", 0.0)
 

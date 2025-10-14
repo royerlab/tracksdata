@@ -1,11 +1,13 @@
 from collections.abc import Sequence
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
+import cloudpickle
 import numpy as np
 import polars as pl
 import rustworkx as rx
 import sqlalchemy as sa
+from polars.datatypes.convert import numpy_char_code_to_dtype
 from sqlalchemy.orm import DeclarativeBase, Session, aliased, load_only
 from sqlalchemy.sql.type_api import TypeEngine
 
@@ -209,8 +211,8 @@ class SQLFilter(BaseFilter):
         if attr_keys is not None:
             nodes_attrs = nodes_attrs.select(attr_keys)
 
-        nodes_attrs = self._graph._cast_boolean_columns(self._graph.Node, nodes_attrs)
         nodes_attrs = unpickle_bytes_columns(nodes_attrs)
+        nodes_attrs = self._graph._cast_special_columns(self._graph.Node, nodes_attrs)
 
         if unpack:
             nodes_attrs = unpack_array_attrs(nodes_attrs)
@@ -265,8 +267,8 @@ class SQLFilter(BaseFilter):
                 connection=session.connection(),
             )
 
-        edges_df = self._graph._cast_boolean_columns(self._graph.Edge, edges_df)
         edges_df = unpickle_bytes_columns(edges_df)
+        edges_df = self._graph._cast_special_columns(self._graph.Edge, edges_df)
 
         if unpack:
             edges_df = unpack_array_attrs(edges_df)
@@ -338,6 +340,12 @@ class SQLFilter(BaseFilter):
         )
 
         return graph
+
+
+class ArrayColInfo(NamedTuple):
+    key: str
+    shape: tuple[int, ...]
+    dtype: np.dtype
 
 
 class SQLGraph(BaseGraph):
@@ -441,6 +449,7 @@ class SQLGraph(BaseGraph):
         # Create unique classes for this instance
         self._define_schema(overwrite=overwrite)
         self._boolean_columns: dict[str, list[str]] = {self.Node.__tablename__: [], self.Edge.__tablename__: []}
+        self._array_columns: dict[str, list[ArrayColInfo]] = {self.Node.__tablename__: [], self.Edge.__tablename__: []}
 
         if overwrite:
             self.Base.metadata.drop_all(self._engine)
@@ -511,7 +520,7 @@ class SQLGraph(BaseGraph):
         self.Edge = Edge
         self.Overlap = Overlap
 
-    def _cast_boolean_columns(self, table_class: type[DeclarativeBase], df: pl.DataFrame) -> pl.DataFrame:
+    def _cast_special_columns(self, table_class: type[DeclarativeBase], df: pl.DataFrame) -> pl.DataFrame:
         """
         This is required because polars bypasses the boolean type and converts it to integer.
         """
@@ -519,6 +528,11 @@ class SQLGraph(BaseGraph):
             pl.col(col).cast(pl.Boolean)
             for col in self._boolean_columns[table_class.__tablename__]
             if col in df.columns
+        )
+        df = df.with_columns(
+            pl.col(arr_info.key).cast(pl.Array(numpy_char_code_to_dtype(arr_info.dtype.char), arr_info.shape))
+            for arr_info in self._array_columns[table_class.__tablename__]
+            if arr_info.key in df.columns
         )
         return df
 
@@ -978,8 +992,8 @@ class SQLGraph(BaseGraph):
                 query.statement,
                 connection=session.connection(),
             )
-            node_df = self._cast_boolean_columns(self.Node, node_df)
             node_df = unpickle_bytes_columns(node_df)
+            node_df = self._cast_special_columns(self.Node, node_df)
 
         if single_node:
             return node_df
@@ -1142,8 +1156,8 @@ class SQLGraph(BaseGraph):
             self._raw_query(query),
             connection=session.connection(),
         )
-        nodes_df = self._cast_boolean_columns(self.Node, nodes_df)
         nodes_df = unpickle_bytes_columns(nodes_df)
+        nodes_df = self._cast_special_columns(self.Node, nodes_df)
 
         # indices are included by default and must be removed
         if attr_keys is not None:
@@ -1184,8 +1198,8 @@ class SQLGraph(BaseGraph):
                 self._raw_query(query),
                 connection=session.connection(),
             )
-            edges_df = self._cast_boolean_columns(self.Edge, edges_df)
             edges_df = unpickle_bytes_columns(edges_df)
+            edges_df = self._cast_special_columns(self.Edge, edges_df)
 
         if unpack:
             edges_df = unpack_array_attrs(edges_df)
@@ -1240,6 +1254,12 @@ class SQLGraph(BaseGraph):
 
         if sa_type == sa.Boolean:
             self._boolean_columns[table_class.__tablename__].append(key)
+
+        if sa_type == sa.PickleType and isinstance(default_value, np.ndarray):
+            self._array_columns[table_class.__tablename__].append(
+                ArrayColInfo(key, default_value.shape, default_value.dtype)
+            )
+            default_value = cloudpickle.dumps(default_value)  # None
 
         sa_column = sa.Column(key, sa_type, default=default_value)
 
