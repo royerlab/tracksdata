@@ -215,6 +215,7 @@ class SQLFilter(BaseFilter):
             nodes_attrs = nodes_attrs.select(attr_keys)
 
         nodes_attrs = unpickle_bytes_columns(nodes_attrs)
+        nodes_attrs = self._graph._cast_array_columns(self._graph.Node, nodes_attrs)
 
         if unpack:
             nodes_attrs = unpack_array_attrs(nodes_attrs)
@@ -271,6 +272,7 @@ class SQLFilter(BaseFilter):
             )
 
         edges_df = unpickle_bytes_columns(edges_df)
+        edges_df = self._graph._cast_array_columns(self._graph.Edge, edges_df)
 
         if unpack:
             edges_df = unpack_array_attrs(edges_df)
@@ -532,8 +534,16 @@ class SQLGraph(BaseGraph):
     def _polars_schema_override(self, table_class: type[DeclarativeBase]) -> SchemaDict:
         return {
             **self._boolean_columns[table_class.__tablename__],
-            **self._array_columns[table_class.__tablename__],
         }
+
+    def _cast_array_columns(self, table_class: type[DeclarativeBase], df: pl.DataFrame) -> pl.DataFrame:
+        # this operation cannot be done with schema_overrides because they are blobs at the database level
+        df = df.with_columns(
+            pl.Series(col, df[col].to_list(), dtype=pl_dtype)
+            for col, pl_dtype in self._array_columns[table_class.__tablename__].items()
+            if col in df.columns
+        )
+        return df
 
     def _update_max_id_per_time(self) -> None:
         """
@@ -993,6 +1003,7 @@ class SQLGraph(BaseGraph):
                 schema_overrides=self._polars_schema_override(self.Node),
             )
             node_df = unpickle_bytes_columns(node_df)
+            node_df = self._cast_array_columns(self.Node, node_df)
 
         if single_node:
             return node_df
@@ -1157,6 +1168,7 @@ class SQLGraph(BaseGraph):
             schema_overrides=self._polars_schema_override(self.Node),
         )
         nodes_df = unpickle_bytes_columns(nodes_df)
+        nodes_df = self._cast_array_columns(self.Node, nodes_df)
 
         # indices are included by default and must be removed
         if attr_keys is not None:
@@ -1199,6 +1211,7 @@ class SQLGraph(BaseGraph):
                 schema_overrides=self._polars_schema_override(self.Edge),
             )
             edges_df = unpickle_bytes_columns(edges_df)
+            edges_df = self._cast_array_columns(self.Edge, edges_df)
 
         if unpack:
             edges_df = unpack_array_attrs(edges_df)
