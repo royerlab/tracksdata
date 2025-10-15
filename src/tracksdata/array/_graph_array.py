@@ -115,6 +115,10 @@ class GraphArrayView(BaseReadOnlyArray):
         The attribute key to view as an array.
     offset : int | np.ndarray, optional
         The offset to apply to the array.
+    strides : tuple[int, ...] | None, optional
+        The strides to apply to the array. If None, the default stride of 1 is used.
+    dtype : np.dtype | None, optional
+        The dtype of the array. If None, the dtype is inferred from the graph's attribute
     chunk_shape : tuple[int] | None, optional
         The chunk shape for the array. If None, the default chunk size is used.
     buffer_cache_size : int, optional
@@ -126,11 +130,13 @@ class GraphArrayView(BaseReadOnlyArray):
         self,
         graph: BaseGraph,
         shape: tuple[int, ...],
-        attr_key: str = DEFAULT_ATTR_KEYS.BBOX,
+        attr_key: str,
+        *,
+        dtype: np.dtype | None = None,
         offset: int | np.ndarray = 0,
+        strides: tuple[int, ...] | None = None,
         chunk_shape: tuple[int, ...] | int | None = None,
         buffer_cache_size: int | None = None,
-        dtype: np.dtype | None = None,
     ):
         if attr_key not in graph.node_attr_keys:
             raise ValueError(f"Attribute key '{attr_key}' not found in graph. Expected '{graph.node_attr_keys}'")
@@ -138,6 +144,10 @@ class GraphArrayView(BaseReadOnlyArray):
         self.graph = graph
         self._attr_key = attr_key
         self._offset = offset
+        self._strides = strides if strides is not None else tuple([1] * (len(shape) - 1))
+        self._original_shape = tuple(
+            [shape[0]] + [(fs - 1) // st + 1 for fs, st in zip(shape[1:], self._strides, strict=True)]
+        )
 
         if dtype is None:
             # Infer the dtype from the graph's attribute
@@ -152,18 +162,18 @@ class GraphArrayView(BaseReadOnlyArray):
                     dtype = np.uint8
 
         self._dtype = dtype
-        self.original_shape = shape
 
         chunk_shape = chunk_shape or get_options().gav_chunk_shape
+        ndim = len(shape)
         if isinstance(chunk_shape, int):
-            chunk_shape = (chunk_shape,) * (len(shape) - 1)
-        elif len(chunk_shape) < len(shape) - 1:
-            chunk_shape = (1,) * (len(shape) - 1 - len(chunk_shape)) + tuple(chunk_shape)
+            chunk_shape = (chunk_shape,) * (ndim - 1)
+        elif len(chunk_shape) < ndim - 1:
+            chunk_shape = (1,) * (ndim - 1 - len(chunk_shape)) + tuple(chunk_shape)
 
         self.chunk_shape = chunk_shape
         self.buffer_cache_size = buffer_cache_size or get_options().gav_buffer_cache_size
 
-        self._indices = tuple(slice(0, s) for s in shape)
+        self._indices = tuple(slice(0, s) for s in self._original_shape)
         self._cache = NDChunkCache(
             compute_func=self._fill_array,
             shape=self.shape[1:],
@@ -181,7 +191,7 @@ class GraphArrayView(BaseReadOnlyArray):
     def shape(self) -> tuple[int, ...]:
         """Returns the shape of the array."""
 
-        shape = [_get_size(ind, os) for ind, os in zip(self._indices, self.original_shape, strict=True)]
+        shape = [_get_size(ind, os) for ind, os in zip(self._indices, self._original_shape, strict=True)]
         return tuple(s for s in shape if s is not None)
 
     @property
@@ -274,10 +284,8 @@ class GraphArrayView(BaseReadOnlyArray):
         volume_slicing = self._indices[1:]
 
         if np.isscalar(time):
-            try:
+            if hasattr(time, "item"):
                 time = time.item()  # convert from numpy.int to int
-            except AttributeError:
-                pass
             result = self._cache.get(
                 time=time,
                 volume_slicing=volume_slicing,
@@ -285,7 +293,7 @@ class GraphArrayView(BaseReadOnlyArray):
             return np.array(result) if np.isscalar(result) else result
         else:
             if isinstance(time, slice):
-                time = range(self.original_shape[0])[time]
+                time = range(self._original_shape[0])[time]
 
             return np.stack(
                 [
@@ -314,6 +322,14 @@ class GraphArrayView(BaseReadOnlyArray):
         np.ndarray
             The filled buffer.
         """
+        volume_slicing = [
+            slice(
+                s.start * st if s.start else s.start,
+                s.stop * st if s.stop else s.stop,
+                s.step * st if s.step else s.step,
+            )
+            for s, st in zip(volume_slicing, self._strides, strict=True)
+        ]
         subgraph = self._spatial_filter[(slice(time, time), *volume_slicing)]
         df = subgraph.node_attrs(
             attr_keys=[self._attr_key, DEFAULT_ATTR_KEYS.MASK],
@@ -321,4 +337,4 @@ class GraphArrayView(BaseReadOnlyArray):
 
         for mask, value in zip(df[DEFAULT_ATTR_KEYS.MASK], df[self._attr_key], strict=True):
             mask: Mask
-            mask.paint_buffer(buffer, value, offset=self._offset)
+            mask.paint_buffer(buffer, value, offset=self._offset, strides=self._strides)

@@ -347,3 +347,145 @@ def test_graph_array_set_options() -> None:
         array_view = GraphArrayView(graph=empty_graph, shape=(10, 100, 100), attr_key="label")
         assert array_view.chunk_shape == (512, 512)
         assert array_view.dtype == np.int16
+
+
+def test_graph_array_view_with_strides_downsamples_data() -> None:
+    graph = RustWorkXGraph()
+    graph.add_node_attr_key("label", 0)
+    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
+    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+
+    shape = (3, 7, 8)
+    strides = (2, 3)
+    reference = np.zeros(shape, dtype=np.uint8)
+
+    nodes = [
+        {
+            "time": 0,
+            "start": (0, 0),
+            "mask": np.array([[True, False, True], [False, True, True]], dtype=bool),
+            "value": 5,
+        },
+        {
+            "time": 1,
+            "start": (2, 1),
+            "mask": np.array([[True, True, False], [False, True, True]], dtype=bool),
+            "value": 7,
+        },
+        {
+            "time": 2,
+            "start": (3, 3),
+            "mask": np.array([[True, True, False], [True, False, True]], dtype=bool),
+            "value": 9,
+        },
+    ]
+
+    for node in nodes:
+        start = node["start"]
+        mask_data = node["mask"]
+        bbox = np.array(
+            [
+                *start,
+                *(coord + size for coord, size in zip(start, mask_data.shape, strict=True)),
+            ]
+        )
+        mask = Mask(mask_data, bbox=bbox)
+        graph.add_node(
+            {
+                DEFAULT_ATTR_KEYS.T: node["time"],
+                "label": node["value"],
+                DEFAULT_ATTR_KEYS.MASK: mask,
+                DEFAULT_ATTR_KEYS.BBOX: mask.bbox,
+            }
+        )
+        region = tuple(slice(coord, coord + size) for coord, size in zip(start, mask_data.shape, strict=True))
+        reference[(node["time"], *region)][mask_data] = node["value"]
+
+    array_view = GraphArrayView(
+        graph=graph,
+        shape=shape,
+        attr_key="label",
+        strides=strides,
+    )
+
+    expected = reference[(slice(None), *(slice(None, None, step) for step in strides))]
+
+    assert array_view.shape == expected.shape
+    assert len(array_view) == expected.shape[0]
+    np.testing.assert_array_equal(np.asarray(array_view), expected)
+    np.testing.assert_array_equal(np.asarray(array_view[1]), expected[1])
+    np.testing.assert_array_equal(np.asarray(array_view[:, 1:, :]), expected[:, 1:, :])
+    np.testing.assert_array_equal(np.asarray(array_view[::2, 0]), expected[::2, 0])
+
+
+def test_graph_array_view_with_strides_3d_data() -> None:
+    graph = RustWorkXGraph()
+    graph.add_node_attr_key("label", 0)
+    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
+    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+
+    shape = (2, 4, 6, 6)
+    strides = (2, 3, 2)
+    reference = np.zeros(shape, dtype=np.uint8)
+
+    nodes = [
+        {
+            "time": 0,
+            "start": (0, 1, 1),
+            "mask": np.array(
+                [
+                    [[True, False, True], [False, True, False]],
+                    [[True, True, False], [False, False, True]],
+                ],
+                dtype=bool,
+            ),
+            "value": 4,
+        },
+        {
+            "time": 1,
+            "start": (2, 3, 2),
+            "mask": np.array(
+                [
+                    [[True, True], [True, False], [False, True]],
+                    [[True, False], [True, True], [True, True]],
+                ],
+                dtype=bool,
+            ),
+            "value": 8,
+        },
+    ]
+
+    for node in nodes:
+        start = node["start"]
+        mask_data = node["mask"]
+        bbox = np.array(
+            [
+                *start,
+                *(coord + size for coord, size in zip(start, mask_data.shape, strict=True)),
+            ]
+        )
+        mask = Mask(mask_data, bbox=bbox)
+        graph.add_node(
+            {
+                DEFAULT_ATTR_KEYS.T: node["time"],
+                "label": node["value"],
+                DEFAULT_ATTR_KEYS.MASK: mask,
+                DEFAULT_ATTR_KEYS.BBOX: mask.bbox,
+            }
+        )
+        region = tuple(slice(coord, coord + size) for coord, size in zip(start, mask_data.shape, strict=True))
+        reference[(node["time"], *region)][mask_data] = node["value"]
+
+    array_view = GraphArrayView(
+        graph=graph,
+        shape=shape,
+        attr_key="label",
+        strides=strides,
+    )
+
+    expected = reference[(slice(None), *(slice(None, None, step) for step in strides))]
+
+    assert array_view.shape == expected.shape
+    np.testing.assert_array_equal(np.asarray(array_view), expected)
+    np.testing.assert_array_equal(np.asarray(array_view[:, 1]), expected[:, 1])
+    np.testing.assert_array_equal(np.asarray(array_view[:, :, :, 1:]), expected[:, :, :, 1:])
