@@ -35,7 +35,7 @@ _POLARS_DTYPE_TO_NUMPY_DTYPE = {
 }
 
 
-def polars_dtype_to_numpy_dtype(polars_dtype: DataType, allow_sequence=True) -> np.dtype:
+def polars_dtype_to_numpy_dtype(polars_dtype: DataType, allow_sequence: bool = True) -> np.dtype:
     """Convert a polars dtype to a numpy dtype.
 
     Parameters
