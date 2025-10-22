@@ -799,18 +799,18 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#tracksdata.metrics.evaluate_ctc_metrics(input_track_id_key)" class="md-nav__link">
+  <a href="#tracksdata.metrics.evaluate_ctc_metrics(input_tracklet_id_key)" class="md-nav__link">
     <span class="md-ellipsis">
-      <code class="doc-symbol doc-symbol-toc doc-symbol-parameter"></code>&nbsp;input_track_id_key
+      <code class="doc-symbol doc-symbol-toc doc-symbol-parameter"></code>&nbsp;input_tracklet_id_key
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#tracksdata.metrics.evaluate_ctc_metrics(reference_track_id_key)" class="md-nav__link">
+  <a href="#tracksdata.metrics.evaluate_ctc_metrics(reference_tracklet_id_key)" class="md-nav__link">
     <span class="md-ellipsis">
-      <code class="doc-symbol doc-symbol-toc doc-symbol-parameter"></code>&nbsp;reference_track_id_key
+      <code class="doc-symbol doc-symbol-toc doc-symbol-parameter"></code>&nbsp;reference_tracklet_id_key
     </span>
   </a>
   
@@ -1106,18 +1106,18 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#tracksdata.metrics.evaluate_ctc_metrics(input_track_id_key)" class="md-nav__link">
+  <a href="#tracksdata.metrics.evaluate_ctc_metrics(input_tracklet_id_key)" class="md-nav__link">
     <span class="md-ellipsis">
-      <code class="doc-symbol doc-symbol-toc doc-symbol-parameter"></code>&nbsp;input_track_id_key
+      <code class="doc-symbol doc-symbol-toc doc-symbol-parameter"></code>&nbsp;input_tracklet_id_key
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#tracksdata.metrics.evaluate_ctc_metrics(reference_track_id_key)" class="md-nav__link">
+  <a href="#tracksdata.metrics.evaluate_ctc_metrics(reference_tracklet_id_key)" class="md-nav__link">
     <span class="md-ellipsis">
-      <code class="doc-symbol doc-symbol-toc doc-symbol-parameter"></code>&nbsp;reference_track_id_key
+      <code class="doc-symbol doc-symbol-toc doc-symbol-parameter"></code>&nbsp;reference_tracklet_id_key
     </span>
   </a>
   
@@ -1326,7 +1326,7 @@
 
 
 </h2>
-<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">evaluate_ctc_metrics</span><span class="p">(</span><span class="n">input_graph</span><span class="p">:</span> <span class="n">RustWorkXGraph</span><span class="p">,</span> <span class="n">reference_graph</span><span class="p">:</span> <span class="n">RustWorkXGraph</span><span class="p">,</span> <span class="n">input_track_id_key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">DEFAULT_ATTR_KEYS</span><span class="o">.</span><span class="n">TRACK_ID</span><span class="p">,</span> <span class="n">reference_track_id_key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">DEFAULT_ATTR_KEYS</span><span class="o">.</span><span class="n">TRACK_ID</span><span class="p">,</span> <span class="n">input_reset</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">reference_reset</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">metrics</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">evaluate_ctc_metrics</span><span class="p">(</span><span class="n">input_graph</span><span class="p">:</span> <span class="n">RustWorkXGraph</span><span class="p">,</span> <span class="n">reference_graph</span><span class="p">:</span> <span class="n">RustWorkXGraph</span><span class="p">,</span> <span class="n">input_tracklet_id_key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">DEFAULT_ATTR_KEYS</span><span class="o">.</span><span class="n">TRACKLET_ID</span><span class="p">,</span> <span class="n">reference_tracklet_id_key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">DEFAULT_ATTR_KEYS</span><span class="o">.</span><span class="n">TRACKLET_ID</span><span class="p">,</span> <span class="n">input_reset</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">reference_reset</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">metrics</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span>
 </span></code></pre></div>
 
     <div class="doc doc-contents ">
@@ -1356,9 +1356,9 @@
           </div>
         </li>
         <li class="doc-section-item field-body">
-<h3 id="tracksdata.metrics.evaluate_ctc_metrics(input_track_id_key)" class="doc doc-heading doc-heading-parameter">              <b><code>input_track_id_key</code></b>
+<h3 id="tracksdata.metrics.evaluate_ctc_metrics(input_tracklet_id_key)" class="doc doc-heading doc-heading-parameter">              <b><code>input_tracklet_id_key</code></b>
 </h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#str">str</a></code>, default:
-                  <code><span title="tracksdata.constants.DEFAULT_ATTR_KEYS.TRACK_ID">TRACK_ID</span></code>
+                  <code><span title="tracksdata.constants.DEFAULT_ATTR_KEYS.TRACKLET_ID">TRACKLET_ID</span></code>
 )
           –
           <div class="doc-md-description">
@@ -1367,9 +1367,9 @@ If key does not exist, it will be created.</p>
           </div>
         </li>
         <li class="doc-section-item field-body">
-<h3 id="tracksdata.metrics.evaluate_ctc_metrics(reference_track_id_key)" class="doc doc-heading doc-heading-parameter">              <b><code>reference_track_id_key</code></b>
+<h3 id="tracksdata.metrics.evaluate_ctc_metrics(reference_tracklet_id_key)" class="doc doc-heading doc-heading-parameter">              <b><code>reference_tracklet_id_key</code></b>
 </h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#str">str</a></code>, default:
-                  <code><span title="tracksdata.constants.DEFAULT_ATTR_KEYS.TRACK_ID">TRACK_ID</span></code>
+                  <code><span title="tracksdata.constants.DEFAULT_ATTR_KEYS.TRACKLET_ID">TRACKLET_ID</span></code>
 )
           –
           <div class="doc-md-description">
@@ -1513,8 +1513,8 @@ Available metrics:
 <span class="normal"><a href="#__codelineno-0-356">356</a></span></pre></div></td><td class="code"><div><pre><span></span><code><span id="__span-0-273"><a id="__codelineno-0-273" name="__codelineno-0-273"></a><span class="k">def</span><span class="w"> </span><span class="nf">evaluate_ctc_metrics</span><span class="p">(</span>
 </span><span id="__span-0-274"><a id="__codelineno-0-274" name="__codelineno-0-274"></a>    <span class="n">input_graph</span><span class="p">:</span> <span class="s2">&quot;RustWorkXGraph&quot;</span><span class="p">,</span>
 </span><span id="__span-0-275"><a id="__codelineno-0-275" name="__codelineno-0-275"></a>    <span class="n">reference_graph</span><span class="p">:</span> <span class="s2">&quot;RustWorkXGraph&quot;</span><span class="p">,</span>
-</span><span id="__span-0-276"><a id="__codelineno-0-276" name="__codelineno-0-276"></a>    <span class="n">input_track_id_key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">DEFAULT_ATTR_KEYS</span><span class="o">.</span><span class="n">TRACK_ID</span><span class="p">,</span>
-</span><span id="__span-0-277"><a id="__codelineno-0-277" name="__codelineno-0-277"></a>    <span class="n">reference_track_id_key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">DEFAULT_ATTR_KEYS</span><span class="o">.</span><span class="n">TRACK_ID</span><span class="p">,</span>
+</span><span id="__span-0-276"><a id="__codelineno-0-276" name="__codelineno-0-276"></a>    <span class="n">input_tracklet_id_key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">DEFAULT_ATTR_KEYS</span><span class="o">.</span><span class="n">TRACKLET_ID</span><span class="p">,</span>
+</span><span id="__span-0-277"><a id="__codelineno-0-277" name="__codelineno-0-277"></a>    <span class="n">reference_tracklet_id_key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">DEFAULT_ATTR_KEYS</span><span class="o">.</span><span class="n">TRACKLET_ID</span><span class="p">,</span>
 </span><span id="__span-0-278"><a id="__codelineno-0-278" name="__codelineno-0-278"></a>    <span class="n">input_reset</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
 </span><span id="__span-0-279"><a id="__codelineno-0-279" name="__codelineno-0-279"></a>    <span class="n">reference_reset</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
 </span><span id="__span-0-280"><a id="__codelineno-0-280" name="__codelineno-0-280"></a>    <span class="n">metrics</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
@@ -1533,10 +1533,10 @@ Available metrics:
 </span><span id="__span-0-293"><a id="__codelineno-0-293" name="__codelineno-0-293"></a><span class="sd">        Input graph.</span>
 </span><span id="__span-0-294"><a id="__codelineno-0-294" name="__codelineno-0-294"></a><span class="sd">    reference_graph : RustWorkXGraph</span>
 </span><span id="__span-0-295"><a id="__codelineno-0-295" name="__codelineno-0-295"></a><span class="sd">        Reference graph.</span>
-</span><span id="__span-0-296"><a id="__codelineno-0-296" name="__codelineno-0-296"></a><span class="sd">    input_track_id_key : str, optional</span>
+</span><span id="__span-0-296"><a id="__codelineno-0-296" name="__codelineno-0-296"></a><span class="sd">    input_tracklet_id_key : str, optional</span>
 </span><span id="__span-0-297"><a id="__codelineno-0-297" name="__codelineno-0-297"></a><span class="sd">        Key to obtain the track id from the input graph.</span>
 </span><span id="__span-0-298"><a id="__codelineno-0-298" name="__codelineno-0-298"></a><span class="sd">        If key does not exist, it will be created.</span>
-</span><span id="__span-0-299"><a id="__codelineno-0-299" name="__codelineno-0-299"></a><span class="sd">    reference_track_id_key : str, optional</span>
+</span><span id="__span-0-299"><a id="__codelineno-0-299" name="__codelineno-0-299"></a><span class="sd">    reference_tracklet_id_key : str, optional</span>
 </span><span id="__span-0-300"><a id="__codelineno-0-300" name="__codelineno-0-300"></a><span class="sd">        Key to obtain the track id from the reference graph.</span>
 </span><span id="__span-0-301"><a id="__codelineno-0-301" name="__codelineno-0-301"></a><span class="sd">        If key does not exist, it will be created.</span>
 </span><span id="__span-0-302"><a id="__codelineno-0-302" name="__codelineno-0-302"></a><span class="sd">    input_reset : bool, optional</span>
@@ -1572,14 +1572,14 @@ Available metrics:
 </span><span id="__span-0-332"><a id="__codelineno-0-332" name="__codelineno-0-332"></a>        <span class="n">LOG</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">&quot;Input graph has no nodes, returning -1.0 for all metrics.&quot;</span><span class="p">)</span>
 </span><span id="__span-0-333"><a id="__codelineno-0-333" name="__codelineno-0-333"></a>        <span class="k">return</span> <span class="nb">dict</span><span class="o">.</span><span class="n">fromkeys</span><span class="p">(</span><span class="n">metrics</span><span class="p">,</span> <span class="o">-</span><span class="mf">1.0</span><span class="p">)</span>
 </span><span id="__span-0-334"><a id="__codelineno-0-334" name="__codelineno-0-334"></a>
-</span><span id="__span-0-335"><a id="__codelineno-0-335" name="__codelineno-0-335"></a>    <span class="k">if</span> <span class="n">input_track_id_key</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">input_graph</span><span class="o">.</span><span class="n">node_attr_keys</span><span class="p">:</span>
-</span><span id="__span-0-336"><a id="__codelineno-0-336" name="__codelineno-0-336"></a>        <span class="n">input_graph</span><span class="o">.</span><span class="n">assign_track_ids</span><span class="p">(</span><span class="n">input_track_id_key</span><span class="p">,</span> <span class="n">reset</span><span class="o">=</span><span class="n">input_reset</span><span class="p">)</span>
+</span><span id="__span-0-335"><a id="__codelineno-0-335" name="__codelineno-0-335"></a>    <span class="k">if</span> <span class="n">input_tracklet_id_key</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">input_graph</span><span class="o">.</span><span class="n">node_attr_keys</span><span class="p">:</span>
+</span><span id="__span-0-336"><a id="__codelineno-0-336" name="__codelineno-0-336"></a>        <span class="n">input_graph</span><span class="o">.</span><span class="n">assign_tracklet_ids</span><span class="p">(</span><span class="n">input_tracklet_id_key</span><span class="p">,</span> <span class="n">reset</span><span class="o">=</span><span class="n">input_reset</span><span class="p">)</span>
 </span><span id="__span-0-337"><a id="__codelineno-0-337" name="__codelineno-0-337"></a>
-</span><span id="__span-0-338"><a id="__codelineno-0-338" name="__codelineno-0-338"></a>    <span class="k">if</span> <span class="n">reference_track_id_key</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">reference_graph</span><span class="o">.</span><span class="n">node_attr_keys</span><span class="p">:</span>
-</span><span id="__span-0-339"><a id="__codelineno-0-339" name="__codelineno-0-339"></a>        <span class="n">reference_graph</span><span class="o">.</span><span class="n">assign_track_ids</span><span class="p">(</span><span class="n">reference_track_id_key</span><span class="p">,</span> <span class="n">reset</span><span class="o">=</span><span class="n">reference_reset</span><span class="p">)</span>
+</span><span id="__span-0-338"><a id="__codelineno-0-338" name="__codelineno-0-338"></a>    <span class="k">if</span> <span class="n">reference_tracklet_id_key</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">reference_graph</span><span class="o">.</span><span class="n">node_attr_keys</span><span class="p">:</span>
+</span><span id="__span-0-339"><a id="__codelineno-0-339" name="__codelineno-0-339"></a>        <span class="n">reference_graph</span><span class="o">.</span><span class="n">assign_tracklet_ids</span><span class="p">(</span><span class="n">reference_tracklet_id_key</span><span class="p">,</span> <span class="n">reset</span><span class="o">=</span><span class="n">reference_reset</span><span class="p">)</span>
 </span><span id="__span-0-340"><a id="__codelineno-0-340" name="__codelineno-0-340"></a>
 </span><span id="__span-0-341"><a id="__codelineno-0-341" name="__codelineno-0-341"></a>    <span class="n">input_tracks</span><span class="p">,</span> <span class="n">reference_tracks</span><span class="p">,</span> <span class="n">matching_data</span> <span class="o">=</span> <span class="n">compute_ctc_metrics_data</span><span class="p">(</span>
-</span><span id="__span-0-342"><a id="__codelineno-0-342" name="__codelineno-0-342"></a>        <span class="n">input_graph</span><span class="p">,</span> <span class="n">reference_graph</span><span class="p">,</span> <span class="n">input_track_id_key</span><span class="p">,</span> <span class="n">reference_track_id_key</span>
+</span><span id="__span-0-342"><a id="__codelineno-0-342" name="__codelineno-0-342"></a>        <span class="n">input_graph</span><span class="p">,</span> <span class="n">reference_graph</span><span class="p">,</span> <span class="n">input_tracklet_id_key</span><span class="p">,</span> <span class="n">reference_tracklet_id_key</span>
 </span><span id="__span-0-343"><a id="__codelineno-0-343" name="__codelineno-0-343"></a>    <span class="p">)</span>
 </span><span id="__span-0-344"><a id="__codelineno-0-344" name="__codelineno-0-344"></a>
 </span><span id="__span-0-345"><a id="__codelineno-0-345" name="__codelineno-0-345"></a>    <span class="n">results</span> <span class="o">=</span> <span class="n">calculate_metrics</span><span class="p">(</span>

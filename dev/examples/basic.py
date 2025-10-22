@@ -126,7 +126,7 @@ def basic_tracking_example(show_napari_viewer: bool = True) -> None:
     print("Converting results to napari format...")
     tracks_df, track_graph, track_labels = td.functional.to_napari_format(graph, labels.shape, mask_key="mask")
 
-    print(f"✓ Generated {len(tracks_df)} track points across {len(set(tracks_df['track_id']))} tracks")
+    print(f"✓ Generated {len(tracks_df)} track points across {len(set(tracks_df['tracklet_id']))} tracks")
 
     # Step 7: Visualize results (optional)
 
