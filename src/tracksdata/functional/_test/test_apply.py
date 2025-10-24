@@ -61,7 +61,7 @@ def test_apply_tiled_no_aggregation(sample_graph: RustWorkXGraph) -> None:
         apply_tiled(
             graph=sample_graph,
             tiling_scheme=scheme,
-            func=lambda g, _: len(g.node_ids()),
+            func=lambda tile: len(tile.graph_filter.node_ids()),
             agg_func=None,
         )
     )
@@ -79,7 +79,7 @@ def test_apply_tiled_with_aggregation(sample_graph: RustWorkXGraph) -> None:
     total = apply_tiled(
         graph=sample_graph,
         tiling_scheme=scheme,
-        func=lambda g, _: len(g.node_ids()),
+        func=lambda tile: len(tile.graph_filter.node_ids()),
         agg_func=sum,
     )
 
@@ -99,7 +99,7 @@ def test_apply_tiled_default_attrs(sample_graph: RustWorkXGraph) -> None:
         apply_tiled(
             graph=sample_graph,
             tiling_scheme=scheme,
-            func=lambda g, _: g.node_attrs(attr_keys=["t", "y", "x"]),
+            func=lambda tile: tile.graph_filter.node_attrs(attr_keys=["t", "y", "x"]),
             agg_func=None,
         )
     )
@@ -157,21 +157,21 @@ def test_apply_tiled_2d_tiling() -> None:
         apply_tiled(
             graph=graph,
             tiling_scheme=scheme,
-            func=lambda g_overlaps, g_tile: (g_overlaps.node_ids(), g_tile.node_ids()),
+            func=lambda tile: (tile.graph_filter.node_ids(), tile.graph_filter_wo_overlap.node_ids()),
             agg_func=None,
         )
     )
 
-    res_with_overlaps, res_tile = zip(*results, strict=False)
+    res_tile_with_overlap, res_tile_wo_overlap = zip(*results, strict=False)
 
-    assert len(res_with_overlaps) == 4
-    assert set(res_with_overlaps[0]) == {0, 2, 4}
-    assert set(res_with_overlaps[1]) == {1, 3, 5}
-    assert set(res_with_overlaps[2]) == {0, 2, 4}
-    assert set(res_with_overlaps[3]) == {1, 3, 5}
+    assert len(res_tile_with_overlap) == 4
+    assert set(res_tile_with_overlap[0]) == {0, 2, 4}
+    assert set(res_tile_with_overlap[1]) == {1, 3, 5}
+    assert set(res_tile_with_overlap[2]) == {0, 2, 4}
+    assert set(res_tile_with_overlap[3]) == {1, 3, 5}
 
-    assert len(res_tile) == 4
-    assert set(res_tile[0]) == {0}
-    assert set(res_tile[1]) == {1}
-    assert set(res_tile[2]) == {2, 4}
-    assert set(res_tile[3]) == {3, 5}
+    assert len(res_tile_wo_overlap) == 4
+    assert set(res_tile_wo_overlap[0]) == {0}
+    assert set(res_tile_wo_overlap[1]) == {1}
+    assert set(res_tile_wo_overlap[2]) == {2, 4}
+    assert set(res_tile_wo_overlap[3]) == {3, 5}

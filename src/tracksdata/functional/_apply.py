@@ -9,11 +9,35 @@ from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.graph.filters._base_filter import BaseFilter
 from tracksdata.utils._logging import LOG
 
+
+@dataclass
+class Tile:
+    """
+    Tile of the graph.
+
+    Parameters
+    ----------
+    graph_filter: BaseFilter
+        The graph filter of the tile with overlap
+    graph_filter_wo_overlap: BaseFilter
+        The graph filter of the tile WITHOUT overlap
+    slicing: tuple[slice, ...]
+        The slicing of the tile with the overlap.
+    slicing_wo_overlap : tuple[slice, ...]
+        The slicing of the tile WITHOUT overlap.
+    """
+
+    graph_filter: BaseFilter
+    graph_filter_wo_overlap: BaseFilter
+
+    slicing: tuple[slice, ...]
+    slicing_wo_overlap: tuple[slice, ...]
+
+
 T = TypeVar("T")  # per tile return type
 R = TypeVar("R")  # reduce return type
 
-
-MapFunc = Callable[[BaseFilter, BaseFilter], T]
+MapFunc = Callable[[Tile], T]
 ReduceFunc = Callable[[list[T]], R]
 
 
@@ -139,22 +163,33 @@ def _yield_apply_tiled(
     for corner in tiles_corner:
         # corner considers the overlap, so right needs to be shifted by 2 * o
         # -1e-8 is because tracksdata filter slicing is inclusive
-        slicing = tuple(slice(c, c + t - 1e-6) for c, t in zip(corner, tiling_scheme.tile_shape, strict=True))
-        filtered_graph = spatial_filter[slicing]
-
-        LOG.info("Tiling with corner %s", corner)
-        LOG.info("Slicing %s", slicing)
+        slicing_without_overlap = tuple(
+            slice(c, c + t - 1e-6) for c, t in zip(corner, tiling_scheme.tile_shape, strict=True)
+        )
+        graph_filter_without_overlap = spatial_filter[slicing_without_overlap]
 
         if no_overlap:
-            filtered_graph_with_overlap = filtered_graph
+            slicing = slicing_without_overlap
+            graph_filter = graph_filter_without_overlap
         else:
-            slicing_with_overlap = tuple(
-                slice(s.start - o, s.stop + o) for s, o in zip(slicing, tiling_scheme.overlap, strict=True)
+            slicing = tuple(
+                slice(s.start - o, s.stop + o)
+                for s, o in zip(slicing_without_overlap, tiling_scheme.overlap, strict=True)
             )
-            filtered_graph_with_overlap = spatial_filter[slicing_with_overlap]
-            LOG.info("Slicing with overlap %s", slicing_with_overlap)
+            graph_filter = spatial_filter[slicing]
 
-        yield func(filtered_graph_with_overlap, filtered_graph)
+        LOG.info("Tiling with corner %s", corner)
+        LOG.info("Slicing without overlap %s", slicing_without_overlap)
+        LOG.info("Slicing %s", slicing)
+
+        yield func(
+            Tile(
+                graph_filter=graph_filter,
+                graph_filter_wo_overlap=graph_filter_without_overlap,
+                slicing=slicing,
+                slicing_wo_overlap=slicing_without_overlap,
+            )
+        )
 
 
 def apply_tiled(
