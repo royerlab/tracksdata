@@ -33,30 +33,30 @@ def sample_graph() -> RustWorkXGraph:
 def test_tiling_scheme_validation() -> None:
     """Test TilingScheme validation."""
     # Valid initialization
-    scheme = TilingScheme(tile_shape=(10, 10), overlap=(2, 2))
-    assert scheme.tile_shape == (10, 10)
+    scheme = TilingScheme(tile=(10, 10), overlap=(2, 2))
+    assert scheme.tile == (10, 10)
     assert scheme.overlap == (2, 2)
 
     # Mismatched tile_shape and overlap lengths
     with pytest.raises(ValueError, match="must have the same length"):
-        TilingScheme(tile_shape=(10, 10), overlap=(2,))
+        TilingScheme(tile=(10, 10), overlap=(2,))
 
     # Mismatched attrs and tile_shape lengths
     with pytest.raises(ValueError, match="must have the same length"):
-        TilingScheme(tile_shape=(10, 10), overlap=(2, 2), attrs=["y", "x", "z"])
+        TilingScheme(tile=(10, 10), overlap=(2, 2), attrs=["y", "x", "z"])
 
     # tile_shape must be greater than 0
     with pytest.raises(ValueError, match="must be greater than 0"):
-        TilingScheme(tile_shape=(0, 10), overlap=(2, 2))
+        TilingScheme(tile=(0, 10), overlap=(2, 2))
 
     # overlap must be non-negative
     with pytest.raises(ValueError, match="must be non-negative"):
-        TilingScheme(tile_shape=(10, 10), overlap=(-2, 2))
+        TilingScheme(tile=(10, 10), overlap=(-2, 2))
 
 
 def test_apply_tiled_no_aggregation(sample_graph: RustWorkXGraph) -> None:
     """Test apply_tiled yields tiles without aggregation."""
-    scheme = TilingScheme(tile_shape=(1, 20, 20), overlap=(0, 5, 5), attrs=["t", "y", "x"])
+    scheme = TilingScheme(tile=(1, 20, 20), overlap=(0, 5, 5), attrs=["t", "y", "x"])
 
     results = list(
         apply_tiled(
@@ -74,7 +74,7 @@ def test_apply_tiled_no_aggregation(sample_graph: RustWorkXGraph) -> None:
 
 def test_apply_tiled_with_aggregation(sample_graph: RustWorkXGraph) -> None:
     """Test apply_tiled with aggregation function."""
-    scheme = TilingScheme(tile_shape=(1, 20, 20), overlap=(0, 5, 5), attrs=["t", "y", "x"])
+    scheme = TilingScheme(tile=(1, 20, 20), overlap=(0, 5, 5), attrs=["t", "y", "x"])
 
     # Count total nodes across all tiles
     total = apply_tiled(
@@ -94,7 +94,7 @@ def test_apply_tiled_default_attrs(sample_graph: RustWorkXGraph) -> None:
     # When attrs=None, it uses [t, z, y, x] by default, but filters to existing keys
     # Since sample_graph has all four dimensions, all will be used
     # Use explicit attrs to test with dimensions that have actual extent
-    scheme = TilingScheme(tile_shape=(2, 100, 100), overlap=(0, 10, 10), attrs=["t", "y", "x"])
+    scheme = TilingScheme(tile=(2, 100, 100), overlap=(0, 10, 10), attrs=["t", "y", "x"])
 
     results = list(
         apply_tiled(
@@ -140,7 +140,7 @@ def test_apply_tiled_2d_tiling() -> None:
     """
 
     scheme = TilingScheme(
-        tile_shape=(1, 5, 15),
+        tile=(1, 5, 15),
         overlap=(0, 5, 5),
         attrs=["t", "y", "x"],
     )

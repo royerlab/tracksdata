@@ -45,11 +45,11 @@ ReduceFunc = Callable[[list[T]], R]
 class TilingScheme:
     """
     Tiling scheme for the graph.
-    Graph will be sliced with 'tile_shape' + 2 * 'overlap' per axis.
+    Graph will be sliced with 'tile' + 2 * 'overlap' per axis.
 
     Parameters
     ----------
-    tile_shape : tuple[int, ...]
+    tile : tuple[int, ...]
         The shape of the tile.
     overlap : tuple[int, ...]
         The overlap between tiles.
@@ -58,28 +58,28 @@ class TilingScheme:
         By default "t", "z", "y", "x" are included. If some columns are not present, they will be ignored.
     """
 
-    tile_shape: tuple[int, ...]
+    tile: tuple[int, ...]
     overlap: tuple[int, ...]
     attrs: list[str] | None = None
 
     def __post_init__(self) -> None:
-        if len(self.tile_shape) != len(self.overlap):
+        if len(self.tile) != len(self.overlap):
             raise ValueError(
-                "'TilingScheme.tile_shape' and 'TilingScheme.overlap' must have the same length, "
-                f"got {len(self.tile_shape)} and {len(self.overlap)}"
+                "'TilingScheme.tile' and 'TilingScheme.overlap' must have the same length, "
+                f"got {len(self.tile)} and {len(self.overlap)}"
             )
 
-        if any(tile_shape <= 0 for tile_shape in self.tile_shape):
-            raise ValueError(f"'TilingScheme.tile_shape' must be greater than 0, got {self.tile_shape}")
+        if any(tile <= 0 for tile in self.tile):
+            raise ValueError(f"'TilingScheme.tile' must be greater than 0, got {self.tile}")
 
         if any(overlap < 0 for overlap in self.overlap):
             raise ValueError(f"'TilingScheme.overlap' must be non-negative, got {self.overlap}")
 
         if self.attrs is not None:
-            if len(self.attrs) != len(self.tile_shape):
+            if len(self.attrs) != len(self.tile):
                 raise ValueError(
-                    f"'TilingScheme.attrs' must have the same length as 'TilingScheme.tile_shape', "
-                    f"got {len(self.attrs)} and {len(self.tile_shape)}"
+                    f"'TilingScheme.attrs' must have the same length as 'TilingScheme.tile', "
+                    f"got {len(self.attrs)} and {len(self.tile)}"
                 )
 
 
@@ -123,7 +123,7 @@ def _get_tiles_corner(
     eps = 1e-8  # adding eps because np.arange is right exclusive
     tiles_corner = list(
         itertools.product(
-            *[np.arange(s, e + eps, t).tolist() for s, e, t in zip(start, end, tiling_scheme.tile_shape, strict=True)]
+            *[np.arange(s, e + eps, t).tolist() for s, e, t in zip(start, end, tiling_scheme.tile, strict=True)]
         )
     )
 
@@ -163,9 +163,7 @@ def _yield_apply_tiled(
     for corner in tiles_corner:
         # corner considers the overlap, so right needs to be shifted by 2 * o
         # -1e-8 is because tracksdata filter slicing is inclusive
-        slicing_without_overlap = tuple(
-            slice(c, c + t - 1e-6) for c, t in zip(corner, tiling_scheme.tile_shape, strict=True)
-        )
+        slicing_without_overlap = tuple(slice(c, c + t - 1e-6) for c, t in zip(corner, tiling_scheme.tile, strict=True))
         graph_filter_without_overlap = spatial_filter[slicing_without_overlap]
 
         if no_overlap:
@@ -201,7 +199,7 @@ def apply_tiled(
 ) -> Iterator[T] | R:
     """
     Apply a function to a graph tiled by the tiling scheme.
-    Graph will be sliced with 'tile_shape' + 2 * 'overlap' per axis.
+    Graph will be sliced with 'tile' + 2 * 'overlap' per axis.
 
     Parameters
     ----------
