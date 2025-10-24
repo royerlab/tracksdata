@@ -84,14 +84,22 @@ def _get_tiles_corner(
     end: Sequence[int],
     tiling_scheme: TilingScheme,
 ) -> list[tuple[int, ...]]:
-    # eps is required when min == max, otherwise np.arange is empty
-    eps = 1e-6
+    """
+    Get the corner of the tiles.
+
+    Parameters
+    ----------
+    start : Sequence[int]
+        The start of the graph.
+    end : Sequence[int]
+        The end of the graph.
+    tiling_scheme : TilingScheme
+        The tiling scheme to use.
+    """
+    eps = 1e-8  # adding eps because np.arange is right exclusive
     tiles_corner = list(
         itertools.product(
-            *[
-                np.arange(s, e + eps * (s == e), t).tolist()
-                for s, e, t in zip(start, end, tiling_scheme.tile_shape, strict=True)
-            ]
+            *[np.arange(s, e + eps, t).tolist() for s, e, t in zip(start, end, tiling_scheme.tile_shape, strict=True)]
         )
     )
 
