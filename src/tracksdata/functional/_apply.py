@@ -195,7 +195,7 @@ def apply_tiled(
     tiling_scheme: TilingScheme,
     func: MapFunc,
     *,
-    agg_func: ReduceFunc | None,
+    agg_func: ReduceFunc | None = None,
 ) -> Iterator[T] | R:
     """
     Apply a function to a graph tiled by the tiling scheme.
