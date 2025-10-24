@@ -1,7 +1,8 @@
 import polars as pl
 import pytest
 
-from tracksdata.functional._apply import TilingScheme, _get_tiles_corner, apply_tiled
+from tracksdata.functional import TilingScheme, apply_tiled
+from tracksdata.functional._apply import _get_tiles_corner
 from tracksdata.graph import RustWorkXGraph
 
 
