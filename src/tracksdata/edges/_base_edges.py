@@ -1,8 +1,7 @@
 import abc
 from collections.abc import Sequence
+from functools import partial
 from typing import Any
-
-from toolz import curry
 
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.utils._multiprocessing import multiprocessing_apply
@@ -51,7 +50,7 @@ class BaseEdgesOperator(abc.ABC):
             time_points = [t]
 
         for edge_attrs in multiprocessing_apply(
-            curry(self._add_edges_per_time, graph=graph, **kwargs),
+            partial(self._add_edges_per_time, graph=graph, **kwargs),
             time_points,
             desc="Adding edges",
         ):

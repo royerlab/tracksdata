@@ -1250,6 +1250,9 @@ class SQLGraph(BaseGraph):
         elif isinstance(default_value, Enum):
             return sa.Enum(default_value.__class__)
 
+        elif isinstance(default_value, list | tuple):  # For bbox
+            return sa.PickleType
+
         elif default_value is None or not _is_builtin(default_value):
             return sa.PickleType
 
@@ -1267,11 +1270,13 @@ class SQLGraph(BaseGraph):
         if sa_type == sa.Boolean:
             self._boolean_columns[table_class.__tablename__][key] = pl.Boolean
 
-        if sa_type == sa.PickleType and isinstance(default_value, np.ndarray):
-            self._array_columns[table_class.__tablename__][key] = pl.Array(
-                numpy_char_code_to_dtype(default_value.dtype.char), default_value.shape
-            )
-            default_value = blob_default(self._engine, cloudpickle.dumps(default_value))  # None
+        if sa_type == sa.PickleType:
+            if isinstance(default_value, np.ndarray):
+                self._array_columns[table_class.__tablename__][key] = pl.Array(
+                    numpy_char_code_to_dtype(default_value.dtype.char), default_value.shape
+                )
+            if default_value is not None:
+                default_value = blob_default(self._engine, cloudpickle.dumps(default_value))  # None
 
         sa_column = sa.Column(key, sa_type, default=default_value)
 

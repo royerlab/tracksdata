@@ -1,8 +1,7 @@
 import abc
 from collections.abc import Sequence
+from functools import partial
 from typing import Any
-
-from toolz import curry
 
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.utils._multiprocessing import multiprocessing_apply
@@ -53,7 +52,7 @@ class BaseNodeAttrsOperator(abc.ABC):
             time_points = [t]
 
         for node_ids, node_attrs in multiprocessing_apply(
-            func=curry(self._node_attrs_per_time, graph=graph, **kwargs),
+            func=partial(self._node_attrs_per_time, graph=graph, **kwargs),
             sequence=time_points,
             desc="Adding node attributes",
         ):

@@ -1,7 +1,7 @@
+from functools import partial
 from typing import Any, Literal
 
 import numpy as np
-from toolz import curry
 
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.nodes._base_nodes import BaseNodesOperator
@@ -130,7 +130,7 @@ class RandomNodes(BaseNodesOperator):
         else:
             time_points = [t]
 
-        _add_nodes_per_time = curry(self._nodes_per_time, **kwargs)
+        _add_nodes_per_time = partial(self._nodes_per_time, **kwargs)
         for node_attrs in multiprocessing_apply(
             _add_nodes_per_time,
             time_points,

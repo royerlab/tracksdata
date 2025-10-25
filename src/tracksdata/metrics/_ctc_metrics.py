@@ -1,9 +1,9 @@
+from functools import partial
 from typing import TYPE_CHECKING
 
 import numpy as np
 import polars as pl
 import scipy.sparse as sp
-from toolz import curry
 
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.io._ctc import compressed_tracks_table
@@ -199,7 +199,7 @@ def _matching_data(
     mapped_comp = []
     ious = []
 
-    match_func = curry(
+    match_func = partial(
         _match_single_frame,
         groups_by_time=groups_by_time,
         reference_graph_key=reference_graph_key,
