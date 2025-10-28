@@ -298,6 +298,26 @@ class Mask:
         self._mask[self_slicing] &= ~other._mask[other_slicing]
         return self
 
+    def _crop_overhang(self, image_shape: tuple[int, ...]) -> None:
+        """
+        Crop regions of the mask that are outside the image.
+        This is used to fix bounding box and mask after changes to the mask.
+
+        Parameters
+        ----------
+        image_shape : tuple[int, ...]
+            The shape of the image.
+        """
+        left_overhang = np.maximum(0, -self._bbox[: self._mask.ndim])
+        self._bbox[: self._mask.ndim] += left_overhang
+
+        right_overhang = np.maximum(0, self._bbox[self._mask.ndim :] - image_shape)
+        self._bbox[self._mask.ndim :] -= right_overhang
+
+        slicing = tuple(slice(s, -e if e > 0 else None) for s, e in zip(left_overhang, right_overhang, strict=True))
+        self._mask = self._mask[slicing]
+        self.bbox = self._bbox  # triggering bbox and mask shape check
+
     def dilate(self, radius: int, image_shape: tuple[int, ...] | None = None) -> None:
         """
         Dilate the mask by a given radius inplace.
@@ -319,21 +339,32 @@ class Mask:
             cval=False,
             out=new_mask,
         )
+        self._mask = new_mask
         self._bbox[: self._mask.ndim] -= radius
         self._bbox[self._mask.ndim :] += radius
 
         if image_shape is not None:
-            left_overhang = np.maximum(0, -self._bbox[: self._mask.ndim])
-            self._bbox[: self._mask.ndim] += left_overhang
+            self._crop_overhang(image_shape)
 
-            right_overhang = np.maximum(0, self._bbox[self._mask.ndim :] - image_shape)
-            self._bbox[self._mask.ndim :] -= right_overhang
+    def move(
+        self,
+        offset: NDArray[np.integer],
+        image_shape: tuple[int, ...] | None = None,
+    ) -> None:
+        """
+        Move the mask by a given offset inplace.
 
-            slicing = tuple(slice(s, -e if e > 0 else None) for s, e in zip(left_overhang, right_overhang, strict=True))
-            new_mask = new_mask[slicing]
-
-        self._mask = new_mask
-        self.bbox = self._bbox  # triggering bbox and mask shape check
+        Parameters
+        offset : NDArray[np.integer]
+            The offset to move the mask by.
+        image_shape : tuple[int, ...] | None
+            The shape of the image.
+            When provided handles regions outside the image.
+        """
+        self._bbox[: self._mask.ndim] += offset
+        self._bbox[self._mask.ndim :] += offset
+        if image_shape is not None:
+            self._crop_overhang(image_shape)
 
     @cached_property
     def size(self) -> int:

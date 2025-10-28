@@ -436,3 +436,17 @@ def test_dilation_on_border() -> None:
         mask.mask,
         _nd_sphere(2, 2)[:-2, :-2],
     )
+
+
+def test_mask_move() -> None:
+    point = np.asarray([[True]])
+    bbox = np.asarray([0, 0, 1, 1])
+    mask = Mask(mask=point, bbox=bbox)
+
+    mask.move(offset=np.asarray([5, 2]), image_shape=(7, 7))
+    np.testing.assert_array_equal(mask.bbox, [5, 2, 6, 3])
+    np.testing.assert_array_equal(mask.mask, point)
+
+    mask.move(offset=np.asarray([-3, 2]), image_shape=(7, 7))
+    np.testing.assert_array_equal(mask.bbox, [2, 4, 3, 5])
+    np.testing.assert_array_equal(mask.mask, point)
