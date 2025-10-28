@@ -375,8 +375,8 @@ def test_mask_difference_no_overlap() -> None:
     mask2 = Mask(mask2_array, np.asarray([0, 0, 0, 1, 2, 2]))
 
     mask1 -= mask2
-    assert mask1 is None
     np.testing.assert_array_equal(mask1.mask, mask1_array)
+    np.testing.assert_array_equal(mask1.bbox, np.asarray([0, 0, 0, 1, 2, 2]))
 
 
 def test_mask_difference_complex_overlap() -> None:
