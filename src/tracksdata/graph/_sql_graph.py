@@ -1414,7 +1414,8 @@ class SQLGraph(BaseGraph):
         reset: bool = True,
         tracklet_id_offset: int | None = None,
         node_ids: list[int] | None = None,
-    ) -> rx.PyDiGraph:
+        return_id_update: bool = False,
+    ) -> rx.PyDiGraph | tuple[rx.PyDiGraph, pl.DataFrame]:
         if node_ids is not None:
             track_node_ids = list(set(self.tracklet_nodes(node_ids)))
         else:
@@ -1431,6 +1432,7 @@ class SQLGraph(BaseGraph):
                 output_key=output_key,
                 reset=reset,
                 tracklet_id_offset=tracklet_id_offset,
+                return_id_update=return_id_update,
             )
         )
 

@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from tracksdata.nodes._mask import Mask
 
@@ -191,6 +192,60 @@ def test_mask_iou_identical() -> None:
 
     iou = mask1.iou(mask2)
     assert iou == 1.0
+
+
+def test_mask_union_dimension_mismatch() -> None:
+    """Mask union should raise when masks do not share the same dimensionality."""
+    mask_2d = Mask(np.ones((1, 2), dtype=bool), np.array([0, 0, 1, 2]))
+    mask_3d = Mask(np.ones((1, 1, 2), dtype=bool), np.array([0, 0, 0, 1, 1, 2]))
+
+    with pytest.raises(ValueError, match=r"Cannot compute union between masks of different dimensions: 2 and 3."):
+        _ = mask_2d | mask_3d
+
+
+def test_mask_union_overlapping() -> None:
+    """Mask union should merge overlapping masks into a single bounding box."""
+    mask1_array = np.array([[True, True], [False, False]], dtype=bool)
+    mask2_array = np.array([[False, True], [True, True]], dtype=bool)
+
+    mask1 = Mask(mask1_array, np.array([0, 0, 2, 2]))
+    mask2 = Mask(mask2_array, np.array([1, 1, 3, 3]))
+
+    union = mask1 | mask2
+
+    expected_bbox = np.array([0, 0, 3, 3])
+    expected_mask = np.array(
+        [
+            [True, True, False],
+            [False, False, True],
+            [False, True, True],
+        ],
+        dtype=bool,
+    )
+
+    assert np.array_equal(union.bbox, expected_bbox)
+    assert np.array_equal(union.mask, expected_mask)
+
+
+def test_mask_union_disjoint() -> None:
+    """Mask union should include both masks even when disjoint."""
+    mask1_array = np.array([[True, True], [True, True]], dtype=bool)
+    mask2_array = np.array([[True, False], [False, False]], dtype=bool)
+
+    mask1 = Mask(mask1_array, np.array([0, 0, 2, 2]))
+    mask2 = Mask(mask2_array, np.array([3, 3, 5, 5]))
+
+    union = mask1 | mask2
+    reverse_union = mask2 | mask1
+
+    expected_bbox = np.array([0, 0, 5, 5])
+    expected_mask = np.zeros((5, 5), dtype=bool)
+    expected_mask[:2, :2] = True
+    expected_mask[3, 3] = True
+
+    assert np.array_equal(union.bbox, expected_bbox)
+    assert np.array_equal(union.mask, expected_mask)
+    assert union == reverse_union
 
 
 def test_mask_empty() -> None:

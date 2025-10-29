@@ -1088,7 +1088,8 @@ class RustWorkXGraph(BaseGraph):
         reset: bool = True,
         tracklet_id_offset: int | None = None,
         node_ids: list[int] | None = None,
-    ) -> rx.PyDiGraph:
+        return_id_update: bool = False,
+    ) -> rx.PyDiGraph | tuple[rx.PyDiGraph, pl.DataFrame]:
         if node_ids is not None:
             track_node_ids = set(self.tracklet_nodes(node_ids))
             return (
@@ -1098,17 +1099,21 @@ class RustWorkXGraph(BaseGraph):
                     output_key=output_key,
                     reset=reset,
                     tracklet_id_offset=tracklet_id_offset,
+                    return_id_update=return_id_update,
                 )
             )
         else:
             if output_key not in self.node_attr_keys:
-                self.add_node_attr_key(output_key, -1)
                 previous_id_df = None
+                self.add_node_attr_key(output_key, -1)
                 if tracklet_id_offset is None:
                     tracklet_id_offset = 1
             elif reset:
+                if return_id_update:
+                    previous_id_df = self.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, output_key])
+                else:
+                    previous_id_df = None
                 self.update_node_attrs(attrs={output_key: -1})
-                previous_id_df = None
                 if tracklet_id_offset is None:
                     tracklet_id_offset = 1
             else:
@@ -1125,35 +1130,54 @@ class RustWorkXGraph(BaseGraph):
                     "Often used from `graph.subgraph(edge_attr_filter={'solution': True})`"
                 ) from e
 
+            # Converting to list of int for SQLGraph compatibility (See below)
+            tracklet_ids = tracklet_ids.tolist()
+
             # For the IndexedRXGraph, we need to map the track_node_ids to the external node ids
             if hasattr(self, "_map_to_external"):
                 track_node_ids = self._map_to_external(track_node_ids)  # type: ignore
 
             # mapping to already existing track IDs as much as possible
+            id_update_df = None
             if previous_id_df is not None:
+                # Entering this block means that either of
+                # (`return_id_update == True` and the output_key already existed) or we are reusing existing IDs.
+                # So we compute the id_update_df here.
                 new_id_df = pl.DataFrame({DEFAULT_ATTR_KEYS.NODE_ID: track_node_ids, output_key + "_new": tracklet_ids})
-                merged = new_id_df.join(
+                id_update_df = new_id_df.join(
                     previous_id_df,
                     left_on=DEFAULT_ATTR_KEYS.NODE_ID,
                     right_on=DEFAULT_ATTR_KEYS.NODE_ID,
                     how="left",
-                ).filter(pl.col(output_key) != -1)
-                if merged.height > 0:
-                    tracklet_id_map = merged.unique(output_key + "_new", keep="first").unique(output_key, keep="first")
-                    tracklet_id_map = dict(
-                        zip(tracklet_id_map[output_key + "_new"], tracklet_id_map[output_key], strict=True)
-                    )
-                else:
-                    tracklet_id_map = {}
-                # Ensure that the result is a list of integers (using numpy integer causes issues with SQLGraph)
-                # Later on, we will make it safe to use numpy integers everywhere for updating attributes.
-                tracklet_ids = [int(tracklet_id_map.get(tid, tid)) for tid in tracklet_ids]  # type: ignore
+                )
+                if reset is False:
+                    id_update_df_filtered = id_update_df.filter(pl.col(output_key) != -1)
+                    if id_update_df_filtered.height > 0:
+                        tracklet_id_map = id_update_df_filtered.unique(output_key + "_new", keep="first").unique(
+                            output_key, keep="first"
+                        )
+                        tracklet_id_map = dict(
+                            zip(tracklet_id_map[output_key + "_new"], tracklet_id_map[output_key], strict=True)
+                        )
+                        # Ensure that the result is a list of integers (using numpy integer causes issues with SQLGraph)
+                        # Later on, we will make it safe to use numpy integers everywhere for updating attributes.
+                        tracklet_ids = [int(tracklet_id_map.get(tid, tid)) for tid in tracklet_ids]  # type: ignore
+                        # Update the value with the reused IDs
+                        id_update_df = id_update_df.with_columns(pl.Series(output_key + "_new", tracklet_ids))
+
             self.update_node_attrs(
                 node_ids=track_node_ids,  # type: ignore
                 attrs={output_key: tracklet_ids},
             )
-
-            return tracks_graph
+            # Return a dataframe with node_id, old_tracklet_id, new_tracklet_id if return_id_update is True
+            if return_id_update:
+                if id_update_df is None:
+                    id_update_df = pl.DataFrame(
+                        {DEFAULT_ATTR_KEYS.NODE_ID: track_node_ids, output_key + "_new": tracklet_ids}
+                    )
+                return tracks_graph, id_update_df
+            else:
+                return tracks_graph
 
     def in_degree(self, node_ids: list[int] | int | None = None) -> list[int] | int:
         """

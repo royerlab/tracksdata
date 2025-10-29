@@ -212,6 +212,49 @@ class Mask:
         """
         return fast_intersection_with_bbox(self._bbox, other._bbox, self._mask, other._mask)
 
+    def __or__(self, other: "Mask") -> "Mask":
+        """
+        Compute the union mask between two masks considering their bounding boxes location.
+
+        Parameters
+        ----------
+        other : Mask
+            The other mask to compute the union with.
+
+        Returns
+        -------
+        Mask
+            The union mask between the two masks.
+        """
+        ndim = self._mask.ndim
+        other_ndim = other._mask.ndim
+        if ndim != other_ndim:
+            raise ValueError(f"Cannot compute union between masks of different dimensions: {ndim} and {other_ndim}.")
+
+        self_start = self._bbox[:ndim]
+        self_end = self._bbox[ndim:]
+        other_start = other._bbox[:ndim]
+        other_end = other._bbox[ndim:]
+
+        union_start = np.minimum(self_start, other_start)
+        union_end = np.maximum(self_end, other_end)
+        union_shape = union_end - union_start
+
+        union_mask = np.zeros(union_shape, dtype=np.bool_)
+
+        self_slice = tuple(
+            slice(start - base, end - base) for start, end, base in zip(self_start, self_end, union_start, strict=True)
+        )
+        other_slice = tuple(
+            slice(start - base, end - base)
+            for start, end, base in zip(other_start, other_end, union_start, strict=True)
+        )
+
+        union_mask[self_slice] |= self._mask
+        union_mask[other_slice] |= other._mask
+
+        return Mask(union_mask, np.concatenate([union_start, union_end]))
+
     @cached_property
     def size(self) -> int:
         """
