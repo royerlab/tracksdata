@@ -216,3 +216,6 @@ def test_apply_tile_scale_invariance() -> None:
 
     for result in results[1:]:
         assert result == first_result
+        for node_ids, node_ids_wo_overlap in result:
+            assert len(node_ids) >= 1
+            assert len(node_ids_wo_overlap) == 1
