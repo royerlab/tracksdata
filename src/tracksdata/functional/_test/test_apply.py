@@ -176,3 +176,43 @@ def test_apply_tiled_2d_tiling() -> None:
     assert set(res_tile_wo_overlap[1]) == {1}
     assert set(res_tile_wo_overlap[2]) == {2, 4}
     assert set(res_tile_wo_overlap[3]) == {3, 5}
+
+
+def test_apply_tile_scale_invariance() -> None:
+    """
+    This check that the tiling scheme is scale invariant
+    if the coordinate space, `tile_shape` and `overlap_shape` are scaled by the same factor.
+    """
+    pos = [-1, 0, 1]
+    scales = [1e-6, 0.001, 1, 1_000, 1_000_000]
+    results = []
+
+    for scale in scales:
+        graph = RustWorkXGraph()
+        for p in pos:
+            graph.add_node({"t": p * scale})
+
+        scheme = TilingScheme(
+            tile_shape=(1 * scale,),
+            overlap_shape=(1 * scale,),
+            attrs=["t"],
+        )
+
+        results.append(
+            list(
+                apply_tiled(
+                    graph=graph,
+                    tiling_scheme=scheme,
+                    func=lambda tile: (
+                        tile.graph_filter.node_ids(),
+                        tile.graph_filter_wo_overlap.node_ids(),
+                    ),
+                    agg_func=None,
+                )
+            )
+        )
+
+    first_result = results[0]
+
+    for result in results[1:]:
+        assert result == first_result
