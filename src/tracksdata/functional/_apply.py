@@ -37,6 +37,7 @@ class Tile:
 
 T = TypeVar("T")  # per tile return type
 R = TypeVar("R")  # reduce return type
+S = TypeVar("S", int, float)  # scalar type
 
 MapFunc = Callable[[Tile], T]
 ReduceFunc = Callable[[list[T]], R]
@@ -50,17 +51,17 @@ class TilingScheme:
 
     Parameters
     ----------
-    tile_shape : tuple[int, ...]
+    tile_shape : tuple[S, ...]
         The shape of the tile.
-    overlap_shape : tuple[int, ...]
+    overlap_shape : tuple[S, ...]
         The overlap between tiles PER SIDE.
     attrs : list[str] | None, optional
         The attributes to include in the tile. If None, all attributes will be included.
         By default "t", "z", "y", "x" are included. If some columns are not present, they will be ignored.
     """
 
-    tile_shape: tuple[int, ...]
-    overlap_shape: tuple[int, ...]
+    tile_shape: tuple[S, ...]
+    overlap_shape: tuple[S, ...]
     attrs: list[str] | None = None
 
     def __post_init__(self) -> None:
@@ -105,21 +106,26 @@ def apply_tiled(
 
 
 def _get_tiles_corner(
-    start: Sequence[int],
-    end: Sequence[int],
+    start: Sequence[S],
+    end: Sequence[S],
     tiling_scheme: TilingScheme,
-) -> list[tuple[int, ...]]:
+) -> list[tuple[S, ...]]:
     """
     Get the corner of the tiles.
 
     Parameters
     ----------
-    start : Sequence[int]
+    start : Sequence[S]
         The start of the graph.
-    end : Sequence[int]
+    end : Sequence[S]
         The end of the graph.
     tiling_scheme : TilingScheme
         The tiling scheme to use.
+
+    Returns
+    -------
+    list[tuple[S, ...]]
+        The corner of the tiles.
     """
     eps = 1e-8  # adding eps because np.arange is right exclusive
     tiles_corner = list(
