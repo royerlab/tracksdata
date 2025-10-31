@@ -1,5 +1,6 @@
 import cloudpickle
 import polars as pl
+import polars.selectors as cs
 
 
 def unpack_array_attrs(df: pl.DataFrame) -> pl.DataFrame:
@@ -42,7 +43,7 @@ def unpickle_bytes_columns(df: pl.DataFrame) -> pl.DataFrame:
     pl.DataFrame
         The DataFrame with the bytes columns unpickled.
     """
-    df = df.with_columns(pl.col(pl.Binary).map_elements(cloudpickle.loads, return_dtype=pl.Object))
+    df = df.map_columns(cs.binary(), lambda x: x.map_elements(cloudpickle.loads))
     for col, dtype in zip(df.columns, df.dtypes, strict=True):
         if isinstance(dtype, pl.Object):
             try:

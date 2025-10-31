@@ -33,7 +33,7 @@ def test_graph_array_view_init(graph_backend: BaseGraph) -> None:
     # Add a attribute key
     graph_backend.add_node_attr_key("label", 0)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, np.asarray([0, 0, 0, 0, 0, 0]))
 
     array_view = GraphArrayView(graph=graph_backend, shape=(10, 100, 100), attr_key="label", offset=0)
 
@@ -58,7 +58,7 @@ def test_graph_array_view_getitem_empty_time(graph_backend: BaseGraph) -> None:
 
     graph_backend.add_node_attr_key("label", 0)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, np.asarray([0, 0, 0, 0, 0, 0]))
 
     array_view = GraphArrayView(graph=graph_backend, shape=(10, 100, 100), attr_key="label")
 
@@ -77,7 +77,7 @@ def test_graph_array_view_getitem_with_nodes(graph_backend: BaseGraph) -> None:
     # Add attribute keys
     graph_backend.add_node_attr_key("label", 0)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, np.asarray([0, 0, 0, 0]))
     graph_backend.add_node_attr_key("y", 0)
     graph_backend.add_node_attr_key("x", 0)
 
@@ -127,7 +127,7 @@ def test_graph_array_view_getitem_multiple_nodes(graph_backend: BaseGraph) -> No
     # Add attribute keys
     graph_backend.add_node_attr_key("label", 0)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, np.asarray([0, 0, 0, 0]))
     graph_backend.add_node_attr_key("y", 0)
     graph_backend.add_node_attr_key("x", 0)
 
@@ -182,7 +182,7 @@ def test_graph_array_view_getitem_boolean_dtype(graph_backend: BaseGraph) -> Non
     # Add attribute keys
     graph_backend.add_node_attr_key("is_active", False)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, np.asarray([0, 0, 0, 0]))
     graph_backend.add_node_attr_key("y", 0)
     graph_backend.add_node_attr_key("x", 0)
 
@@ -219,7 +219,7 @@ def test_graph_array_view_dtype_inference(graph_backend: BaseGraph) -> None:
     # Add attribute keys
     graph_backend.add_node_attr_key("float_label", 0.0)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, np.asarray([0, 0, 0, 0]))
     graph_backend.add_node_attr_key("y", 0)
     graph_backend.add_node_attr_key("x", 0)
 
@@ -341,7 +341,7 @@ def test_graph_array_set_options(graph_backend: BaseGraph) -> None:
     with Options(gav_chunk_shape=(512, 512), gav_default_dtype=np.int16):
         graph_backend.add_node_attr_key("label", 0)
         graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-        graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+        graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, np.asarray([0, 0, 0, 0]))
         array_view = GraphArrayView(graph=graph_backend, shape=(10, 100, 100), attr_key="label")
         assert array_view.chunk_shape == (512, 512)
         assert array_view.dtype == np.int16

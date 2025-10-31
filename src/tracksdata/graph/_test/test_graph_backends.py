@@ -1380,7 +1380,7 @@ def test_spatial_filter_basic(graph_backend: BaseGraph) -> None:
     graph_backend.add_node_attr_key("x", 0.0)
     graph_backend.add_node_attr_key("y", 0.0)
     graph_backend.add_node_attr_key("z", 0.0)
-    graph_backend.add_node_attr_key("bbox", None)
+    graph_backend.add_node_attr_key("bbox", np.zeros(6, dtype=int))
 
     node1 = graph_backend.add_node({"t": 0, "x": 1.0, "y": 1.0, "z": 1.0, "bbox": np.array([6, 6, 6, 8, 8, 8])})
     node2 = graph_backend.add_node({"t": 1, "x": 2.0, "y": 2.0, "z": 2.0, "bbox": np.array([0, 0, 0, 3, 3, 3])})
