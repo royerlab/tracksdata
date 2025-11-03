@@ -147,7 +147,7 @@ def test_apply_tiled_2d_tiling() -> None:
 
     tiles_corner = _get_tiles_corner(
         start=[0, 5, 10],
-        end=[0, 15, 30],
+        end=[0, 14, 30],
         tiling_scheme=scheme,
     )
     expected_tiles_corner = [(0.0, 5.0, 10.0), (0.0, 5.0, 25.0), (0.0, 10.0, 10.0), (0.0, 10.0, 25.0)]
