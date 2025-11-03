@@ -127,10 +127,12 @@ def _get_tiles_corner(
     list[tuple[S, ...]]
         The corner of the tiles.
     """
-    eps = 1e-8  # adding eps because np.arange is right exclusive
     tiles_corner = list(
         itertools.product(
-            *[np.arange(s, e + eps, t).tolist() for s, e, t in zip(start, end, tiling_scheme.tile_shape, strict=True)]
+            *[
+                np.arange(s, e + np.nextafter(e, e + t), t).tolist()
+                for s, e, t in zip(start, end, tiling_scheme.tile_shape, strict=True)
+            ]
         )
     )
 
