@@ -130,7 +130,7 @@ def _get_tiles_corner(
     tiles_corner = list(
         itertools.product(
             *[
-                np.arange(s, e + np.nextafter(e, e + t), t).tolist()
+                np.arange(s, e, t).tolist() if s != e else [s]
                 for s, e, t in zip(start, end, tiling_scheme.tile_shape, strict=True)
             ]
         )

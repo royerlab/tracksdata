@@ -151,7 +151,8 @@ def test_apply_tiled_2d_tiling() -> None:
         tiling_scheme=scheme,
     )
     expected_tiles_corner = [(0.0, 5.0, 10.0), (0.0, 5.0, 25.0), (0.0, 10.0, 10.0), (0.0, 10.0, 25.0)]
-    for c, s in zip(tiles_corner, expected_tiles_corner, strict=False):
+    assert len(tiles_corner) == len(expected_tiles_corner)
+    for c, s in zip(tiles_corner, expected_tiles_corner, strict=True):
         assert c == s
 
     results = list(
