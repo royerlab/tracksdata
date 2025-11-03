@@ -169,13 +169,12 @@ def _yield_apply_tiled(
 
     no_overlap = all(o == 0 for o in tiling_scheme.overlap_shape)
 
-    eps = 1e-4
     for corner in tiles_corner:
         # corner considers the overlap, so right needs to be shifted by 2 * o
         # eps is because tracksdata filter slicing is inclusive
         # it varies with the scale due to numerical precision of spatial-graph rtree queries
         slicing_without_overlap = tuple(
-            slice(c, c + t - eps * t) for c, t in zip(corner, tiling_scheme.tile_shape, strict=True)
+            slice(c, c + t - np.spacing(c)) for c, t in zip(corner, tiling_scheme.tile_shape, strict=True)
         )
         graph_filter_without_overlap = spatial_filter[slicing_without_overlap]
 
