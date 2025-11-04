@@ -13,7 +13,7 @@ from tracksdata.nodes._generic_nodes import GenericFuncNodeAttrs
 
 
 @lru_cache(maxsize=5)
-def _spherical_mask(
+def _nd_sphere(
     radius: int,
     ndim: int,
 ) -> NDArray[np.bool_]:
@@ -255,6 +255,117 @@ class Mask:
 
         return Mask(union_mask, np.concatenate([union_start, union_end]))
 
+    def __isub__(self, other: "Mask") -> "Mask":
+        """
+        Compute the difference between two masks considering their bounding boxes location.
+
+        Parameters
+        ----------
+        other : Mask
+            The other mask to compute the difference with.
+        """
+        if self.intersection(other) == 0:
+            return self
+
+        other_slicing = []
+        self_slicing = []
+        for i in range(self._mask.ndim):
+            diff = self._bbox[i] - other._bbox[i]
+            if diff > 0:
+                self_s = None
+                other_s = diff
+            else:
+                self_s = -diff
+                other_s = None
+
+            diff = self._bbox[i + self._mask.ndim] - other._bbox[i + other._mask.ndim]
+            if diff > 0:
+                self_e = -diff
+                other_e = None
+            elif diff < 0:
+                self_e = None
+                other_e = diff
+            else:
+                self_e = None
+                other_e = None
+
+            self_slicing.append(slice(self_s, self_e))
+            other_slicing.append(slice(other_s, other_e))
+
+        self_slicing = tuple(self_slicing)
+        other_slicing = tuple(other_slicing)
+
+        self._mask[self_slicing] &= ~other._mask[other_slicing]
+        return self
+
+    def _crop_overhang(self, image_shape: tuple[int, ...]) -> None:
+        """
+        Crop regions of the mask that are outside the image.
+        This is used to fix bounding box and mask after changes to the mask.
+
+        Parameters
+        ----------
+        image_shape : tuple[int, ...]
+            The shape of the image.
+        """
+        left_overhang = np.maximum(0, -self._bbox[: self._mask.ndim])
+        self._bbox[: self._mask.ndim] += left_overhang
+
+        right_overhang = np.maximum(0, self._bbox[self._mask.ndim :] - image_shape)
+        self._bbox[self._mask.ndim :] -= right_overhang
+
+        slicing = tuple(slice(s, -e if e > 0 else None) for s, e in zip(left_overhang, right_overhang, strict=True))
+        self._mask = self._mask[slicing]
+        self.bbox = self._bbox  # triggering bbox and mask shape check
+
+    def dilate(self, radius: int, image_shape: tuple[int, ...] | None = None) -> None:
+        """
+        Dilate the mask by a given radius inplace.
+
+        Parameters
+        ----------
+        radius : int
+            The radius of the dilation.
+        image_shape : tuple[int, ...] | None
+            The shape of the image.
+            When provided handles regions outside the image.
+        """
+        new_mask = np.pad(self.mask, radius, mode="constant", constant_values=False)
+
+        morph.dilation(
+            new_mask,
+            _nd_sphere(radius, new_mask.ndim),
+            mode="constant",
+            cval=False,
+            out=new_mask,
+        )
+        self._mask = new_mask
+        self._bbox[: self._mask.ndim] -= radius
+        self._bbox[self._mask.ndim :] += radius
+
+        if image_shape is not None:
+            self._crop_overhang(image_shape)
+
+    def move(
+        self,
+        offset: NDArray[np.integer],
+        image_shape: tuple[int, ...] | None = None,
+    ) -> None:
+        """
+        Move the mask by a given offset inplace.
+
+        Parameters
+        offset : NDArray[np.integer]
+            The offset to move the mask by.
+        image_shape : tuple[int, ...] | None
+            The shape of the image.
+            When provided handles regions outside the image.
+        """
+        self._bbox[: self._mask.ndim] += offset
+        self._bbox[self._mask.ndim :] += offset
+        if image_shape is not None:
+            self._crop_overhang(image_shape)
+
     @cached_property
     def size(self) -> int:
         """
@@ -299,7 +410,7 @@ class Mask:
         Mask
             The mask.
         """
-        mask = _spherical_mask(radius, len(center))
+        mask = _nd_sphere(radius, len(center))
         center = np.round(center).astype(int)
 
         start = center - np.asarray(mask.shape) // 2

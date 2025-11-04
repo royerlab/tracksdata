@@ -137,8 +137,6 @@ def test_apply_tiled_2d_tiling() -> None:
       |
       ---------------------y
      0   5   10   15   20
-
-     Note: tile range is (0-0, 5-14, 10-30)
     """
 
     scheme = TilingScheme(
@@ -146,12 +144,6 @@ def test_apply_tiled_2d_tiling() -> None:
         overlap_shape=(0, 5, 5),
         attrs=["t", "y", "x"],
     )
-
-    """
-    Tile layout (with overlap):
-    # tile ids to corners
-    # 0 : (0-1, 5-15, 10-30)
-    """
 
     tiles_corner = _get_tiles_corner(
         start=[0, 5, 10],

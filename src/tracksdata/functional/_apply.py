@@ -169,7 +169,6 @@ def _yield_apply_tiled(
 
     no_overlap = all(o == 0 for o in tiling_scheme.overlap_shape)
 
-    eps = 1e-4
     for corner in tiles_corner:
         # corner considers the overlap, so right needs to be shifted by 2 * o
         # np.nextafter is used to convert inclusive to exclusive ranges.
