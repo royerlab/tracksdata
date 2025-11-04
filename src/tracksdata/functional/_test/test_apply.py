@@ -118,6 +118,7 @@ def test_apply_tiled_2d_tiling() -> None:
     for y in [5, 11, 14]:
         for x in [10, 30]:
             graph.add_node({"t": 0, "y": y, "x": x})
+    graph.add_node({"t": 0, "y": 9.999999, "x": 10})
 
     """
     # node ids to coords
@@ -127,13 +128,14 @@ def test_apply_tiled_2d_tiling() -> None:
     # 3 : (11, 30)
     # 4 : (14, 10)
     # 5 : (14, 30)
+    # 6 : (9.999999, 10)
 
       x
       |
     30|  1    3   5
       |
       |
-    10|  0    2   4
+    10|  0  6 2   4
       |
       ---------------------y
      0   5   10   15   20
@@ -167,13 +169,13 @@ def test_apply_tiled_2d_tiling() -> None:
     res_tile_with_overlap, res_tile_wo_overlap = zip(*results, strict=False)
 
     assert len(res_tile_with_overlap) == 4
-    assert set(res_tile_with_overlap[0]) == {0, 2, 4}
+    assert set(res_tile_with_overlap[0]) == {0, 2, 4, 6}
     assert set(res_tile_with_overlap[1]) == {1, 3, 5}
-    assert set(res_tile_with_overlap[2]) == {0, 2, 4}
+    assert set(res_tile_with_overlap[2]) == {0, 2, 4, 6}
     assert set(res_tile_with_overlap[3]) == {1, 3, 5}
 
     assert len(res_tile_wo_overlap) == 4
-    assert set(res_tile_wo_overlap[0]) == {0}
+    assert set(res_tile_wo_overlap[0]) == {0, 6}
     assert set(res_tile_wo_overlap[1]) == {1}
     assert set(res_tile_wo_overlap[2]) == {2, 4}
     assert set(res_tile_wo_overlap[3]) == {3, 5}
