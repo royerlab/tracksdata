@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 @overload
 def to_napari_format(
     graph: BaseGraph,
-    shape: tuple[int, ...],
+    shape: tuple[int, ...] | None,
     solution_key: str | None,
     output_tracklet_id_key: str,
     mask_key: None,
@@ -24,7 +24,7 @@ def to_napari_format(
 @overload
 def to_napari_format(
     graph: BaseGraph,
-    shape: tuple[int, ...],
+    shape: tuple[int, ...] | None,
     solution_key: str | None,
     output_tracklet_id_key: str,
     mask_key: str,
@@ -33,7 +33,7 @@ def to_napari_format(
 
 def to_napari_format(
     graph: BaseGraph,
-    shape: tuple[int, ...],
+    shape: tuple[int, ...] | None = None,
     solution_key: str | None = DEFAULT_ATTR_KEYS.SOLUTION,
     output_tracklet_id_key: str = DEFAULT_ATTR_KEYS.TRACKLET_ID,
     mask_key: str | None = None,
@@ -102,6 +102,15 @@ def to_napari_format(
 
     else:
         solution_graph = graph
+
+    if shape is None:
+        try:
+            shape = graph.metadata["shape"]
+        except KeyError as e:
+            raise KeyError(
+                "`shape` is required to convert to napari format. "
+                "Please provide a `shape` or set the `shape` in the graph metadata."
+            ) from e
 
     tracks_graph = solution_graph.assign_tracklet_ids(output_tracklet_id_key)
     dict_graph = {tracks_graph[child]: tracks_graph[parent] for parent, child in tracks_graph.edge_list()}
