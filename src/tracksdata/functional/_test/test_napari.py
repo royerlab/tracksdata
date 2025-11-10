@@ -28,14 +28,16 @@ def test_napari_conversion(metadata_shape: bool) -> None:
     graph.add_node_attr_key(DEFAULT_ATTR_KEYS.SOLUTION, True)
     graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.SOLUTION, True)
 
-    image_shape = (10, 22, 32)
+    shape = (2, 10, 22, 32)
     if metadata_shape:
-        graph.update_metadata(shape=image_shape)
-        image_shape = None
+        graph.update_metadata(shape=shape)
+        arg_shape = None
+    else:
+        arg_shape = shape
 
     mask_attrs = MaskDiskAttrs(
         radius=2,
-        image_shape=image_shape,
+        image_shape=shape[1:],
         output_key=DEFAULT_ATTR_KEYS.MASK,
     )
     mask_attrs.add_node_attrs(graph)
@@ -50,7 +52,7 @@ def test_napari_conversion(metadata_shape: bool) -> None:
 
     tracks_df, dict_graph, array_view = to_napari_format(
         graph,
-        shape=(2, *image_shape),
+        shape=arg_shape,
         mask_key=DEFAULT_ATTR_KEYS.MASK,
     )
 
