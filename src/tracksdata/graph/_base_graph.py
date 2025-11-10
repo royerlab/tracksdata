@@ -1523,21 +1523,35 @@ class NodeInterface:
     @abc.abstractmethod
     def metadata(self) -> dict[str, Any]:
         """
-        Return the metadata of the node.
+        Return the metadata of the graph.
 
         Returns
         -------
         dict[str, Any]
-            The metadata of the node.
+            The metadata of the graph as a dictionary.
+
+        Examples
+        --------
+        ```python
+        metadata = graph.metadata
+        print(metadata["shape"])
+        ```
         """
 
     @abc.abstractmethod
     def update_metadata(self, **kwargs) -> None:
         """
-        Set the metadata of the node.
+        Set or update metadata for the graph.
 
         Parameters
         ----------
         **kwargs : Any
-            The metadata items to set by key.
+            The metadata items to set by key. Values will be stored as JSON.
+
+        Examples
+        --------
+        ```python
+        graph.update_metadata(shape=[1, 25, 25], path="path/to/image.ome.zarr")
+        graph.update_metadata(description="Tracking data from experiment 1")
+        ```
         """

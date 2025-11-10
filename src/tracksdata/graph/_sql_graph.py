@@ -525,11 +525,17 @@ class SQLGraph(BaseGraph):
             source_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"))
             target_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"))
 
+        class Metadata(Base):
+            __tablename__ = "Metadata"
+            key = sa.Column(sa.String, primary_key=True)
+            value = sa.Column(sa.JSON)
+
         # Assign to instance variables
         self.Base = Base
         self.Node = Node
         self.Edge = Edge
         self.Overlap = Overlap
+        self.Metadata = Metadata
 
     def _polars_schema_override(self, table_class: type[DeclarativeBase]) -> SchemaDict:
         return {
@@ -1632,4 +1638,17 @@ class SQLGraph(BaseGraph):
                 deleted = session.query(self.Edge).filter(self.Edge.edge_id == edge_id).delete()
                 if not deleted:
                     raise ValueError(f"Edge {edge_id} does not exist in the graph.")
+            session.commit()
+
+    @property
+    def metadata(self) -> dict[str, Any]:
+        with Session(self._engine) as session:
+            result = session.query(self.Metadata).all()
+            return {row.key: row.value for row in result}
+
+    def update_metadata(self, **kwargs) -> None:
+        with Session(self._engine) as session:
+            for key, value in kwargs.items():
+                metadata_entry = self.Metadata(key=key, value=value)
+                session.merge(metadata_entry)
             session.commit()
