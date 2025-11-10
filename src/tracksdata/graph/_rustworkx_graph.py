@@ -321,12 +321,24 @@ class RustWorkXGraph(BaseGraph):
         self._overlaps: list[list[int, 2]] = []
 
         if rx_graph is None:
-            self._graph = rx.PyDiGraph()
+            self._graph = rx.PyDiGraph(attrs={})
             self._node_attr_keys.append(DEFAULT_ATTR_KEYS.NODE_ID)
             self._node_attr_keys.append(DEFAULT_ATTR_KEYS.T)
 
         else:
             self._graph = rx_graph
+
+            if self._graph.attrs is None:
+                self._graph.attrs = {}
+
+            elif not isinstance(self._graph.attrs, dict):
+                LOG.warning(
+                    "previous attribute %s will be added to key 'old_attrs' of `graph.metadata`",
+                    self._graph.attrs,
+                )
+                self._graph.attrs = {
+                    "old_attrs": self._graph.attrs,
+                }
 
             unique_node_attr_keys = set()
             unique_edge_attr_keys = set()
@@ -1303,6 +1315,13 @@ class RustWorkXGraph(BaseGraph):
         Return the edge id between two nodes.
         """
         return self.rx_graph.get_edge_data(source_id, target_id)[DEFAULT_ATTR_KEYS.EDGE_ID]
+
+    @property
+    def metadata(self) -> dict[str, Any]:
+        return self._graph.attrs
+
+    def update_metadata(self, **kwargs) -> None:
+        self._graph.attrs.update(kwargs)
 
 
 class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):

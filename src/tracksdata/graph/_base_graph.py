@@ -1305,9 +1305,12 @@ class BaseGraph(abc.ABC):
             LOG.warning("The graph is not a directed graph, converting to directed graph.")
             rx_graph = rx_graph.to_directed()
 
+        node_id_map = rx_graph.attrs["to_rx_id_map"]
+        rx_graph.attrs = {"geff": rx_graph.attrs, **rx_graph.attrs["extra"].pop("tracksdata", {})}
+
         indexed_graph = IndexedRXGraph(
             rx_graph=rx_graph,
-            node_id_map=rx_graph.attrs["to_rx_id_map"],
+            node_id_map=node_id_map,
             **kwargs,
         )
 
@@ -1381,12 +1384,18 @@ class BaseGraph(abc.ABC):
                 for k, v in edge_attrs.to_dict().items()
             }
 
+            td_metadata = self.metadata.copy()
+            td_metadata.pop("geff", None)  # avoid geff being written multiple times
+
             geff_metadata = geff.GeffMetadata(
                 directed=True,
                 axes=axes,
                 node_props_metadata=node_props_metadata,
                 edge_props_metadata=edge_props_metadata,
                 track_node_props=track_node_props,
+                extra={
+                    "tracksdata": td_metadata,
+                },
             )
 
         node_dict = {
@@ -1509,3 +1518,26 @@ class NodeInterface:
             .rows(named=True)[0]
         )
         return data
+
+    @property
+    @abc.abstractmethod
+    def metadata(self) -> dict[str, Any]:
+        """
+        Return the metadata of the node.
+
+        Returns
+        -------
+        dict[str, Any]
+            The metadata of the node.
+        """
+
+    @abc.abstractmethod
+    def update_metadata(self, **kwargs) -> None:
+        """
+        Set the metadata of the node.
+
+        Parameters
+        ----------
+        **kwargs : Any
+            The metadata items to set by key.
+        """

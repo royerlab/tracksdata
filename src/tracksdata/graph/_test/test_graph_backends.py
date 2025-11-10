@@ -2089,6 +2089,11 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
 
     graph_backend.add_edge_attr_key("weight", 0.0)
 
+    graph_backend.update_metadata(
+        shape=[1, 25, 25],
+        path="path/to/image.ome.zarr",
+    )
+
     node1 = graph_backend.add_node(
         {
             "t": 0,
@@ -2138,6 +2143,12 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
     graph_backend.to_geff(geff_store=output_store)
 
     geff_graph, _ = IndexedRXGraph.from_geff(output_store)
+
+    assert "geff" in geff_graph.metadata
+
+    # geff metadata was not stored in original graph
+    geff_graph.metadata.pop("geff")
+    assert geff_graph.metadata == graph_backend.metadata
 
     assert geff_graph.num_nodes == 3
     assert geff_graph.num_edges == 2

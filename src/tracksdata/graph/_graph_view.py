@@ -708,3 +708,10 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
             "`copy` is not supported for `GraphView`.\n"
             "Use `detach` to create a new reference-less graph with the same nodes and edges."
         )
+
+    @property
+    def metadata(self) -> dict[str, Any]:
+        return self._root.metadata
+
+    def update_metadata(self, **kwargs) -> None:
+        self._root.update_metadata(**kwargs)
