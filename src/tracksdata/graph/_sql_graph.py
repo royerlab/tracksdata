@@ -1488,7 +1488,7 @@ class SQLGraph(BaseGraph):
 
     def __getstate__(self) -> dict:
         data_dict = self.__dict__.copy()
-        for k in ["Base", "Node", "Edge", "Overlap", "_engine"]:
+        for k in ["Base", "Node", "Edge", "Overlap", "Metadata", "_engine"]:
             del data_dict[k]
         return data_dict
 
