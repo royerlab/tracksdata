@@ -9,7 +9,6 @@ import rustworkx as rx
 
 from tracksdata.attrs import AttrComparison, split_attr_comps
 from tracksdata.constants import DEFAULT_ATTR_KEYS
-from tracksdata.functional._rx import _assign_tracklet_ids
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.graph._mapped_graph_mixin import MappedGraphMixin
 from tracksdata.graph.filters._base_filter import BaseFilter, cache_method
@@ -1102,6 +1101,8 @@ class RustWorkXGraph(BaseGraph):
         node_ids: list[int] | None = None,
         return_id_update: bool = False,
     ) -> rx.PyDiGraph | tuple[rx.PyDiGraph, pl.DataFrame]:
+        from tracksdata.functional._rx import _assign_tracklet_ids
+
         if node_ids is not None:
             track_node_ids = set(self.tracklet_nodes(node_ids))
             return (
