@@ -1323,6 +1323,9 @@ class RustWorkXGraph(BaseGraph):
     def update_metadata(self, **kwargs) -> None:
         self._graph.attrs.update(kwargs)
 
+    def remove_metadata(self, key: str) -> None:
+        self._graph.attrs.pop(key, None)
+
 
 class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
     """

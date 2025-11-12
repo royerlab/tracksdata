@@ -1555,3 +1555,20 @@ class NodeInterface:
         graph.update_metadata(description="Tracking data from experiment 1")
         ```
         """
+
+    @abc.abstractmethod
+    def remove_metadata(self, key: str) -> None:
+        """
+        Remove a metadata key from the graph.
+
+        Parameters
+        ----------
+        key : str
+            The key of the metadata to remove.
+
+        Examples
+        --------
+        ```python
+        graph.remove_metadata("shape")
+        ```
+        """

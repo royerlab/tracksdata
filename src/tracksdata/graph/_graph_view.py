@@ -715,3 +715,6 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
 
     def update_metadata(self, **kwargs) -> None:
         self._root.update_metadata(**kwargs)
+
+    def remove_metadata(self, key: str) -> None:
+        self._root.remove_metadata(key)

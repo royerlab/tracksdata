@@ -1652,3 +1652,8 @@ class SQLGraph(BaseGraph):
                 metadata_entry = self.Metadata(key=key, value=value)
                 session.merge(metadata_entry)
             session.commit()
+
+    def remove_metadata(self, key: str) -> None:
+        with Session(self._engine) as session:
+            session.query(self.Metadata).filter(self.Metadata.key == key).delete()
+            session.commit()

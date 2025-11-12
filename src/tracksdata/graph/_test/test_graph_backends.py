@@ -2202,3 +2202,13 @@ def test_metadata_multiple_dtypes(graph_backend: BaseGraph) -> None:
     assert retrieved["string"] == "updated_value"
     assert retrieved["new_key"] == "new_value"
     assert retrieved["integer"] == 42  # Other values unchanged
+
+    # Testing removing metadata
+    graph_backend.remove_metadata("string")
+    retrieved = graph_backend.metadata
+    assert "string" not in retrieved
+
+    graph_backend.remove_metadata("mixed_list")
+    retrieved = graph_backend.metadata
+    assert "string" not in retrieved
+    assert "mixed_list" not in retrieved
