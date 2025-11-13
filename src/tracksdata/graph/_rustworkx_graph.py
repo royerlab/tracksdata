@@ -1101,6 +1101,7 @@ class RustWorkXGraph(BaseGraph):
         node_ids: list[int] | None = None,
         return_id_update: bool = False,
     ) -> rx.PyDiGraph | tuple[rx.PyDiGraph, pl.DataFrame]:
+        # local import to avoid circular import
         from tracksdata.functional._rx import _assign_tracklet_ids
 
         if node_ids is not None:
