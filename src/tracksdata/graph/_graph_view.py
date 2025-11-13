@@ -421,23 +421,33 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
         neighbors_func: Callable[[rx.PyDiGraph, int], rx.NodeIndices],
         node_ids: list[int] | int,
         attr_keys: Sequence[str] | str | None = None,
-    ) -> dict[int, pl.DataFrame] | pl.DataFrame:
+        *,
+        return_attrs: bool = False,
+    ) -> dict[int, pl.DataFrame] | pl.DataFrame | dict[int, list[int]] | list[int]:
         single_node = False
         if isinstance(node_ids, int):
             node_ids = [node_ids]
             single_node = True
 
-        node_ids = self._map_to_local(node_ids)
-        neighbors_data = super()._get_neighbors(neighbors_func, node_ids, attr_keys)
+        local_node_ids = self._map_to_local(node_ids)
+        neighbors_data = super()._get_neighbors(
+            neighbors_func,
+            local_node_ids,
+            attr_keys,
+            return_attrs=return_attrs,
+        )
 
-        out_data = {}
-        for node_id in node_ids:
-            df = neighbors_data[node_id]
-            # Map DataFrame IDs from local to external using mixin method
-            mapped_df = self._map_df_to_external(
-                df, [DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET]
-            )
-            out_data[self._map_to_external(node_id)] = mapped_df
+        out_data: dict[int, pl.DataFrame] | dict[int, list[int]] = {}
+        for local_id, external_id in zip(local_node_ids, node_ids, strict=True):
+            if return_attrs:
+                df = neighbors_data[local_id]
+                mapped_df = self._map_df_to_external(
+                    df, [DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET]
+                )
+                out_data[external_id] = mapped_df
+            else:
+                neighbor_ids = neighbors_data[local_id]
+                out_data[external_id] = self._map_to_external(neighbor_ids)
 
         if single_node:
             return next(iter(out_data.values()))
@@ -448,19 +458,23 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
         self,
         node_ids: list[int] | int,
         attr_keys: Sequence[str] | str | None = None,
-    ) -> dict[int, pl.DataFrame] | pl.DataFrame:
+        *,
+        return_attrs: bool = False,
+    ) -> dict[int, pl.DataFrame] | pl.DataFrame | dict[int, list[int]] | list[int]:
         if self._out_of_sync:
             raise RuntimeError("Out of sync graph view cannot be used to get sucessors")
-        return super().successors(node_ids, attr_keys)
+        return super().successors(node_ids, attr_keys, return_attrs=return_attrs)
 
     def predecessors(
         self,
         node_ids: list[int] | int,
         attr_keys: Sequence[str] | str | None = None,
-    ) -> dict[int, pl.DataFrame] | pl.DataFrame:
+        *,
+        return_attrs: bool = False,
+    ) -> dict[int, pl.DataFrame] | pl.DataFrame | dict[int, list[int]] | list[int]:
         if self._out_of_sync:
             raise RuntimeError("Out of sync graph view cannot be used to get predecessors")
-        return super().predecessors(node_ids, attr_keys)
+        return super().predecessors(node_ids, attr_keys, return_attrs=return_attrs)
 
     def _node_attrs_from_node_ids(
         self,
@@ -728,3 +742,13 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
             "`copy` is not supported for `GraphView`.\n"
             "Use `detach` to create a new reference-less graph with the same nodes and edges."
         )
+
+    @property
+    def metadata(self) -> dict[str, Any]:
+        return self._root.metadata
+
+    def update_metadata(self, **kwargs) -> None:
+        self._root.update_metadata(**kwargs)
+
+    def remove_metadata(self, key: str) -> None:
+        self._root.remove_metadata(key)

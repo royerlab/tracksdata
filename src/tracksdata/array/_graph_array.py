@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from copy import copy
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -7,9 +8,28 @@ from tracksdata.array._base_array import ArrayIndex, BaseReadOnlyArray
 from tracksdata.array._nd_chunk_cache import NDChunkCache
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph._base_graph import BaseGraph
-from tracksdata.nodes._mask import Mask
 from tracksdata.options import get_options
 from tracksdata.utils._dtypes import polars_dtype_to_numpy_dtype
+
+if TYPE_CHECKING:
+    from tracksdata.nodes._mask import Mask
+
+
+def _validate_shape(
+    shape: tuple[int, ...] | None,
+    graph: BaseGraph,
+    func_name: str,
+) -> tuple[int, ...]:
+    """Helper function to validate the shape argument."""
+    if shape is None:
+        try:
+            shape = graph.metadata["shape"]
+        except KeyError as e:
+            raise KeyError(
+                f"`shape` is required to `{func_name}`. "
+                "Please provide a `shape` argument or set the `shape` in the graph metadata."
+            ) from e
+    return shape
 
 
 def chain_indices(slicing1: ArrayIndex | None, slicing2: ArrayIndex | None) -> ArrayIndex:
@@ -109,12 +129,12 @@ class GraphArrayView(BaseReadOnlyArray):
     ----------
     graph : BaseGraph
         The graph to view as an array.
-    shape : tuple[int, ...]
-        The shape of the array.
     attr_key : str
         The attribute key to view as an array.
     offset : int | np.ndarray, optional
         The offset to apply to the array.
+    shape : tuple[int, ...] | None, optional
+        The shape of the array. If None, the shape is inferred from the graph metadata `shape` key.
     chunk_shape : tuple[int] | None, optional
         The chunk shape for the array. If None, the default chunk size is used.
     buffer_cache_size : int, optional
@@ -125,9 +145,10 @@ class GraphArrayView(BaseReadOnlyArray):
     def __init__(
         self,
         graph: BaseGraph,
-        shape: tuple[int, ...],
         attr_key: str,
+        *,
         offset: int | np.ndarray = 0,
+        shape: tuple[int, ...] | None = None,
         chunk_shape: tuple[int, ...] | int | None = None,
         buffer_cache_size: int | None = None,
         dtype: np.dtype | None = None,
@@ -155,18 +176,18 @@ class GraphArrayView(BaseReadOnlyArray):
                     dtype = np.uint8
 
         self._dtype = dtype
-        self.original_shape = shape
+        self.original_shape = _validate_shape(shape, graph, "GraphArrayView")
 
         chunk_shape = chunk_shape or get_options().gav_chunk_shape
         if isinstance(chunk_shape, int):
-            chunk_shape = (chunk_shape,) * (len(shape) - 1)
-        elif len(chunk_shape) < len(shape) - 1:
-            chunk_shape = (1,) * (len(shape) - 1 - len(chunk_shape)) + tuple(chunk_shape)
+            chunk_shape = (chunk_shape,) * (len(self.original_shape) - 1)
+        elif len(chunk_shape) < len(self.original_shape) - 1:
+            chunk_shape = (1,) * (len(self.original_shape) - 1 - len(chunk_shape)) + tuple(chunk_shape)
 
         self.chunk_shape = chunk_shape
         self.buffer_cache_size = buffer_cache_size or get_options().gav_buffer_cache_size
 
-        self._indices = tuple(slice(0, s) for s in shape)
+        self._indices = tuple(slice(0, s) for s in self.original_shape)
         self._cache = NDChunkCache(
             compute_func=self._fill_array,
             shape=self.shape[1:],

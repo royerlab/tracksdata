@@ -59,6 +59,7 @@ def compressed_tracks_table(graph: BaseGraph) -> np.ndarray:
     parents = graph.predecessors(
         node_ids,
         attr_keys=[DEFAULT_ATTR_KEYS.TRACKLET_ID],
+        return_attrs=True,
     )
     for tracklet_id, node_id in zip(tracks_data, node_ids, strict=True):
         df = parents[node_id]
@@ -230,8 +231,8 @@ def from_ctc(
 
 def to_ctc(
     graph: BaseGraph,
-    shape: tuple[int, ...],
     output_dir: str | Path,
+    shape: tuple[int, ...] | None = None,
     tracklet_id_key: str = DEFAULT_ATTR_KEYS.TRACKLET_ID,
     overwrite: bool = False,
 ) -> None:
@@ -242,10 +243,11 @@ def to_ctc(
     ----------
     graph : BaseGraph
         The graph to save.
-    shape : tuple[int, ...]
-        The shape of the label images (T, (Z), Y, X)
     output_dir : str | Path
         The directory to save the label images and the tracks graph to.
+    shape : tuple[int, ...] | None, optional
+        The shape of the label images (T, (Z), Y, X).
+        If None, the shape is inferred from the graph metadata `shape` key.
     tracklet_id_key : str
         The attribute key to use for the track IDs.
     overwrite : bool

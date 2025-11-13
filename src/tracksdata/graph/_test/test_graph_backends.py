@@ -641,32 +641,45 @@ def test_sucessors_and_degree(graph_backend: BaseGraph) -> None:
     graph_backend.add_edge(node1, node2, {"weight": 0.3})  # node1 -> node2
 
     # Test successors of node0 (should return node1 and node3)
-    successors_df = graph_backend.successors(node0)
-    assert isinstance(successors_df, pl.DataFrame)
-    assert len(successors_df) == 2  # node0 has 2 successors
+    successors = graph_backend.successors(node0)
+    assert isinstance(successors, list)
+    assert len(successors) == 2  # node0 has 2 successors
     assert graph_backend.out_degree(node0) == 2
 
     # Check that we get the correct target nodes (order doesn't matter)
-    successor_nodes = set(successors_df[DEFAULT_ATTR_KEYS.NODE_ID].to_list())
+    successor_nodes = set(successors)
     assert successor_nodes == {node1, node3}
 
-    # Test successors of node1 (should return node2)
-    successors_df = graph_backend.successors(node1)
+    successors_df = graph_backend.successors(node0, return_attrs=True)
     assert isinstance(successors_df, pl.DataFrame)
-    assert len(successors_df) == 1  # node1 has 1 successor
-    assert successors_df[DEFAULT_ATTR_KEYS.NODE_ID].to_list()[0] == node2
+    assert set(successors_df[DEFAULT_ATTR_KEYS.NODE_ID].to_list()) == {node1, node3}
+
+    # Test successors of node1 (should return node2)
+    successors = graph_backend.successors(node1)
+    assert isinstance(successors, list)
+    assert len(successors) == 1  # node1 has 1 successor
+    assert successors[0] == node2
     assert graph_backend.out_degree(node1) == 1
 
     # Test successors of node2 (should return empty - no successors)
-    successors_df = graph_backend.successors(node2)
-    assert isinstance(successors_df, pl.DataFrame)
-    assert len(successors_df) == 0  # node2 has no successors
+    successors = graph_backend.successors(node2)
+    assert isinstance(successors, list)
+    assert len(successors) == 0  # node2 has no successors
     assert graph_backend.out_degree(node2) == 0
 
     # Test with multiple nodes
     successors_dict = graph_backend.successors([node0, node1, node2])
     assert isinstance(successors_dict, dict)
     assert len(successors_dict) == 3
+    assert sorted(successors_dict[node0]) == sorted([node1, node3])
+    assert successors_dict[node1] == [node2]
+    assert successors_dict[node2] == []
+
+    successors_dict_df = graph_backend.successors([node0, node1, node2], return_attrs=True)
+    assert isinstance(successors_dict_df[node0], pl.DataFrame)
+    assert set(successors_dict_df[node0][DEFAULT_ATTR_KEYS.NODE_ID].to_list()) == {node1, node3}
+    assert set(successors_dict_df[node1][DEFAULT_ATTR_KEYS.NODE_ID].to_list()) == {node2}
+    assert len(successors_dict_df[node2]) == 0
 
     # testing query all
     assert graph_backend.out_degree() == [2, 1, 0, 0]
@@ -676,11 +689,11 @@ def test_sucessors_and_degree(graph_backend: BaseGraph) -> None:
     assert graph_backend.out_degree([node1, node2, node0]) == [1, 0, 2]
 
     # Check node0's successors
-    assert len(successors_dict[node0]) == 2
+    assert len(successors_dict_df[node0]) == 2
     # Check node1's successors
-    assert len(successors_dict[node1]) == 1
+    assert len(successors_dict_df[node1]) == 1
     # Check node2's successors (empty)
-    assert len(successors_dict[node2]) == 0
+    assert len(successors_dict_df[node2]) == 0
 
 
 def test_predecessors_and_degree(graph_backend: BaseGraph) -> None:
@@ -703,38 +716,47 @@ def test_predecessors_and_degree(graph_backend: BaseGraph) -> None:
     graph_backend.add_edge(node1, node2, {"weight": 0.3})  # node1 -> node2
 
     # Test predecessors of node0 (should return empty - no predecessors)
-    predecessors_df = graph_backend.predecessors(node0)
-    assert isinstance(predecessors_df, pl.DataFrame)
-    assert len(predecessors_df) == 0  # node0 has no predecessors
+    predecessors = graph_backend.predecessors(node0)
+    assert isinstance(predecessors, list)
+    assert len(predecessors) == 0  # node0 has no predecessors
     assert graph_backend.in_degree(node0) == 0
 
     # Test predecessors of node1 (should return node0)
-    predecessors_df = graph_backend.predecessors(node1)
-    assert isinstance(predecessors_df, pl.DataFrame)
-    assert len(predecessors_df) == 1  # node1 has 1 predecessor
+    predecessors = graph_backend.predecessors(node1)
+    assert isinstance(predecessors, list)
+    assert len(predecessors) == 1  # node1 has 1 predecessor
     assert graph_backend.in_degree(node1) == 1
-
-    # Check that we get the correct source node
-    assert predecessors_df[DEFAULT_ATTR_KEYS.NODE_ID].to_list()[0] == node0
+    assert predecessors[0] == node0
 
     # Test predecessors of node2 (should return node1)
-    predecessors_df = graph_backend.predecessors(node2)
-    assert isinstance(predecessors_df, pl.DataFrame)
-    assert len(predecessors_df) == 1  # node2 has 1 predecessor
-    assert predecessors_df[DEFAULT_ATTR_KEYS.NODE_ID].to_list()[0] == node1
+    predecessors = graph_backend.predecessors(node2)
+    assert isinstance(predecessors, list)
+    assert len(predecessors) == 1  # node2 has 1 predecessor
+    assert predecessors[0] == node1
     assert graph_backend.in_degree(node2) == 1
 
     # Test predecessors of node3 (should return node0)
-    predecessors_df = graph_backend.predecessors(node3)
-    assert isinstance(predecessors_df, pl.DataFrame)
-    assert len(predecessors_df) == 1  # node3 has 1 predecessor
-    assert predecessors_df[DEFAULT_ATTR_KEYS.NODE_ID].to_list()[0] == node0
+    predecessors = graph_backend.predecessors(node3)
+    assert isinstance(predecessors, list)
+    assert len(predecessors) == 1  # node3 has 1 predecessor
+    assert predecessors[0] == node0
     assert graph_backend.in_degree(node3) == 1
 
     # Test with multiple nodes
     predecessors_dict = graph_backend.predecessors([node0, node1, node2, node3])
     assert isinstance(predecessors_dict, dict)
     assert len(predecessors_dict) == 4
+    assert predecessors_dict[node0] == []
+    assert predecessors_dict[node1] == [node0]
+    assert predecessors_dict[node2] == [node1]
+    assert predecessors_dict[node3] == [node0]
+
+    predecessors_dict_df = graph_backend.predecessors([node0, node1, node2, node3], return_attrs=True)
+    assert isinstance(predecessors_dict_df[node1], pl.DataFrame)
+    assert predecessors_dict_df[node0].is_empty()
+    assert set(predecessors_dict_df[node1][DEFAULT_ATTR_KEYS.NODE_ID].to_list()) == {node0}
+    assert set(predecessors_dict_df[node2][DEFAULT_ATTR_KEYS.NODE_ID].to_list()) == {node1}
+    assert set(predecessors_dict_df[node3][DEFAULT_ATTR_KEYS.NODE_ID].to_list()) == {node0}
     assert graph_backend.in_degree() == [0, 1, 1, 1]
     # testing different ordering
     assert graph_backend.in_degree([node0, node1, node2, node3]) == [0, 1, 1, 1]
@@ -765,7 +787,10 @@ def test_sucessors_with_attr_keys(graph_backend: BaseGraph) -> None:
     graph_backend.add_edge(node0, node2, {"weight": 0.7})
 
     # Test with single attribute key as string
-    successors_df = graph_backend.successors(node0, attr_keys="x")
+    successors_ids = graph_backend.successors(node0)
+    assert isinstance(successors_ids, list)
+
+    successors_df = graph_backend.successors(node0, attr_keys="x", return_attrs=True)
     assert isinstance(successors_df, pl.DataFrame)
     assert "x" in successors_df.columns
     assert "y" not in successors_df.columns
@@ -776,7 +801,7 @@ def test_sucessors_with_attr_keys(graph_backend: BaseGraph) -> None:
     assert "x" in available_cols
 
     # Test with multiple attribute keys as list
-    successors_df = graph_backend.successors(node0, attr_keys=["x", "label"])
+    successors_df = graph_backend.successors(node0, attr_keys=["x", "label"], return_attrs=True)
     assert isinstance(successors_df, pl.DataFrame)
     assert "x" in successors_df.columns
     assert "label" in successors_df.columns
@@ -809,14 +834,17 @@ def test_predecessors_with_attr_keys(graph_backend: BaseGraph) -> None:
     graph_backend.add_edge(node1, node2, {"weight": 0.7})
 
     # Test with single attribute key as string
-    predecessors_df = graph_backend.predecessors(node2, attr_keys="label")
+    predecessors_ids = graph_backend.predecessors(node2)
+    assert isinstance(predecessors_ids, list)
+
+    predecessors_df = graph_backend.predecessors(node2, attr_keys="label", return_attrs=True)
     assert isinstance(predecessors_df, pl.DataFrame)
     assert "label" in predecessors_df.columns
     assert "y" not in predecessors_df.columns
     assert "x" not in predecessors_df.columns
 
     # Test with multiple attribute keys as list
-    predecessors_df = graph_backend.predecessors(node2, attr_keys=["x", "label"])
+    predecessors_df = graph_backend.predecessors(node2, attr_keys=["x", "label"], return_attrs=True)
     assert isinstance(predecessors_df, pl.DataFrame)
     assert "x" in predecessors_df.columns
     assert "label" in predecessors_df.columns
@@ -842,11 +870,17 @@ def test_sucessors_predecessors_edge_cases(graph_backend: BaseGraph) -> None:
     node1 = graph_backend.add_node({"t": 1, "x": 1.0})
 
     # Test successors/predecessors of isolated nodes
-    successors_df = graph_backend.successors(node0)
+    successors = graph_backend.successors(node0)
+    assert isinstance(successors, list)
+    assert len(successors) == 0
+    successors_df = graph_backend.successors(node0, return_attrs=True)
     assert isinstance(successors_df, pl.DataFrame)
     assert len(successors_df) == 0
 
-    predecessors_df = graph_backend.predecessors(node1)
+    predecessors = graph_backend.predecessors(node1)
+    assert isinstance(predecessors, list)
+    assert len(predecessors) == 0
+    predecessors_df = graph_backend.predecessors(node1, return_attrs=True)
     assert isinstance(predecessors_df, pl.DataFrame)
     assert len(predecessors_df) == 0
 
@@ -862,8 +896,7 @@ def test_sucessors_predecessors_edge_cases(graph_backend: BaseGraph) -> None:
     # Test with non-existent attribute keys (should work but return limited columns)
     # This depends on implementation - some might raise errors, others might ignore
     try:
-        successors_df = graph_backend.successors(node0, attr_keys=["nonexistent"])
-        # If it doesn't raise an error, it should return empty or handle gracefully
+        successors_df = graph_backend.successors(node0, attr_keys=["nonexistent"], return_attrs=True)
         assert isinstance(successors_df, pl.DataFrame)
     except (KeyError, AttributeError):
         # This is also acceptable behavior
@@ -2090,6 +2123,11 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
 
     graph_backend.add_edge_attr_key("weight", 0.0)
 
+    graph_backend.update_metadata(
+        shape=[1, 25, 25],
+        path="path/to/image.ome.zarr",
+    )
+
     node1 = graph_backend.add_node(
         {
             "t": 0,
@@ -2140,6 +2178,12 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
 
     geff_graph, _ = IndexedRXGraph.from_geff(output_store)
 
+    assert "geff" in geff_graph.metadata
+
+    # geff metadata was not stored in original graph
+    geff_graph.metadata.pop("geff")
+    assert geff_graph.metadata == graph_backend.metadata
+
     assert geff_graph.num_nodes == 3
     assert geff_graph.num_edges == 2
 
@@ -2155,6 +2199,52 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
         rx_graph,
         geff_graph.rx_graph,
     )
+
+
+def test_metadata_multiple_dtypes(graph_backend: BaseGraph) -> None:
+    """Test metadata with various datatypes."""
+    # Test basic types, None, nested structures, and numpy arrays
+    test_metadata = {
+        "string": "test_value",
+        "integer": 42,
+        "float": 3.14159,
+        "boolean": True,
+        "none_value": None,
+        "list_simple": [1, 2, 3],
+        "list_nested": [[1, 2], [3, 4], [5, 6]],
+        "dict_simple": {"a": 1, "b": 2},
+        "dict_nested": {"outer": {"inner": [1, 2, 3]}, "value": 42},
+        "mixed_list": [1, "two", 3.0, None, {"key": "value"}],
+        "numpy_list": [1.0, 2.0, 3.0],  # Will be serialized as JSON list
+    }
+
+    # Update metadata with all test values
+    graph_backend.update_metadata(**test_metadata)
+
+    # Retrieve and verify
+    retrieved = graph_backend.metadata
+
+    for key, expected_value in test_metadata.items():
+        assert key in retrieved, f"Key '{key}' not found in metadata"
+        assert retrieved[key] == expected_value, f"Value mismatch for '{key}': {retrieved[key]} != {expected_value}"
+
+    # Test updating existing keys
+    graph_backend.update_metadata(string="updated_value", new_key="new_value")
+    retrieved = graph_backend.metadata
+
+    assert retrieved["string"] == "updated_value"
+    assert retrieved["new_key"] == "new_value"
+    assert retrieved["integer"] == 42  # Other values unchanged
+
+    # Testing removing metadata
+    graph_backend.remove_metadata("string")
+    retrieved = graph_backend.metadata
+    assert "string" not in retrieved
+
+    graph_backend.remove_metadata("mixed_list")
+    retrieved = graph_backend.metadata
+    assert "string" not in retrieved
+    assert "mixed_list" not in retrieved
 
 
 def test_pickle_roundtrip(graph_backend: BaseGraph) -> None:

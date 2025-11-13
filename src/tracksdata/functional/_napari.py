@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, overload
 import polars as pl
 import rustworkx as rx
 
+from tracksdata.array._graph_array import _validate_shape
 from tracksdata.attrs import EdgeAttr, NodeAttr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph._base_graph import BaseGraph
@@ -14,7 +15,7 @@ if TYPE_CHECKING:
 @overload
 def to_napari_format(
     graph: BaseGraph,
-    shape: tuple[int, ...],
+    shape: tuple[int, ...] | None,
     solution_key: str | None,
     output_tracklet_id_key: str,
     mask_key: None,
@@ -24,7 +25,7 @@ def to_napari_format(
 @overload
 def to_napari_format(
     graph: BaseGraph,
-    shape: tuple[int, ...],
+    shape: tuple[int, ...] | None,
     solution_key: str | None,
     output_tracklet_id_key: str,
     mask_key: str,
@@ -33,7 +34,7 @@ def to_napari_format(
 
 def to_napari_format(
     graph: BaseGraph,
-    shape: tuple[int, ...],
+    shape: tuple[int, ...] | None = None,
     solution_key: str | None = DEFAULT_ATTR_KEYS.SOLUTION,
     output_tracklet_id_key: str = DEFAULT_ATTR_KEYS.TRACKLET_ID,
     mask_key: str | None = None,
@@ -64,8 +65,8 @@ def to_napari_format(
     ----------
     graph : BaseGraph
         The graph to convert.
-    shape : tuple[int, ...]
-        The shape of the labels layer.
+    shape : tuple[int, ...] | None, optional
+        The shape of the labels layer. If None, the shape is inferred from the graph metadata `shape` key.
     solution_key : str, optional
         The key of the solution attribute. If None, the graph is not filtered by the solution attribute.
     output_tracklet_id_key : str, optional
@@ -103,6 +104,8 @@ def to_napari_format(
     else:
         solution_graph = graph
 
+    shape = _validate_shape(shape, solution_graph, "to_napari_format")
+
     tracks_graph = solution_graph.assign_tracklet_ids(output_tracklet_id_key)
     dict_graph = {tracks_graph[child]: tracks_graph[parent] for parent, child in tracks_graph.edge_list()}
 
@@ -120,7 +123,7 @@ def to_napari_format(
 
         array_view = GraphArrayView(
             solution_graph,
-            shape,
+            shape=shape,
             attr_key=output_tracklet_id_key,
             chunk_shape=chunk_shape,
             buffer_cache_size=buffer_cache_size,
