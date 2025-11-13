@@ -12,6 +12,7 @@ from tracksdata.graph._mapped_graph_mixin import MappedGraphMixin
 from tracksdata.graph._rustworkx_graph import IndexedRXGraph, RustWorkXGraph, RXFilter
 from tracksdata.graph.filters._indexed_filter import IndexRXFilter
 from tracksdata.utils._logging import LOG
+from tracksdata.utils._signal import is_signal_on
 
 
 class GraphView(RustWorkXGraph, MappedGraphMixin):
@@ -260,31 +261,48 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
         validate_keys: bool = True,
         index: int | None = None,
     ) -> int:
-        parent_node_id = self._root.add_node(
-            attrs=attrs,
-            validate_keys=validate_keys,
-            index=index,
-        )
-
-        if self.sync:
-            node_id = RustWorkXGraph.add_node(
-                self,
+        with self._root.node_added.blocked():
+            parent_node_id = self._root.add_node(
                 attrs=attrs,
                 validate_keys=validate_keys,
+                index=index,
             )
+
+        if self.sync:
+            with self.node_added.blocked():
+                node_id = RustWorkXGraph.add_node(
+                    self,
+                    attrs=attrs,
+                    validate_keys=validate_keys,
+                )
             self._add_id_mapping(node_id, parent_node_id)
         else:
             self._out_of_sync = True
 
+        self._root.node_added.emit_fast(parent_node_id)
+        self.node_added.emit_fast(parent_node_id)
+
         return parent_node_id
 
     def bulk_add_nodes(self, nodes: list[dict[str, Any]], indices: list[int] | None = None) -> list[int]:
-        parent_node_ids = self._root.bulk_add_nodes(nodes, indices=indices)
+        with self._root.node_added.blocked():
+            parent_node_ids = self._root.bulk_add_nodes(nodes, indices=indices)
+
         if self.sync:
-            node_ids = RustWorkXGraph.bulk_add_nodes(self, nodes)
+            with self.node_added.blocked():
+                node_ids = RustWorkXGraph.bulk_add_nodes(self, nodes)
             self._add_id_mappings(list(zip(node_ids, parent_node_ids, strict=True)))
         else:
             self._out_of_sync = True
+
+        if is_signal_on(self._root.node_added):
+            for node_id in parent_node_ids:
+                self._root.node_added.emit_fast(node_id)
+
+        if is_signal_on(self.node_added):
+            for node_id in parent_node_ids:
+                self.node_added.emit_fast(node_id)
+
         return parent_node_ids
 
     def remove_node(self, node_id: int) -> None:
@@ -307,14 +325,16 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
         if node_id not in self._external_to_local:
             raise ValueError(f"Node {node_id} does not exist in the graph.")
 
-        # Remove from root graph first
+        # Remove from root graph first, because removing bounding box requires node attrs
         self._root.remove_node(node_id)
+        self.node_removed.emit_fast(node_id)
 
         if self.sync:
             # Get the local node ID and remove from local graph
             local_node_id = self._external_to_local[node_id]
 
-            super().remove_node(local_node_id)
+            with self.node_removed.blocked():
+                super().remove_node(local_node_id)
 
             # Remove the node mapping
             self._remove_id_mapping(external_id=node_id)

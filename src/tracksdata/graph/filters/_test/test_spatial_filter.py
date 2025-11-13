@@ -1,6 +1,7 @@
+import numpy as np
 import pytest
 
-from tracksdata.graph import RustWorkXGraph
+from tracksdata.graph import BaseGraph, RustWorkXGraph
 from tracksdata.graph.filters._spatial_filter import BBoxSpatialFilter, SpatialFilter
 
 
@@ -229,3 +230,52 @@ def test_bbox_spatial_filter_error_handling() -> None:
     # Test mismatched min/max attributes length
     with pytest.raises(ValueError, match="Bounding box coordinates must have even number of dimensions"):
         BBoxSpatialFilter(graph, frame_attr_key="t", bbox_attr_key="bbox")
+
+
+def test_add_and_remove_node(graph_backend: BaseGraph) -> None:
+    graph_backend.add_node_attr_key("bbox", np.asarray([0, 0, 0, 0]))
+
+    # testing if _node_tree is created in BBoxSpatialFilter when graph is empty
+    _ = BBoxSpatialFilter(graph_backend, frame_attr_key="t", bbox_attr_key="bbox")
+
+    graph_backend.add_node({"t": 0, "bbox": np.asarray([1, 1, 5, 5])})
+    graph_backend.add_node({"t": 1, "bbox": np.asarray([10, 10, 15, 15])})
+
+    # testing it twice, once in the original and then in a trivial graph view
+    for graph in [graph_backend, graph_backend.filter().subgraph()]:
+        assert graph.num_nodes == 2
+
+        spatial_filter = BBoxSpatialFilter(graph, frame_attr_key="t", bbox_attr_key="bbox")
+
+        empty_region = spatial_filter[0:3, 6:9, 6:9].node_attrs()
+        assert empty_region.is_empty()
+
+        new_node_id = graph.add_node({"t": 2, "bbox": np.asarray([7, 7, 8, 8])})
+
+        assert len(spatial_filter._node_rtree) == 3
+
+        result = spatial_filter[0:3, 6:9, 6:9].node_attrs()
+        assert len(result) == 1
+        assert result["t"].item() == 2
+
+        bulk_node_ids = graph.bulk_add_nodes([{"t": 0, "bbox": np.asarray([11, 11, 12, 12])}])
+
+        # narrow bounds in time point to avoid overlaps
+        result = spatial_filter[0:0.5, 11:12, 11:12].node_attrs()
+        assert len(result) == 1
+        assert result["t"].item() == 0
+
+        size = graph.num_nodes
+
+        graph.remove_node(new_node_id)
+
+        assert graph.num_nodes == size - 1
+
+        empty_region = spatial_filter[0:3, 6:9, 6:9].node_attrs()
+        assert empty_region.is_empty()
+
+        # clean up bulk addition for next iteration
+        for node_id in bulk_node_ids:
+            graph.remove_node(node_id)
+
+        assert graph.num_nodes == 2

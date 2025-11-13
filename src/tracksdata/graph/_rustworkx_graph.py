@@ -14,6 +14,7 @@ from tracksdata.graph._mapped_graph_mixin import MappedGraphMixin
 from tracksdata.graph.filters._base_filter import BaseFilter, cache_method
 from tracksdata.utils._dataframe import unpack_array_attrs
 from tracksdata.utils._logging import LOG
+from tracksdata.utils._signal import is_signal_on
 
 if TYPE_CHECKING:
     from tracksdata.graph._graph_view import GraphView
@@ -420,6 +421,7 @@ class RustWorkXGraph(BaseGraph):
 
         node_id = self.rx_graph.add_node(attrs)
         self._time_to_nodes.setdefault(attrs["t"], []).append(node_id)
+        self.node_added.emit_fast(node_id)
         return node_id
 
     def bulk_add_nodes(self, nodes: list[dict[str, Any]], indices: list[int] | None = None) -> list[int]:
@@ -447,6 +449,12 @@ class RustWorkXGraph(BaseGraph):
         node_indices = list(self.rx_graph.add_nodes_from(nodes))
         for node, index in zip(nodes, node_indices, strict=True):
             self._time_to_nodes.setdefault(node["t"], []).append(index)
+
+        # checking if it has connections to reduce overhead
+        if is_signal_on(self.node_added):
+            for node_id in node_indices:
+                self.node_added.emit_fast(node_id)
+
         return node_indices
 
     def remove_node(self, node_id: int) -> None:
@@ -468,6 +476,8 @@ class RustWorkXGraph(BaseGraph):
         """
         if node_id not in self.rx_graph.node_indices():
             raise ValueError(f"Node {node_id} does not exist in the graph.")
+
+        self.node_removed.emit_fast(node_id)
 
         # Get the time value before removing the node
         t = self.rx_graph[node_id]["t"]
@@ -1440,7 +1450,9 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
         int
             The index of the node.
         """
-        node_id = super().add_node(attrs, validate_keys)
+        with self.node_added.blocked():
+            node_id = super().add_node(attrs, validate_keys)
+
         if index is None:
             index = self._get_next_available_external_id()
         else:
@@ -1448,6 +1460,7 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
             self._next_external_id = max(self._next_external_id, index + 1)
         # Add mapping using mixin
         self._add_id_mapping(node_id, index)
+        self.node_added.emit_fast(index)
         return index
 
     def bulk_add_nodes(
@@ -1476,7 +1489,8 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
 
         self._validate_indices_length(nodes, indices)
 
-        graph_ids = super().bulk_add_nodes(nodes)
+        with self.node_added.blocked():
+            graph_ids = super().bulk_add_nodes(nodes)
 
         if indices is None:
             # All nodes get auto-generated indices
@@ -1490,6 +1504,10 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
             self._next_external_id = max(self._next_external_id, max(indices) + 1)
 
         self._add_id_mappings(list(zip(graph_ids, indices, strict=True)))
+
+        if is_signal_on(self.node_added):
+            for index in indices:
+                self.node_added.emit_fast(index)
 
         return indices
 
@@ -1788,7 +1806,11 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
             raise ValueError(f"Node {node_id} does not exist in the graph.")
 
         local_node_id = self._map_to_local(node_id)
-        super().remove_node(local_node_id)
+
+        self.node_removed.emit_fast(node_id)
+        with self.node_removed.blocked():
+            super().remove_node(local_node_id)
+
         self._remove_id_mapping(external_id=node_id)
 
     def filter(
