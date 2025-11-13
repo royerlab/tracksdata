@@ -82,7 +82,9 @@ def _run_benchmark(
 
 def _format_markdown_table(df: pl.DataFrame, output_file: Path | None = None) -> str:
     # Create time string column
-    df = df.with_columns(time_str=pl.format("{} ± {}", pl.col("time_avg").round(3), pl.col("time_std").round(3)))
+    df = df.with_columns(
+        time_str=pl.format("{} ± {}", pl.col("time_avg"), pl.col("time_std")),
+    )
 
     # Pivot the table to get n_nodes as columns
     pivoted = df.pivot(values="time_str", index=["backend", "operation"], on="n_nodes", aggregate_function="first")
@@ -181,8 +183,8 @@ def main() -> None:
 
         df = pl.concat(data)
         df = df.group_by(["backend", "n_nodes", "operation"], maintain_order=True).agg(
-            pl.col("time").std().alias("time_std"),
-            pl.col("time").mean().alias("time_avg"),
+            pl.col("time").std().round(3).alias("time_std"),
+            pl.col("time").mean().round(3).alias("time_avg"),
         )
 
         file_path = Path(__file__)
