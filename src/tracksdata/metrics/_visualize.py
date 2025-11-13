@@ -23,6 +23,7 @@ def _vector_kwargs_defaults(vector_kwargs: dict | None) -> dict:
     default_kwargs = {
         "edge_width": 3,
         "vector_style": "arrow",
+        "blending": "translucent_no_depth",
     }
     for key, value in default_kwargs.items():
         if key not in vector_kwargs:
@@ -48,6 +49,7 @@ def _points_kwargs_defaults(points_kwargs: dict | None) -> dict:
         "border_color": "yellow",
         "border_color_cycle": color_cycle,
         "size": 20,
+        "blending": "translucent_no_depth",
     }
     for key, value in default_kwargs.items():
         if key not in points_kwargs:

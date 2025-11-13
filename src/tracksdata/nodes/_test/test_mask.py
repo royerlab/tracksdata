@@ -1,6 +1,7 @@
 import numpy as np
+import pytest
 
-from tracksdata.nodes._mask import Mask
+from tracksdata.nodes._mask import Mask, _nd_sphere
 
 
 def test_mask_init() -> None:
@@ -193,6 +194,60 @@ def test_mask_iou_identical() -> None:
     assert iou == 1.0
 
 
+def test_mask_union_dimension_mismatch() -> None:
+    """Mask union should raise when masks do not share the same dimensionality."""
+    mask_2d = Mask(np.ones((1, 2), dtype=bool), np.array([0, 0, 1, 2]))
+    mask_3d = Mask(np.ones((1, 1, 2), dtype=bool), np.array([0, 0, 0, 1, 1, 2]))
+
+    with pytest.raises(ValueError, match=r"Cannot compute union between masks of different dimensions: 2 and 3."):
+        _ = mask_2d | mask_3d
+
+
+def test_mask_union_overlapping() -> None:
+    """Mask union should merge overlapping masks into a single bounding box."""
+    mask1_array = np.array([[True, True], [False, False]], dtype=bool)
+    mask2_array = np.array([[False, True], [True, True]], dtype=bool)
+
+    mask1 = Mask(mask1_array, np.array([0, 0, 2, 2]))
+    mask2 = Mask(mask2_array, np.array([1, 1, 3, 3]))
+
+    union = mask1 | mask2
+
+    expected_bbox = np.array([0, 0, 3, 3])
+    expected_mask = np.array(
+        [
+            [True, True, False],
+            [False, False, True],
+            [False, True, True],
+        ],
+        dtype=bool,
+    )
+
+    assert np.array_equal(union.bbox, expected_bbox)
+    assert np.array_equal(union.mask, expected_mask)
+
+
+def test_mask_union_disjoint() -> None:
+    """Mask union should include both masks even when disjoint."""
+    mask1_array = np.array([[True, True], [True, True]], dtype=bool)
+    mask2_array = np.array([[True, False], [False, False]], dtype=bool)
+
+    mask1 = Mask(mask1_array, np.array([0, 0, 2, 2]))
+    mask2 = Mask(mask2_array, np.array([3, 3, 5, 5]))
+
+    union = mask1 | mask2
+    reverse_union = mask2 | mask1
+
+    expected_bbox = np.array([0, 0, 5, 5])
+    expected_mask = np.zeros((5, 5), dtype=bool)
+    expected_mask[:2, :2] = True
+    expected_mask[3, 3] = True
+
+    assert np.array_equal(union.bbox, expected_bbox)
+    assert np.array_equal(union.mask, expected_mask)
+    assert union == reverse_union
+
+
 def test_mask_empty() -> None:
     """Test mask with no True values."""
     mask_array = np.array([[False, False], [False, False]], dtype=bool)
@@ -253,6 +308,11 @@ def test_mask_crop_with_shape() -> None:
     image = np.array([[0, 0, 0, 0], [0, 1, 2, 0], [0, 3, 4, 0], [0, 0, 0, 0]])
     cropped_image = mask.crop(image, shape=(2, 4))
     assert np.array_equal(cropped_image, image[1:3, 0:4])
+    assert cropped_image.shape == (2, 4)
+
+    cropped_image = mask.crop(image, shape=(1, 4))
+    assert np.array_equal(cropped_image, image[2:3, 0:4])
+    assert cropped_image.shape == (1, 4)
 
 
 def test_mask_from_coordinates_2d_basic() -> None:
@@ -291,3 +351,102 @@ def test_mask_from_coordinates_cropping() -> None:
 
     # Mask should be cropped to fit within image bounds
     np.testing.assert_array_equal(mask.bbox, [0, 0, 4, 3])
+
+
+def test_mask_simple_difference() -> None:
+    """Test mask difference."""
+    mask1_array = np.asarray([[[True, True], [True, False]]], dtype=bool)
+    mask2_array = np.asarray([[[True, False], [True, True]]], dtype=bool)
+
+    mask1 = Mask(mask1_array, np.asarray([0, 0, 0, 1, 2, 2]))
+    mask2 = Mask(mask2_array, np.asarray([0, 0, 0, 1, 2, 2]))
+
+    mask1 -= mask2
+    np.testing.assert_array_equal(mask1.mask, np.asarray([[[False, True], [False, False]]], dtype=bool))
+    np.testing.assert_array_equal(mask1.bbox, np.asarray([0, 0, 0, 1, 2, 2]))
+
+
+def test_mask_difference_no_overlap() -> None:
+    """Test mask difference with no overlap."""
+    mask1_array = np.asarray([[[True, True], [True, False]]], dtype=bool)
+    mask2_array = np.asarray([[[False, False], [False, True]]], dtype=bool)
+
+    mask1 = Mask(mask1_array, np.asarray([0, 0, 0, 1, 2, 2]))
+    mask2 = Mask(mask2_array, np.asarray([0, 0, 0, 1, 2, 2]))
+
+    mask1 -= mask2
+    np.testing.assert_array_equal(mask1.mask, mask1_array)
+    np.testing.assert_array_equal(mask1.bbox, np.asarray([0, 0, 0, 1, 2, 2]))
+
+
+def test_mask_difference_complex_overlap() -> None:
+    mask1_array = np.asarray([[[True, True], [True, True]]], dtype=bool)
+    mask2_array = np.asarray([[[True, True], [True, True]]], dtype=bool)
+
+    mask1 = Mask(mask1_array.copy(), np.asarray([1, 3, 3, 2, 5, 5]))
+    mask2 = Mask(mask2_array, np.asarray([1, 4, 4, 2, 6, 6]))
+
+    mask1 -= mask2
+    np.testing.assert_array_equal(mask1.mask, np.asarray([[[True, True], [True, False]]], dtype=bool))
+    np.testing.assert_array_equal(mask1.bbox, np.asarray([1, 3, 3, 2, 5, 5]))
+
+    # identical to mask1 checking reverse overlap
+    mask3 = Mask(mask1_array, np.asarray([1, 3, 3, 2, 5, 5]))
+    mask2 -= mask3
+
+    np.testing.assert_array_equal(mask2.mask, np.asarray([[[False, True], [True, True]]], dtype=bool))
+    np.testing.assert_array_equal(mask2.bbox, np.asarray([1, 4, 4, 2, 6, 6]))
+
+
+def test_dilation_simple() -> None:
+    point = np.asarray([[True]])
+    bbox = np.asarray([5, 5, 6, 6])
+    mask = Mask(mask=point, bbox=bbox)
+
+    mask.dilate(radius=2)
+
+    np.testing.assert_array_equal(mask.bbox, [3, 3, 8, 8])
+    np.testing.assert_array_equal(
+        mask.mask,
+        _nd_sphere(2, 2),
+    )
+
+
+def test_dilation_on_border() -> None:
+    point = np.asarray([[True]])
+    bbox = np.asarray([0, 0, 1, 1])
+
+    # left overhang
+    mask = Mask(mask=point, bbox=bbox)
+    mask.dilate(radius=2, image_shape=(7, 7))
+
+    np.testing.assert_array_equal(mask.bbox, [0, 0, 3, 3])
+    np.testing.assert_array_equal(
+        mask.mask,
+        _nd_sphere(2, 2)[2:, 2:],
+    )
+
+    bbox = np.asarray([6, 6, 7, 7])
+    mask = Mask(mask=point, bbox=bbox)
+
+    # right overhang
+    mask.dilate(radius=2, image_shape=(7, 7))
+    np.testing.assert_array_equal(mask.bbox, [4, 4, 7, 7])
+    np.testing.assert_array_equal(
+        mask.mask,
+        _nd_sphere(2, 2)[:-2, :-2],
+    )
+
+
+def test_mask_move() -> None:
+    point = np.asarray([[True]])
+    bbox = np.asarray([0, 0, 1, 1])
+    mask = Mask(mask=point, bbox=bbox)
+
+    mask.move(offset=np.asarray([5, 2]), image_shape=(7, 7))
+    np.testing.assert_array_equal(mask.bbox, [5, 2, 6, 3])
+    np.testing.assert_array_equal(mask.mask, point)
+
+    mask.move(offset=np.asarray([-3, 2]), image_shape=(7, 7))
+    np.testing.assert_array_equal(mask.bbox, [2, 4, 3, 5])
+    np.testing.assert_array_equal(mask.mask, point)

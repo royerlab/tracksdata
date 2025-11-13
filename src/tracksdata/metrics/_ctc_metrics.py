@@ -1,9 +1,9 @@
+from functools import partial
 from typing import TYPE_CHECKING
 
 import numpy as np
 import polars as pl
 import scipy.sparse as sp
-from toolz import curry
 
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.io._ctc import compressed_tracks_table
@@ -15,6 +15,19 @@ from tracksdata.utils._multiprocessing import multiprocessing_apply
 if TYPE_CHECKING:
     from tracksdata.graph import RustWorkXGraph
     from tracksdata.graph._base_graph import BaseGraph
+
+
+def _fill_empty(weights: sp.csr_array, eps: float = 1e-10) -> None:
+    """
+    Fill empty rows and columns of a sparse matrix with a small value.
+    """
+    empty_rows = weights.sum(axis=1) == 0
+    if empty_rows.any():
+        weights[empty_rows, :] = eps
+
+    empty_cols = weights.sum(axis=0) == 0
+    if empty_cols.any():
+        weights[:, empty_cols] = eps
 
 
 def _match_single_frame(
@@ -90,7 +103,12 @@ def _match_single_frame(
         LOG.info("Solving optimal matching ...")
 
         weights = sp.csr_array((_ious, (_rows, _cols)), dtype=np.float32)
-        rows_id, cols_id = sp.csgraph.min_weight_full_bipartite_matching(weights, maximize=True)
+
+        try:
+            rows_id, cols_id = sp.csgraph.min_weight_full_bipartite_matching(weights, maximize=True)
+        except ValueError:
+            _fill_empty(weights)
+            rows_id, cols_id = sp.csgraph.min_weight_full_bipartite_matching(weights, maximize=True)
 
         # loading original group ids and filtering by the matches
         _mapped_ref = ref_group[reference_graph_key][rows_id].to_list()
@@ -146,18 +164,18 @@ def _matching_data(
     n_workers = get_options().n_workers
 
     # computing unique labels for each graph
-    for name, graph, track_id_key in [
+    for name, graph, tracklet_id_key in [
         ("ref", reference_graph, reference_graph_key),
         ("comp", input_graph, input_graph_key),
     ]:
-        nodes_df = graph.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.T, track_id_key, DEFAULT_ATTR_KEYS.MASK])
+        nodes_df = graph.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.T, tracklet_id_key, DEFAULT_ATTR_KEYS.MASK])
         if n_workers > 1:
             # required by multiprocessing
             nodes_df = column_to_bytes(nodes_df, DEFAULT_ATTR_KEYS.MASK)
         labels = {}
 
         for (t,), group in nodes_df.group_by(DEFAULT_ATTR_KEYS.T):
-            labels[t] = group[track_id_key].sort().to_list()
+            labels[t] = group[tracklet_id_key].sort().to_list()
             # storing masks of each frame
             groups_by_time[name][t] = group
 
@@ -181,7 +199,7 @@ def _matching_data(
     mapped_comp = []
     ious = []
 
-    match_func = curry(
+    match_func = partial(
         _match_single_frame,
         groups_by_time=groups_by_time,
         reference_graph_key=reference_graph_key,
@@ -210,8 +228,8 @@ def _matching_data(
 def compute_ctc_metrics_data(
     input_graph: "BaseGraph",
     reference_graph: "BaseGraph",
-    input_track_id_key: str,
-    reference_track_id_key: str,
+    input_tracklet_id_key: str,
+    reference_tracklet_id_key: str,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, list[list]]]:
     """
     Compute intermediate data required for CTC metrics.
@@ -224,18 +242,18 @@ def compute_ctc_metrics_data(
         Input graph.
     reference_graph : RustWorkXGraph
         Reference graph.
-    input_track_id_key : str
+    input_tracklet_id_key : str
         Key to obtain the track id from the input graph.
-    reference_track_id_key : str
+    reference_tracklet_id_key : str
         Key to obtain the track id from the reference graph.
 
     Returns
     -------
     tuple[np.ndarray, np.ndarray, dict[str, list], dict[str, list], list[str]]
         - input_tracks:
-            (n, 4) array with reprensenting the (track_id, start_frame, end_frame, parent_track_id) of each track
+            (n, 4) array with reprensenting the (tracklet_id, start_frame, end_frame, parent_tracklet_id) of each track
         - reference_tracks:
-            (n, 4) array with reprensenting the (track_id, start_frame, end_frame, parent_track_id) of each track
+            (n, 4) array with reprensenting the (tracklet_id, start_frame, end_frame, parent_tracklet_id) of each track
         - matching_data: Frame-wise matching data, defined as a dict with the following keys:
             - labels_ref: A list of lists containing the labels of the reference masks.
             - labels_comp: A list of lists containing the labels of the computed masks.
@@ -247,7 +265,7 @@ def compute_ctc_metrics_data(
     input_tracks = compressed_tracks_table(input_graph)
     reference_tracks = compressed_tracks_table(reference_graph)
 
-    matching_data = _matching_data(input_graph, reference_graph, input_track_id_key, reference_track_id_key)
+    matching_data = _matching_data(input_graph, reference_graph, input_tracklet_id_key, reference_tracklet_id_key)
 
     return input_tracks, reference_tracks, matching_data
 
@@ -255,8 +273,8 @@ def compute_ctc_metrics_data(
 def evaluate_ctc_metrics(
     input_graph: "RustWorkXGraph",
     reference_graph: "RustWorkXGraph",
-    input_track_id_key: str = DEFAULT_ATTR_KEYS.TRACK_ID,
-    reference_track_id_key: str = DEFAULT_ATTR_KEYS.TRACK_ID,
+    input_tracklet_id_key: str = DEFAULT_ATTR_KEYS.TRACKLET_ID,
+    reference_tracklet_id_key: str = DEFAULT_ATTR_KEYS.TRACKLET_ID,
     input_reset: bool = True,
     reference_reset: bool = False,
     metrics: list[str] | None = None,
@@ -275,10 +293,10 @@ def evaluate_ctc_metrics(
         Input graph.
     reference_graph : RustWorkXGraph
         Reference graph.
-    input_track_id_key : str, optional
+    input_tracklet_id_key : str, optional
         Key to obtain the track id from the input graph.
         If key does not exist, it will be created.
-    reference_track_id_key : str, optional
+    reference_tracklet_id_key : str, optional
         Key to obtain the track id from the reference graph.
         If key does not exist, it will be created.
     input_reset : bool, optional
@@ -314,14 +332,14 @@ def evaluate_ctc_metrics(
         LOG.warning("Input graph has no nodes, returning -1.0 for all metrics.")
         return dict.fromkeys(metrics, -1.0)
 
-    if input_track_id_key not in input_graph.node_attr_keys:
-        input_graph.assign_track_ids(input_track_id_key, reset=input_reset)
+    if input_tracklet_id_key not in input_graph.node_attr_keys:
+        input_graph.assign_tracklet_ids(input_tracklet_id_key, reset=input_reset)
 
-    if reference_track_id_key not in reference_graph.node_attr_keys:
-        reference_graph.assign_track_ids(reference_track_id_key, reset=reference_reset)
+    if reference_tracklet_id_key not in reference_graph.node_attr_keys:
+        reference_graph.assign_tracklet_ids(reference_tracklet_id_key, reset=reference_reset)
 
     input_tracks, reference_tracks, matching_data = compute_ctc_metrics_data(
-        input_graph, reference_graph, input_track_id_key, reference_track_id_key
+        input_graph, reference_graph, input_tracklet_id_key, reference_tracklet_id_key
     )
 
     results = calculate_metrics(

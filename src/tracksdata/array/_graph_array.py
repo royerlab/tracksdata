@@ -126,7 +126,7 @@ class GraphArrayView(BaseReadOnlyArray):
         self,
         graph: BaseGraph,
         shape: tuple[int, ...],
-        attr_key: str = DEFAULT_ATTR_KEYS.BBOX,
+        attr_key: str,
         offset: int | np.ndarray = 0,
         chunk_shape: tuple[int, ...] | int | None = None,
         buffer_cache_size: int | None = None,
@@ -146,7 +146,10 @@ class GraphArrayView(BaseReadOnlyArray):
             if df.is_empty():
                 dtype = get_options().gav_default_dtype
             else:
-                dtype = polars_dtype_to_numpy_dtype(df[self._attr_key].dtype)
+                try:
+                    dtype = polars_dtype_to_numpy_dtype(df[self._attr_key].dtype, allow_sequence=False)
+                except ValueError as e:
+                    raise ValueError(f"Attribute values for key '{self._attr_key}' must be scalar.") from e
                 # napari support for bool is limited
                 if np.issubdtype(dtype, bool):
                     dtype = np.uint8
@@ -183,6 +186,11 @@ class GraphArrayView(BaseReadOnlyArray):
 
         shape = [_get_size(ind, os) for ind, os in zip(self._indices, self.original_shape, strict=True)]
         return tuple(s for s in shape if s is not None)
+
+    @property
+    def size(self) -> int:
+        """Returns the total number of elements in the array."""
+        return int(np.prod(self.shape))
 
     @property
     def ndim(self) -> int:

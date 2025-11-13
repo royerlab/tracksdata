@@ -1086,6 +1086,54 @@ def test_remove_node_updates_time_points(graph_backend: BaseGraph, use_subgraph:
         assert len(final_time_points) == len(initial_time_points) - 1
 
 
+def test_graph_view_remove_edge(graph_backend: BaseGraph) -> None:
+    """Ensure GraphView.remove_edge updates both the view and the root graph.
+
+    Tests removal by endpoints and by edge_id with the view in sync mode.
+    """
+    # Setup root graph with attributes
+    graph_backend.add_node_attr_key("x", None)
+    graph_backend.add_edge_attr_key("weight", 0.0)
+
+    # Nodes and edges
+    n0 = graph_backend.add_node({"t": 0, "x": 0.0})
+    n1 = graph_backend.add_node({"t": 1, "x": 1.0})
+    n2 = graph_backend.add_node({"t": 2, "x": 2.0})
+
+    graph_backend.add_edge(n0, n1, {"weight": 0.2})
+    graph_backend.add_edge(n1, n2, {"weight": 0.8})
+
+    # Create a view containing nodes t <= 1 (n0, n1) which includes edge n0->n1
+    view = graph_backend.filter(NodeAttr("t") <= 1).subgraph()
+    assert isinstance(view, GraphView)
+
+    # Sanity: edge present in both root and view
+    assert graph_backend.has_edge(n0, n1)
+    assert view.has_edge(n0, n1)
+
+    # Remove by endpoints in the view
+    view.remove_edge(n0, n1)
+    assert not graph_backend.has_edge(n0, n1)
+    assert not view.has_edge(n0, n1)
+
+    # Re-add in the view (which syncs to root) and get the edge id from the view
+    view.add_edge(n0, n1, {"weight": 0.9})
+    vid = view.edge_attrs()[DEFAULT_ATTR_KEYS.EDGE_ID].to_list()[0]
+
+    # Remove by edge_id via the view
+    view.remove_edge(edge_id=vid)
+    assert not view.has_edge(n0, n1)
+    assert not graph_backend.has_edge(n0, n1)
+
+    # Removing a non-existent edge via the view raises
+    with pytest.raises(ValueError, match=rf"Edge {n0}->{n1} does not exist in the graph\."):
+        view.remove_edge(n0, n1)
+    with pytest.raises(ValueError, match=rf"Edge {vid} does not exist in the graph\."):
+        view.remove_edge(edge_id=vid)
+    with pytest.raises(ValueError, match=r"Provide either edge_id or both source_id and target_id\."):
+        view.remove_edge()
+
+
 @parametrize_subgraph_tests
 def test_has_edge(graph_backend: BaseGraph, use_subgraph: bool) -> None:
     """Test has_edge functionality on both original graphs and subgraphs."""

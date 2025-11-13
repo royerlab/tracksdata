@@ -14,14 +14,14 @@ def test_export_from_ctc_roundtrip(tmp_path: Path):
 
     in_graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
     in_graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
-    in_graph.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACK_ID, -1)
+    in_graph.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACKLET_ID, -1)
     in_graph.add_node_attr_key("x", -999_999)
     in_graph.add_node_attr_key("y", -999_999)
 
     node_1 = in_graph.add_node(
         attrs={
             DEFAULT_ATTR_KEYS.T: 0,
-            DEFAULT_ATTR_KEYS.TRACK_ID: 1,
+            DEFAULT_ATTR_KEYS.TRACKLET_ID: 1,
             "x": 0,
             "y": 0,
             DEFAULT_ATTR_KEYS.MASK: Mask(
@@ -35,7 +35,7 @@ def test_export_from_ctc_roundtrip(tmp_path: Path):
     node_2 = in_graph.add_node(
         attrs={
             DEFAULT_ATTR_KEYS.T: 1,
-            DEFAULT_ATTR_KEYS.TRACK_ID: 2,
+            DEFAULT_ATTR_KEYS.TRACKLET_ID: 2,
             "x": 1,
             "y": 1,
             DEFAULT_ATTR_KEYS.MASK: Mask(
@@ -49,7 +49,7 @@ def test_export_from_ctc_roundtrip(tmp_path: Path):
     node_3 = in_graph.add_node(
         attrs={
             DEFAULT_ATTR_KEYS.T: 1,
-            DEFAULT_ATTR_KEYS.TRACK_ID: 3,
+            DEFAULT_ATTR_KEYS.TRACKLET_ID: 3,
             "x": 2,
             "y": 2,
             DEFAULT_ATTR_KEYS.MASK: Mask(
@@ -71,7 +71,7 @@ def test_export_from_ctc_roundtrip(tmp_path: Path):
     assert out_graph.num_nodes == in_graph.num_nodes
     assert out_graph.num_edges == in_graph.num_edges
 
-    in_attrs = in_graph.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.T, DEFAULT_ATTR_KEYS.TRACK_ID])
-    out_attrs = out_graph.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.T, DEFAULT_ATTR_KEYS.TRACK_ID])
+    in_attrs = in_graph.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.T, DEFAULT_ATTR_KEYS.TRACKLET_ID])
+    out_attrs = out_graph.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.T, DEFAULT_ATTR_KEYS.TRACKLET_ID])
 
     assert in_attrs.equals(out_attrs)

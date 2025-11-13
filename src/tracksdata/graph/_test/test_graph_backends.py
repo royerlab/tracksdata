@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 import cloudpickle
 import numpy as np
@@ -9,8 +10,9 @@ from zarr.storage import MemoryStore
 
 from tracksdata.attrs import EdgeAttr, NodeAttr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
-from tracksdata.graph import BaseGraph, RustWorkXGraph, SQLGraph
+from tracksdata.graph import BaseGraph, IndexedRXGraph, RustWorkXGraph, SQLGraph
 from tracksdata.io._numpy_array import from_array
+from tracksdata.nodes import RegionPropsNodes
 from tracksdata.nodes._mask import Mask
 
 
@@ -104,6 +106,73 @@ def test_add_edge(graph_backend: BaseGraph) -> None:
     assert df["weight"].to_list() == [0.5, 0.1]
 
 
+def test_remove_edge_by_id(graph_backend: BaseGraph) -> None:
+    """Test removing an edge by ID across backends using unified API."""
+    # Setup
+    graph_backend.add_node_attr_key("x", None)
+    graph_backend.add_edge_attr_key("weight", 0.0)
+
+    n1 = graph_backend.add_node({"t": 0, "x": 1.0})
+    n2 = graph_backend.add_node({"t": 1, "x": 2.0})
+    n3 = graph_backend.add_node({"t": 2, "x": 3.0})
+
+    e1 = graph_backend.add_edge(n1, n2, {"weight": 0.5})
+    e2 = graph_backend.add_edge(n2, n3, {"weight": 0.7})
+
+    assert graph_backend.num_edges == 2
+    assert graph_backend.has_edge(n1, n2)
+    assert graph_backend.has_edge(n2, n3)
+
+    # Delete first edge
+    graph_backend.remove_edge(edge_id=e1)
+    assert graph_backend.num_edges == 1
+    assert not graph_backend.has_edge(n1, n2)
+    assert graph_backend.has_edge(n2, n3)
+
+    remaining_ids = set(graph_backend.edge_ids())
+    assert e1 not in remaining_ids
+    assert e2 in remaining_ids
+
+    # Delete non-existing edge should raise
+    with pytest.raises(ValueError, match=rf"Edge {e1} does not exist in the graph\."):
+        graph_backend.remove_edge(edge_id=e1)
+
+    with pytest.raises(ValueError, match=r"Edge 999999 does not exist in the graph\."):
+        graph_backend.remove_edge(edge_id=999999)
+
+    with pytest.raises(ValueError, match=r"Provide either edge_id or both source_id and target_id\."):
+        graph_backend.remove_edge()
+
+
+def test_remove_edge_by_nodes(graph_backend: BaseGraph) -> None:
+    """Test removing an edge by its source/target IDs."""
+    graph_backend.add_node_attr_key("x", None)
+    graph_backend.add_edge_attr_key("weight", 0.0)
+
+    a = graph_backend.add_node({"t": 0, "x": 0.0})
+    b = graph_backend.add_node({"t": 1, "x": 1.0})
+    c = graph_backend.add_node({"t": 2, "x": 2.0})
+
+    graph_backend.add_edge(a, b, {"weight": 0.2})
+    graph_backend.add_edge(b, c, {"weight": 0.8})
+
+    assert graph_backend.has_edge(a, b)
+    assert graph_backend.has_edge(b, c)
+
+    # Remove a->b
+    graph_backend.remove_edge(a, b)
+    assert not graph_backend.has_edge(a, b)
+    assert graph_backend.has_edge(b, c)
+
+    # Removing again should raise
+    with pytest.raises(ValueError, match=rf"Edge {a}->{b} does not exist in the graph\."):
+        graph_backend.remove_edge(a, b)
+
+    # Removing non-existent pair should raise
+    with pytest.raises(ValueError, match=rf"Edge {a}->{c} does not exist in the graph\."):
+        graph_backend.remove_edge(a, c)
+
+
 def test_node_ids(graph_backend: BaseGraph) -> None:
     """Test retrieving node IDs."""
     graph_backend.add_node({"t": 0})
@@ -139,6 +208,19 @@ def test_filter_nodes_by_attribute(graph_backend: BaseGraph) -> None:
     # Test with multiple conditions using *args for AND
     nodes = graph_backend.filter(NodeAttr("t") == 0, NodeAttr("label") == "A").node_ids()
     assert set(nodes) == {node1}
+
+
+def test_filter_nodes_by_membership(graph_backend: BaseGraph) -> None:
+    """Test filtering nodes using membership comparisons."""
+    node_a = graph_backend.add_node({"t": 0})
+    node_b = graph_backend.add_node({"t": 1})
+    node_c = graph_backend.add_node({"t": 2})
+
+    members = graph_backend.filter(NodeAttr("t").is_in([0, 2])).node_ids()
+    assert set(members) == {node_a, node_c}
+
+    np_members = graph_backend.filter(NodeAttr("t").is_in(np.array([1], dtype=np.int64))).node_ids()
+    assert set(np_members) == {node_b}
 
 
 def test_time_points(graph_backend: BaseGraph) -> None:
@@ -324,13 +406,31 @@ def test_subgraph_with_node_ids_and_filters(graph_backend: BaseGraph) -> None:
     assert len(subgraph_edge_ids) == 0
 
 
-def test_add_node_attr_key(graph_backend: BaseGraph) -> None:
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param(42, id="int-42"),
+        pytest.param(3.14, id="float-3.14"),
+        pytest.param("test_string", id="str-test_string"),
+        pytest.param(np.array([1, 2, 3]), id="ndarray-1d"),
+        pytest.param(np.array([[1.0, 2.0], [3.0, 4.0]]), id="ndarray-2d"),
+        pytest.param(Mask(mask=np.array([[True, False], [False, True]]), bbox=(0, 0, 2, 2)), id="mask"),
+        pytest.param(True, id="bool-True"),
+        pytest.param(False, id="bool-False"),
+    ],
+)
+def test_add_node_attr_key(graph_backend: BaseGraph, value) -> None:
     """Test adding new node attribute keys."""
     node = graph_backend.add_node({"t": 0})
-    graph_backend.add_node_attr_key("new_attribute", 42)
+    graph_backend.add_node_attr_key("new_attribute", value)
 
     df = graph_backend.filter(node_ids=[node]).node_attrs(attr_keys=["new_attribute"])
-    assert df["new_attribute"].to_list() == [42]
+    assert len(df) == 1
+    new_attr_value = df["new_attribute"].to_list()[0]
+    if isinstance(value, np.ndarray):
+        np.testing.assert_array_equal(new_attr_value, value)
+    else:
+        assert new_attr_value == value
 
 
 def test_add_edge_attr_key(graph_backend: BaseGraph) -> None:
@@ -1048,7 +1148,7 @@ def test_from_numpy_array_basic(graph_backend: BaseGraph) -> None:
         from_array(positions, graph_backend)
 
     assert graph_backend.num_nodes == 3
-    assert graph_backend.num_edges == 0  # No track_ids, so no edges
+    assert graph_backend.num_edges == 0  # No tracklet_ids, so no edges
 
     # Check node attributes
     nodes_df = graph_backend.node_attrs(attr_keys=["t", "y", "x"])
@@ -1067,23 +1167,23 @@ def test_from_numpy_array_3d(graph_backend: BaseGraph) -> None:
         ]
     )
 
-    track_ids = np.asarray([1, 2, 3])
-    track_id_graph = {3: 1, 2: 1}
+    tracklet_ids = np.asarray([1, 2, 3])
+    tracklet_id_graph = {3: 1, 2: 1}
 
     if isinstance(graph_backend, RustWorkXGraph):
         # for RustWorkXGraph we validate if the OOP API is working
         graph_backend = RustWorkXGraph.from_array(
             positions,
-            track_ids=track_ids,
-            track_id_graph=track_id_graph,
+            tracklet_ids=tracklet_ids,
+            tracklet_id_graph=tracklet_id_graph,
             rx_graph=None,
         )
     else:
         from_array(
             positions,
             graph_backend,
-            track_ids=track_ids,
-            track_id_graph=track_id_graph,
+            tracklet_ids=tracklet_ids,
+            tracklet_id_graph=tracklet_id_graph,
         )
 
     assert graph_backend.num_nodes == 3
@@ -1100,7 +1200,7 @@ def test_from_numpy_array_3d(graph_backend: BaseGraph) -> None:
     assert [node_ids[0], node_ids[2]] in edges
 
     np.testing.assert_array_equal(nodes_df.select(["t", "z", "y", "x"]).to_numpy(), positions)
-    np.testing.assert_array_equal(nodes_df[DEFAULT_ATTR_KEYS.TRACK_ID].to_list(), track_ids)
+    np.testing.assert_array_equal(nodes_df[DEFAULT_ATTR_KEYS.TRACKLET_ID].to_list(), tracklet_ids)
 
 
 def test_from_numpy_array_validation_errors() -> None:
@@ -1112,18 +1212,38 @@ def test_from_numpy_array_validation_errors() -> None:
 
     positions = np.array([[0, 10, 20], [1, 15, 25]])
 
-    # Test track_id_graph without track_ids
+    # Test tracklet_id_graph without tracklet_ids
     with pytest.raises(ValueError, match="must be provided if"):
-        RustWorkXGraph.from_array(positions, track_id_graph={2: 1})
+        RustWorkXGraph.from_array(positions, tracklet_id_graph={2: 1})
 
-    # Test track_ids length mismatch
-    track_ids = np.array([1, 2, 3])  # Length 3, positions length 2
+    # Test tracklet_ids length mismatch
+    tracklet_ids = np.array([1, 2, 3])  # Length 3, positions length 2
     with pytest.raises(ValueError, match="must have the same length"):
-        RustWorkXGraph.from_array(positions, track_ids=track_ids)
+        RustWorkXGraph.from_array(positions, tracklet_ids=tracklet_ids)
 
 
-def test_from_other_with_edges(graph_backend: BaseGraph) -> None:
-    """Test from_other method with edges and edge attributes."""
+@pytest.mark.parametrize(
+    ("target_cls", "target_kwargs"),
+    [
+        pytest.param(RustWorkXGraph, {}, id="rustworkx"),
+        pytest.param(
+            SQLGraph,
+            {
+                "drivername": "sqlite",
+                "database": ":memory:",
+                "engine_kwargs": {"connect_args": {"check_same_thread": False}},
+            },
+            id="sql",
+        ),
+        pytest.param(IndexedRXGraph, {}, id="indexed"),
+    ],
+)
+def test_from_other_with_edges(
+    graph_backend: BaseGraph,
+    target_cls: type[BaseGraph],
+    target_kwargs: dict[str, Any],
+) -> None:
+    """Ensure from_other preserves structure across backend conversions."""
     # Create source graph with nodes, edges, and attributes
     graph_backend.add_node_attr_key("x", 0.0)
     graph_backend.add_edge_attr_key("weight", 0.0)
@@ -1139,11 +1259,16 @@ def test_from_other_with_edges(graph_backend: BaseGraph) -> None:
 
     graph_backend.add_overlap(node1, node3)
 
-    new_graph = RustWorkXGraph.from_other(graph_backend)
+    new_graph = target_cls.from_other(graph_backend, **target_kwargs)
 
     # Verify the new graph has the same structure
-    assert new_graph.num_nodes == 3
-    assert new_graph.num_edges == 3
+    assert isinstance(new_graph, target_cls)
+    assert new_graph.num_nodes == graph_backend.num_nodes
+    assert new_graph.num_edges == graph_backend.num_edges
+
+    # Verify node and edge attribute keys are copied
+    assert set(new_graph.node_attr_keys) == set(graph_backend.node_attr_keys)
+    assert set(new_graph.edge_attr_keys) == set(graph_backend.edge_attr_keys)
 
     # Verify edge attributes are copied correctly
     source_edges = graph_backend.edge_attrs(attr_keys=["weight", "type"])
@@ -1158,8 +1283,20 @@ def test_from_other_with_edges(graph_backend: BaseGraph) -> None:
 
     assert source_sorted.select(["weight", "type"]).equals(new_sorted.select(["weight", "type"]))
 
-    # Verify attribute keys are preserved
-    assert set(new_graph.edge_attr_keys) == set(graph_backend.edge_attr_keys)
+    # Build a mapping from source to new node IDs using unique node attributes
+    source_nodes_df = graph_backend.node_attrs().select(
+        pl.col(DEFAULT_ATTR_KEYS.NODE_ID).alias("source_id"),
+        pl.col(DEFAULT_ATTR_KEYS.T),
+        pl.col("x"),
+    )
+    new_nodes_df = new_graph.node_attrs().select(
+        pl.col(DEFAULT_ATTR_KEYS.NODE_ID).alias("target_id"),
+        pl.col(DEFAULT_ATTR_KEYS.T),
+        pl.col("x"),
+    )
+    node_mapping_df = source_nodes_df.join(new_nodes_df, on=[DEFAULT_ATTR_KEYS.T, "x"], how="inner")
+    node_map = dict(zip(node_mapping_df["source_id"], node_mapping_df["target_id"], strict=True))
+    assert len(node_map) == graph_backend.num_nodes
 
     # Verify graph connectivity is preserved by checking degrees
     source_out_degrees = sorted(graph_backend.out_degree())
@@ -1170,10 +1307,74 @@ def test_from_other_with_edges(graph_backend: BaseGraph) -> None:
     new_in_degrees = sorted(new_graph.in_degree())
     assert source_in_degrees == new_in_degrees
 
-    new_node_ids = new_graph.node_ids()
+    # Verify overlaps are transferred to new node IDs
+    source_overlaps = {tuple(sorted(node_map[node] for node in overlap)) for overlap in graph_backend.overlaps()}
+    new_overlaps = {tuple(sorted(overlap)) for overlap in new_graph.overlaps()}
+    assert new_overlaps == source_overlaps
 
-    assert len(new_graph.overlaps()) == len(graph_backend.overlaps())
-    assert new_graph.overlaps()[0] == [new_node_ids[0], new_node_ids[2]]
+
+@pytest.mark.parametrize(
+    ("target_cls", "target_kwargs"),
+    [
+        pytest.param(RustWorkXGraph, {}, id="rustworkx"),
+        pytest.param(
+            SQLGraph,
+            {
+                "drivername": "sqlite",
+                "database": ":memory:",
+                "engine_kwargs": {"connect_args": {"check_same_thread": False}},
+            },
+            id="sql",
+        ),
+        pytest.param(IndexedRXGraph, {}, id="indexed"),
+    ],
+)
+def test_form_other_regionprops_nodes(
+    graph_backend: BaseGraph,
+    target_cls: type[BaseGraph],
+    target_kwargs: dict[str, Any],
+) -> None:
+    labels = np.zeros((2, 4, 4), dtype=np.int32)
+    labels[0, 0:2, 0:2] = 1
+    labels[0, 2:4, 2:4] = 2
+    labels[1, 1:3, 0:2] = 1
+    labels[1, 1:3, 2:4] = 2
+
+    operator = RegionPropsNodes(extra_properties=["area"])
+    operator.add_nodes(graph_backend, labels=labels)
+
+    assert graph_backend.num_nodes == 4
+
+    copied_graph = target_cls.from_other(graph_backend, **target_kwargs)
+
+    assert copied_graph.num_nodes == graph_backend.num_nodes
+    assert set(copied_graph.node_attr_keys) == set(graph_backend.node_attr_keys)
+
+    def build_node_map(graph: BaseGraph) -> dict[tuple[int, tuple[int, ...]], dict[str, Any]]:
+        nodes_df = graph.node_attrs()
+        node_map: dict[tuple[int, tuple[int, ...]], dict[str, Any]] = {}
+        for row in nodes_df.iter_rows(named=True):
+            bbox = np.asarray(row[DEFAULT_ATTR_KEYS.BBOX], dtype=int)
+            key = (row[DEFAULT_ATTR_KEYS.T], tuple(bbox.tolist()))
+            node_map[key] = row
+        return node_map
+
+    source_map = build_node_map(graph_backend)
+    target_map = build_node_map(copied_graph)
+    assert set(source_map) == set(target_map)
+
+    for key, source_row in source_map.items():
+        target_row = target_map[key]
+        assert target_row["area"] == pytest.approx(source_row["area"])
+        assert target_row["y"] == pytest.approx(source_row["y"])
+        assert target_row["x"] == pytest.approx(source_row["x"])
+
+        source_mask = source_row[DEFAULT_ATTR_KEYS.MASK]
+        target_mask = target_row[DEFAULT_ATTR_KEYS.MASK]
+        assert isinstance(source_mask, Mask)
+        assert isinstance(target_mask, Mask)
+        np.testing.assert_array_equal(source_mask.mask, target_mask.mask)
+        np.testing.assert_array_equal(source_mask.bbox, target_mask.bbox)
 
 
 def test_compute_overlaps_basic(graph_backend: BaseGraph) -> None:
@@ -1259,10 +1460,10 @@ def test_compute_overlaps_multiple_timepoints(graph_backend: BaseGraph) -> None:
 
 def test_compute_overlaps_invalid_threshold(graph_backend: BaseGraph) -> None:
     """Test compute_overlaps with invalid threshold values."""
-    with pytest.raises(ValueError, match=r"iou_threshold must be between 0.0 and 1.0"):
+    with pytest.raises(ValueError, match=r"iou_threshold must be between 0.0 and 1\.0"):
         graph_backend.compute_overlaps(iou_threshold=-0.1)
 
-    with pytest.raises(ValueError, match=r"iou_threshold must be between 0.0 and 1.0"):
+    with pytest.raises(ValueError, match=r"iou_threshold must be between 0.0 and 1\.0"):
         graph_backend.compute_overlaps(iou_threshold=1.1)
 
 
@@ -1301,7 +1502,7 @@ def test_spatial_filter_basic(graph_backend: BaseGraph) -> None:
     graph_backend.add_node_attr_key("x", 0.0)
     graph_backend.add_node_attr_key("y", 0.0)
     graph_backend.add_node_attr_key("z", 0.0)
-    graph_backend.add_node_attr_key("bbox", None)
+    graph_backend.add_node_attr_key("bbox", np.zeros(6, dtype=int))
 
     node1 = graph_backend.add_node({"t": 0, "x": 1.0, "y": 1.0, "z": 1.0, "bbox": np.array([6, 6, 6, 8, 8, 8])})
     node2 = graph_backend.add_node({"t": 1, "x": 2.0, "y": 2.0, "z": 2.0, "bbox": np.array([0, 0, 0, 3, 3, 3])})
@@ -1317,10 +1518,29 @@ def test_spatial_filter_basic(graph_backend: BaseGraph) -> None:
     assert set(bb_filter[0:0, 0:2, 0:2, 0:2].node_ids()) == {node3}
 
 
-def test_assign_track_ids(graph_backend: BaseGraph):
-    if isinstance(graph_backend, SQLGraph):
-        pytest.skip("`assign_track_ids` is not available for `SQLGraph`")
+def _check_id_update_df(id_update_df: pl.DataFrame, new_id_df: pl.DataFrame, old_exists: bool = True) -> None:
+    assert isinstance(id_update_df, pl.DataFrame)
+    assert DEFAULT_ATTR_KEYS.NODE_ID in id_update_df.columns
+    if old_exists:
+        assert DEFAULT_ATTR_KEYS.TRACKLET_ID in id_update_df.columns
+    else:
+        assert DEFAULT_ATTR_KEYS.TRACKLET_ID not in id_update_df.columns
+    assert DEFAULT_ATTR_KEYS.TRACKLET_ID + "_new" in id_update_df.columns
+    updated_new = id_update_df.select(
+        [
+            DEFAULT_ATTR_KEYS.NODE_ID,
+            pl.col(DEFAULT_ATTR_KEYS.TRACKLET_ID + "_new").alias(DEFAULT_ATTR_KEYS.TRACKLET_ID),
+        ]
+    )
+    updated_node_ids = updated_new[DEFAULT_ATTR_KEYS.NODE_ID].to_list()
+    expected_new = new_id_df.filter(pl.col(DEFAULT_ATTR_KEYS.NODE_ID).is_in(pl.lit(updated_node_ids))).select(
+        [DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.TRACKLET_ID]
+    )
+    assert updated_new.sort(DEFAULT_ATTR_KEYS.NODE_ID).equals(expected_new.sort(DEFAULT_ATTR_KEYS.NODE_ID))
 
+
+@pytest.mark.parametrize("return_id_updates", [False, True])
+def test_assign_tracklet_ids(graph_backend: BaseGraph, return_id_updates: bool) -> None:
     # Add nodes:
     #     0
     #    / \
@@ -1333,36 +1553,237 @@ def test_assign_track_ids(graph_backend: BaseGraph):
     graph_backend.add_edge(nodes[0], nodes[1], {})
     graph_backend.add_edge(nodes[0], nodes[2], {})
 
-    tracks_graph = graph_backend.assign_track_ids()
-    track_ids = graph_backend.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.TRACK_ID])
-    assert len(track_ids) == 3
-    assert len(set(track_ids[DEFAULT_ATTR_KEYS.TRACK_ID])) == 3
-    assert isinstance(tracks_graph, rx.PyDiGraph)
-    assert tracks_graph.num_nodes() == 3  # Three tracks
+    returned = graph_backend.assign_tracklet_ids(return_id_update=return_id_updates)
+    if return_id_updates:
+        tracks_graph, id_update_df = returned
+    else:
+        tracks_graph = returned
 
-    tracks_graph = graph_backend.assign_track_ids(track_id_offset=100)
-    track_ids = graph_backend.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.TRACK_ID])
-    assert len(track_ids) == 3
-    assert len(set(track_ids[DEFAULT_ATTR_KEYS.TRACK_ID])) == 3
-    assert min(track_ids[DEFAULT_ATTR_KEYS.TRACK_ID]) == 100
+    tracklet_ids = graph_backend.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.TRACKLET_ID])
+    assert len(tracklet_ids) == 3
+    assert len(set(tracklet_ids[DEFAULT_ATTR_KEYS.TRACKLET_ID])) == 3
     assert isinstance(tracks_graph, rx.PyDiGraph)
     assert tracks_graph.num_nodes() == 3  # Three tracks
+    if return_id_updates:
+        assert len(id_update_df) == 3
+        _check_id_update_df(id_update_df, tracklet_ids, old_exists=False)
+
+    returned = graph_backend.assign_tracklet_ids(tracklet_id_offset=100, return_id_update=return_id_updates)
+    if return_id_updates:
+        tracks_graph, id_update_df = returned
+    else:
+        tracks_graph = returned
+
+    tracklet_ids = graph_backend.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.TRACKLET_ID])
+    assert len(tracklet_ids) == 3
+    assert len(set(tracklet_ids[DEFAULT_ATTR_KEYS.TRACKLET_ID])) == 3
+    assert min(tracklet_ids[DEFAULT_ATTR_KEYS.TRACKLET_ID]) == 100
+    assert isinstance(tracks_graph, rx.PyDiGraph)
+    assert tracks_graph.num_nodes() == 3  # Three tracks
+    if return_id_updates:
+        assert len(id_update_df) == 3
+        _check_id_update_df(id_update_df, tracklet_ids, old_exists=True)
+
+    filtered_graph = graph_backend.filter(node_ids=nodes[1:3]).subgraph()
+    returned = filtered_graph.assign_tracklet_ids(tracklet_id_offset=200, return_id_update=return_id_updates)
+    if return_id_updates:
+        tracks_graph, id_update_df = returned
+    else:
+        tracks_graph = returned
+
+    tracklet_ids = filtered_graph.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.TRACKLET_ID])
+    assert len(tracklet_ids) == 2
+    assert len(set(tracklet_ids[DEFAULT_ATTR_KEYS.TRACKLET_ID])) == 2
+    assert min(tracklet_ids[DEFAULT_ATTR_KEYS.TRACKLET_ID]) == 200
+    assert isinstance(tracks_graph, rx.PyDiGraph)
+    assert tracks_graph.num_nodes() == 2  # Two tracks
+    if return_id_updates:
+        assert len(id_update_df) == 2
+        _check_id_update_df(id_update_df, tracklet_ids, old_exists=True)
+
+
+def _compare_tracklet_id_assignments(expected_node_sets, graph_backend: BaseGraph):
+    ids_df = graph_backend.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.TRACKLET_ID])
+    ids_map = dict(
+        zip(
+            ids_df[DEFAULT_ATTR_KEYS.NODE_ID].to_list(),
+            ids_df[DEFAULT_ATTR_KEYS.TRACKLET_ID].to_list(),
+            strict=True,
+        )
+    )
+    assigned = {}
+    for node_id, tracklet_id in ids_map.items():
+        if tracklet_id == -1:
+            continue
+        if tracklet_id not in assigned:
+            assigned[tracklet_id] = []
+        assigned[tracklet_id].append(node_id)
+    assigned = {frozenset(group) for group in assigned.values()}
+    expected = {frozenset(group) for group in expected_node_sets}
+    assert assigned == expected
+
+
+@pytest.mark.parametrize("return_id_updates", [False, True])
+def test_assign_tracklet_ids_node_id_filter(graph_backend: BaseGraph, return_id_updates: bool) -> None:
+    """Assign track IDs for subsets selected via node_ids and validate exact non-branching closure.
+
+    Graph:
+      - A: linear chain A0 -> A1 -> A2 -> A3
+      - B: B0 -> B1 with B1 -> {B2, B4}, and B2 -> B3, B4 -> B5
+
+    Cases:
+      1) node_ids=[A1] -> closure = {A0, A1, A2, A3}
+      2) node_ids=[B2] -> closure = {B2, B3}
+      3) node_ids=[B1] -> closure = {B0, B1}
+      3) node_ids=[A1, B4] -> closure = {A0, A1, A2, A3, B4, B5}
+    """
+
+    # Build graph components
+    # A chain
+    A0 = graph_backend.add_node({DEFAULT_ATTR_KEYS.T: 0})
+    A1 = graph_backend.add_node({DEFAULT_ATTR_KEYS.T: 1})
+    A2 = graph_backend.add_node({DEFAULT_ATTR_KEYS.T: 2})
+    A3 = graph_backend.add_node({DEFAULT_ATTR_KEYS.T: 3})
+    graph_backend.add_edge(A0, A1, {})
+    graph_backend.add_edge(A1, A2, {})
+    graph_backend.add_edge(A2, A3, {})
+
+    # B branched with parent and children
+    B0 = graph_backend.add_node({DEFAULT_ATTR_KEYS.T: 0})
+    B1 = graph_backend.add_node({DEFAULT_ATTR_KEYS.T: 1})
+    B2 = graph_backend.add_node({DEFAULT_ATTR_KEYS.T: 2})
+    B4 = graph_backend.add_node({DEFAULT_ATTR_KEYS.T: 2})
+    B3 = graph_backend.add_node({DEFAULT_ATTR_KEYS.T: 3})
+    B5 = graph_backend.add_node({DEFAULT_ATTR_KEYS.T: 3})
+    graph_backend.add_edge(B0, B1, {})
+    graph_backend.add_edge(B1, B2, {})
+    graph_backend.add_edge(B1, B4, {})
+    graph_backend.add_edge(B2, B3, {})
+    graph_backend.add_edge(B4, B5, {})
+
+    # Ensure tracklet_id attribute exists after nodes were added
+    if DEFAULT_ATTR_KEYS.TRACKLET_ID not in graph_backend.node_attr_keys:
+        graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACKLET_ID, -1)
+
+    for seeds, expected in (
+        ([A1], [[A0, A1, A2, A3]]),
+        ([B2], [[B2, B3]]),
+        ([B1], [[B0, B1]]),
+        ([A1, B4], [[A0, A1, A2, A3], [B4, B5]]),
+    ):
+        # Ensure all nodes start unassigned across backends (avoid NULL/default discrepancies)
+        graph_backend.update_node_attrs(attrs={DEFAULT_ATTR_KEYS.TRACKLET_ID: -1})
+
+        returned = graph_backend.assign_tracklet_ids(
+            node_ids=seeds,
+            return_id_update=return_id_updates,
+        )
+        if return_id_updates:
+            tracks_graph, id_update_df = returned
+        else:
+            tracks_graph = returned
+        _compare_tracklet_id_assignments(expected, graph_backend)
+        assert isinstance(tracks_graph, rx.PyDiGraph)
+        if return_id_updates:
+            ids_df = graph_backend.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.TRACKLET_ID])
+            assert len(id_update_df) == sum(len(group) for group in expected)
+            _check_id_update_df(id_update_df, ids_df, old_exists=True)
+
+    # Check that re-assigning track IDs without reset works as expected
+    graph_backend.update_node_attrs(attrs={DEFAULT_ATTR_KEYS.TRACKLET_ID: -1})
+    returned = graph_backend.assign_tracklet_ids(return_id_update=return_id_updates)
+    if return_id_updates:
+        tracks_graph, id_update_df = returned
+    else:
+        tracks_graph = returned
+    ids_df = graph_backend.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.TRACKLET_ID])
+    assert tracks_graph.num_nodes() == 4
+    if return_id_updates:
+        assert len(id_update_df) == 10
+        _check_id_update_df(id_update_df, ids_df, old_exists=True)
+
+    returned = graph_backend.assign_tracklet_ids(
+        node_ids=[A1, B4],
+        reset=False,
+        return_id_update=return_id_updates,
+    )
+    if return_id_updates:
+        tracks_graph_reassign, id_update_df_reassign = returned
+    else:
+        tracks_graph_reassign = returned
+    ids_df_reassign = graph_backend.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.TRACKLET_ID])
+    assert tracks_graph_reassign.num_nodes() == 2
+    if return_id_updates:
+        assert len(id_update_df_reassign) == 6
+        _check_id_update_df(id_update_df_reassign, ids_df_reassign, old_exists=True)
+    # Full reassignment should yield same result as previous partial reassignment
+    # df must be sorted by node_id for direct comparison
+    ids_df = ids_df.sort(DEFAULT_ATTR_KEYS.NODE_ID)
+    ids_df_reassign = ids_df_reassign.sort(DEFAULT_ATTR_KEYS.NODE_ID)
+    assert ids_df.equals(ids_df_reassign)
+
+    # Changing the topology
+    C0 = graph_backend.add_node({DEFAULT_ATTR_KEYS.T: 0, DEFAULT_ATTR_KEYS.TRACKLET_ID: -1})
+    C1 = graph_backend.add_node({DEFAULT_ATTR_KEYS.T: 0, DEFAULT_ATTR_KEYS.TRACKLET_ID: -1})
+    returned = graph_backend.assign_tracklet_ids(reset=True, return_id_update=return_id_updates)
+    if return_id_updates:
+        _, id_update_df_reset = returned
+        ids_df_reset = graph_backend.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.TRACKLET_ID])
+        assert len(id_update_df_reset) == 12
+        _check_id_update_df(id_update_df_reset, ids_df_reset, old_exists=True)
+
+    A4 = graph_backend.add_node({DEFAULT_ATTR_KEYS.T: 1, DEFAULT_ATTR_KEYS.TRACKLET_ID: -1})
+    graph_backend.remove_edge(A2, A3)
+    graph_backend.add_edge(A0, A4, {})
+    graph_backend.add_edge(C0, C1, {})
+    returned = graph_backend.assign_tracklet_ids(
+        node_ids=None,
+        reset=False,
+        return_id_update=return_id_updates,
+    )
+    if return_id_updates:
+        tracks_graph_reassign, id_update_df_reassign = returned
+    else:
+        tracks_graph_reassign = returned
+    _compare_tracklet_id_assignments(
+        [[A0], [A1, A2], [A3], [A4], [B0, B1], [B2, B3], [B4, B5], [C0, C1]], graph_backend
+    )
+    assert tracks_graph_reassign.num_nodes() == 8
+    if return_id_updates:
+        ids_df_reassign = graph_backend.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.TRACKLET_ID])
+        assert len(id_update_df_reassign) == 13
+        _check_id_update_df(id_update_df_reassign, ids_df_reassign, old_exists=True)
+
+    returned = graph_backend.assign_tracklet_ids(
+        node_ids=[A1, A4, B4],
+        reset=False,
+        return_id_update=return_id_updates,
+    )
+    if return_id_updates:
+        tracks_graph_reassign, id_update_df_reassign = returned
+    else:
+        tracks_graph_reassign = returned
+    ids_df_reassign = graph_backend.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.TRACKLET_ID])
+    assert tracks_graph_reassign.num_nodes() == 3
+    if return_id_updates:
+        assert len(id_update_df_reassign) == 5
+        _check_id_update_df(id_update_df_reassign, ids_df_reassign, old_exists=True)
 
 
 def test_tracklet_graph_basic(graph_backend: BaseGraph) -> None:
     """Test basic tracklet_graph functionality."""
-    # Add track_id attribute and nodes with track IDs
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACK_ID, -1)
+    # Add tracklet_id attribute and nodes with track IDs
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACKLET_ID, -1)
 
     # Create nodes with different track IDs
-    node1 = graph_backend.add_node({"t": 0, DEFAULT_ATTR_KEYS.TRACK_ID: 1})
-    node2 = graph_backend.add_node({"t": 1, DEFAULT_ATTR_KEYS.TRACK_ID: 2})
-    node3 = graph_backend.add_node({"t": 1, DEFAULT_ATTR_KEYS.TRACK_ID: 3})
-    node4 = graph_backend.add_node({"t": 2, DEFAULT_ATTR_KEYS.TRACK_ID: 2})
-    node5 = graph_backend.add_node({"t": 2, DEFAULT_ATTR_KEYS.TRACK_ID: 3})
-    node6 = graph_backend.add_node({"t": 0, DEFAULT_ATTR_KEYS.TRACK_ID: 4})
-    node7 = graph_backend.add_node({"t": 1, DEFAULT_ATTR_KEYS.TRACK_ID: 4})
-    node8 = graph_backend.add_node({"t": 2, DEFAULT_ATTR_KEYS.TRACK_ID: 4})
+    node1 = graph_backend.add_node({"t": 0, DEFAULT_ATTR_KEYS.TRACKLET_ID: 1})
+    node2 = graph_backend.add_node({"t": 1, DEFAULT_ATTR_KEYS.TRACKLET_ID: 2})
+    node3 = graph_backend.add_node({"t": 1, DEFAULT_ATTR_KEYS.TRACKLET_ID: 3})
+    node4 = graph_backend.add_node({"t": 2, DEFAULT_ATTR_KEYS.TRACKLET_ID: 2})
+    node5 = graph_backend.add_node({"t": 2, DEFAULT_ATTR_KEYS.TRACKLET_ID: 3})
+    node6 = graph_backend.add_node({"t": 0, DEFAULT_ATTR_KEYS.TRACKLET_ID: 4})
+    node7 = graph_backend.add_node({"t": 1, DEFAULT_ATTR_KEYS.TRACKLET_ID: 4})
+    node8 = graph_backend.add_node({"t": 2, DEFAULT_ATTR_KEYS.TRACKLET_ID: 4})
 
     graph_backend.add_edge_attr_key("weight", 0.0)
 
@@ -1391,23 +1812,23 @@ def test_tracklet_graph_basic(graph_backend: BaseGraph) -> None:
     assert set(edges) == {(1, 2), (1, 3)}
 
 
-def test_tracklet_graph_with_ignore_track_id(graph_backend: BaseGraph) -> None:
-    """Test tracklet_graph with ignore_track_id parameter."""
-    # Add track_id attribute and nodes with track IDs
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACK_ID, -1)
+def test_tracklet_graph_with_ignore_tracklet_id(graph_backend: BaseGraph) -> None:
+    """Test tracklet_graph with ignore_tracklet_id parameter."""
+    # Add tracklet_id attribute and nodes with track IDs
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACKLET_ID, -1)
     graph_backend.add_edge_attr_key("weight", 0.0)
 
     # Simple test case: just check that the method accepts the parameter
     # and filters out nodes properly when there are no edges
-    node1 = graph_backend.add_node({"t": 0, DEFAULT_ATTR_KEYS.TRACK_ID: 1})
-    node2 = graph_backend.add_node({"t": 1, DEFAULT_ATTR_KEYS.TRACK_ID: 2})
-    node3 = graph_backend.add_node({"t": 1, DEFAULT_ATTR_KEYS.TRACK_ID: -1})
+    node1 = graph_backend.add_node({"t": 0, DEFAULT_ATTR_KEYS.TRACKLET_ID: 1})
+    node2 = graph_backend.add_node({"t": 1, DEFAULT_ATTR_KEYS.TRACKLET_ID: 2})
+    node3 = graph_backend.add_node({"t": 1, DEFAULT_ATTR_KEYS.TRACKLET_ID: -1})
 
     graph_backend.add_edge(node1, node2, {"weight": 0.8})
     graph_backend.add_edge(node1, node3, {"weight": 0.9})
 
-    # Test that tracklet_graph method accepts ignore_track_id parameter
-    tracklet_graph = graph_backend.tracklet_graph(ignore_track_id=-1)
+    # Test that tracklet_graph method accepts ignore_tracklet_id parameter
+    tracklet_graph = graph_backend.tracklet_graph(ignore_tracklet_id=-1)
     assert tracklet_graph.num_nodes() == 2
     assert tracklet_graph.num_edges() == 1
 
@@ -1415,9 +1836,9 @@ def test_tracklet_graph_with_ignore_track_id(graph_backend: BaseGraph) -> None:
     assert set(tracklet_graph.edges()) == {(1, 2)}
 
 
-def test_tracklet_graph_missing_track_id_key(graph_backend: BaseGraph) -> None:
-    """Test tracklet_graph raises error when track_id_key doesn't exist."""
-    with pytest.raises(ValueError, match="Track id key 'track_id' not found in graph"):
+def test_tracklet_graph_missing_tracklet_id_key(graph_backend: BaseGraph) -> None:
+    """Test tracklet_graph raises error when tracklet_id_key doesn't exist."""
+    with pytest.raises(ValueError, match="Track id key 'tracklet_id' not found in graph"):
         graph_backend.tracklet_graph()
 
 
@@ -1549,11 +1970,11 @@ def test_remove_node(graph_backend: BaseGraph) -> None:
     assert [node1, node3] in remaining_overlaps
 
     # Test error when removing non-existent node
-    with pytest.raises(ValueError, match=r"Node .* does not exist in the graph"):
+    with pytest.raises(ValueError, match=r"Node .* does not exist in the graph."):
         graph_backend.remove_node(99999)
 
     # Test error when removing already removed node
-    with pytest.raises(ValueError, match=r"Node .* does not exist in the graph"):
+    with pytest.raises(ValueError, match=r"Node .* does not exist in the graph."):
         graph_backend.remove_node(node2)
 
 
@@ -1664,7 +2085,8 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
     graph_backend.add_node_attr_key("z", 0.0)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACK_ID, -1)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACKLET_ID, -1)
+    graph_backend.add_node_attr_key("ndfeature", np.asarray([[1.0], [2.0], [3.0]]))
 
     graph_backend.add_edge_attr_key("weight", 0.0)
 
@@ -1676,7 +2098,8 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
             "z": 1.0,
             "bbox": np.array([6, 6, 8, 8]),
             "mask": Mask(np.array([[True, True], [True, True]], dtype=bool), bbox=np.array([6, 6, 8, 8])),
-            DEFAULT_ATTR_KEYS.TRACK_ID: 1,
+            DEFAULT_ATTR_KEYS.TRACKLET_ID: 1,
+            "ndfeature": np.asarray([[1.0], [2.0], [3.0]]),
         }
     )
     node2 = graph_backend.add_node(
@@ -1690,7 +2113,8 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
                 np.array([[True, True, True], [True, True, True], [True, True, True]], dtype=bool),
                 bbox=np.array([0, 0, 3, 3]),
             ),
-            DEFAULT_ATTR_KEYS.TRACK_ID: 1,
+            DEFAULT_ATTR_KEYS.TRACKLET_ID: 1,
+            "ndfeature": np.asarray([[9.0], [10.0], [11.0]]),
         }
     )
 
@@ -1702,7 +2126,8 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
             "z": 3.0,
             "bbox": np.array([2, 2, 4, 4]),
             "mask": Mask(np.array([[True, True], [True, True]], dtype=bool), bbox=np.array([2, 2, 4, 4])),
-            DEFAULT_ATTR_KEYS.TRACK_ID: 1,
+            DEFAULT_ATTR_KEYS.TRACKLET_ID: 1,
+            "ndfeature": np.asarray([[5.0], [6.0], [7.0]]),
         }
     )
 
@@ -1713,7 +2138,7 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
 
     graph_backend.to_geff(geff_store=output_store)
 
-    geff_graph = RustWorkXGraph.from_geff(output_store)
+    geff_graph, _ = IndexedRXGraph.from_geff(output_store)
 
     assert geff_graph.num_nodes == 3
     assert geff_graph.num_edges == 2
@@ -1722,6 +2147,9 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
 
     assert set(graph_backend.node_attr_keys) == set(geff_graph.node_attr_keys)
     assert set(graph_backend.edge_attr_keys) == set(geff_graph.edge_attr_keys)
+
+    for node_id in geff_graph.node_ids():
+        assert geff_graph[node_id].to_dict() == graph_backend[node_id].to_dict()
 
     assert rx.is_isomorphic(
         rx_graph,

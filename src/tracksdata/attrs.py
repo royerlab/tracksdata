@@ -22,7 +22,7 @@ import functools
 import math
 import operator
 from collections.abc import Callable, Sequence
-from typing import Any, Union, overload
+from typing import Any, TypeGuard, Union, overload
 
 import numpy as np
 import polars as pl
@@ -30,6 +30,7 @@ from polars import DataFrame, Expr, Series
 
 Scalar = int | float | str | bool | complex | np.number
 ExprInput = Union[str, Scalar, "Attr", Expr, "AttrComparison"]
+MembershipExprInput = Sequence[Scalar]
 
 
 __all__ = [
@@ -40,6 +41,17 @@ __all__ = [
     "polars_reduce_attr_comps",
     "split_attr_comps",
 ]
+
+
+def _is_in_op(lhs: Any, values: MembershipExprInput) -> Any:
+    """
+    Backend-aware membership operator that works for Polars expressions, SQLAlchemy columns, and Python scalars.
+    """
+    if isinstance(lhs, pl.Expr):
+        return lhs.is_in(values)
+    if hasattr(lhs, "in_"):
+        return lhs.in_(values)
+    return lhs in values
 
 
 _OPS_MATH_SYMBOLS: dict[Callable, str] = {
@@ -59,12 +71,24 @@ _OPS_MATH_SYMBOLS: dict[Callable, str] = {
     operator.le: "<=",
     operator.gt: ">",
     operator.ge: ">=",
+    _is_in_op: "in",
 }
+
+
+def _is_membership_expr_input(x: Any) -> TypeGuard[MembershipExprInput]:
+    if isinstance(x, Attr | AttrComparison | pl.Expr):
+        return False
+    if isinstance(x, Scalar):
+        return False
+    if isinstance(x, np.ndarray):
+        return getattr(x, "ndim", 1) >= 1
+    return isinstance(x, Sequence)
 
 
 class AttrComparison:
     """
-    Class to store a comparison between an [Attr][tracksdata.attrs.Attr] and a value.
+    Class to store a comparison between an [Attr][tracksdata.attrs.Attr] and a value
+    (a sequence of values for `is_in`).
     It's mainly used for filtering.
     Complex expression are transformed back to [Attr][tracksdata.attrs.Attr] objects
     which can be used to evaluate the expression on a DataFrame.
@@ -75,11 +99,21 @@ class AttrComparison:
         The attribute to compare.
     op : Callable
         The operator to use for the comparison.
-    other : ExprInput
+    other : ExprInput | MembershipExprInput
         The value to compare the attribute to.
     """
 
-    def __init__(self, attr: "Attr", op: Callable, other: ExprInput) -> None:
+    def __init__(self, attr: "Attr", op: Callable, other: ExprInput | MembershipExprInput) -> None:
+        is_membership_expr = _is_membership_expr_input(other)
+        if is_membership_expr and op != _is_in_op:
+            raise ValueError(
+                f"Membership values can only be used with the 'is_in' method. Found '{_OPS_MATH_SYMBOLS[op]}'."
+            )
+        elif not is_membership_expr and op == _is_in_op:
+            raise ValueError(
+                f"Cannot use 'is_in' method with non-membership values. Found '{other}' of type {type(other)}."
+            )
+
         if attr.has_inf():
             raise ValueError("Comparison operators are not supported for expressions with infinity.")
 
@@ -98,9 +132,14 @@ class AttrComparison:
         self.column = columns[0]
         self.op = op
 
-        if isinstance(other, np.ndarray):
-            # casting numpy scalars to python scalars
-            # numpy scalars are problematic for sqlalchemy
+        # casting numpy scalars to python scalars
+        # numpy scalars are problematic for sqlalchemy
+        if is_membership_expr:
+            if isinstance(other, np.ndarray):
+                other = other.tolist()
+            else:
+                other = list(other)
+        elif isinstance(other, np.ndarray):
             other = other.item()
         self.other = other
 
@@ -391,6 +430,22 @@ class Attr:
         Check if any column in the expression is multiplied by negative infinity.
         """
         return len(self._neg_inf_exprs) > 0
+
+    def is_in(self, values: MembershipExprInput) -> "AttrComparison":
+        """
+        Create a membership comparison between the attribute and a collection of literals.
+
+        Parameters
+        ----------
+        values : Iterable[Scalar] | Sequence[Scalar] | np.ndarray | Series
+            Values the attribute should belong to.
+
+        Returns
+        -------
+        AttrComparison
+            A comparison suitable for filtering across all graph backends.
+        """
+        return AttrComparison(self, _is_in_op, values)
 
     def __invert__(self) -> "Attr":
         return Attr(~self.expr)

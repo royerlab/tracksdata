@@ -16,7 +16,7 @@ def to_napari_format(
     graph: BaseGraph,
     shape: tuple[int, ...],
     solution_key: str | None,
-    output_track_id_key: str,
+    output_tracklet_id_key: str,
     mask_key: None,
 ) -> tuple[pl.DataFrame, dict[int, int]]: ...
 
@@ -26,7 +26,7 @@ def to_napari_format(
     graph: BaseGraph,
     shape: tuple[int, ...],
     solution_key: str | None,
-    output_track_id_key: str,
+    output_tracklet_id_key: str,
     mask_key: str,
 ) -> tuple[pl.DataFrame, dict[int, int], "GraphArrayView"]: ...
 
@@ -35,7 +35,7 @@ def to_napari_format(
     graph: BaseGraph,
     shape: tuple[int, ...],
     solution_key: str | None = DEFAULT_ATTR_KEYS.SOLUTION,
-    output_track_id_key: str = DEFAULT_ATTR_KEYS.TRACK_ID,
+    output_tracklet_id_key: str = DEFAULT_ATTR_KEYS.TRACKLET_ID,
     mask_key: str | None = None,
     chunk_shape: tuple[int] | None = None,
     buffer_cache_size: int | None = None,
@@ -68,7 +68,7 @@ def to_napari_format(
         The shape of the labels layer.
     solution_key : str, optional
         The key of the solution attribute. If None, the graph is not filtered by the solution attribute.
-    output_track_id_key : str, optional
+    output_tracklet_id_key : str, optional
         The key of the output track id attribute.
     mask_key : str | None, optional
         The key of the mask attribute.
@@ -103,17 +103,17 @@ def to_napari_format(
     else:
         solution_graph = graph
 
-    tracks_graph = solution_graph.assign_track_ids(output_track_id_key)
+    tracks_graph = solution_graph.assign_tracklet_ids(output_tracklet_id_key)
     dict_graph = {tracks_graph[child]: tracks_graph[parent] for parent, child in tracks_graph.edge_list()}
 
     spatial_cols = ["z", "y", "x"][-len(shape) + 1 :]
 
     tracks_data = solution_graph.node_attrs(
-        attr_keys=[output_track_id_key, DEFAULT_ATTR_KEYS.T, *spatial_cols],
+        attr_keys=[output_tracklet_id_key, DEFAULT_ATTR_KEYS.T, *spatial_cols],
     )
 
     # sorting columns
-    tracks_data = tracks_data.select([output_track_id_key, DEFAULT_ATTR_KEYS.T, *spatial_cols])
+    tracks_data = tracks_data.select([output_tracklet_id_key, DEFAULT_ATTR_KEYS.T, *spatial_cols])
 
     if mask_key is not None:
         from tracksdata.array._graph_array import GraphArrayView
@@ -121,7 +121,7 @@ def to_napari_format(
         array_view = GraphArrayView(
             solution_graph,
             shape,
-            attr_key=output_track_id_key,
+            attr_key=output_tracklet_id_key,
             chunk_shape=chunk_shape,
             buffer_cache_size=buffer_cache_size,
         )

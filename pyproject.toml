@@ -22,7 +22,7 @@ authors = [
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Science/Research",
-  "License :: OSI Approved :: MIT License",
+  "License :: OSI Approved :: BSD License",
   "Programming Language :: Python",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
@@ -48,7 +48,7 @@ dependencies = [
   "ilpy >= 0.5.1",
   "pyarrow",
   "bidict>=0.23.1",
-  "geff @ git+https://github.com/live-image-tracking-tools/geff.git@b751718f81d107e1fdda2df2afb62253039c137b",
+  "geff>=1.0.0",
   "psygnal>=0.14.0",
 ]
 

@@ -1,11 +1,15 @@
+import binascii
 from collections.abc import Sequence
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
+import cloudpickle
 import numpy as np
 import polars as pl
 import rustworkx as rx
 import sqlalchemy as sa
+from polars._typing import SchemaDict
+from polars.datatypes.convert import numpy_char_code_to_dtype
 from sqlalchemy.orm import DeclarativeBase, Session, aliased, load_only
 from sqlalchemy.sql.type_api import TypeEngine
 
@@ -205,13 +209,14 @@ class SQLFilter(BaseFilter):
             nodes_attrs = pl.read_database(
                 self._graph._raw_query(query),
                 connection=session.connection(),
+                schema_overrides=self._graph._polars_schema_override(self._graph.Node),
             )
 
         if attr_keys is not None:
             nodes_attrs = nodes_attrs.select(attr_keys)
 
-        nodes_attrs = self._graph._cast_boolean_columns(self._graph.Node, nodes_attrs)
         nodes_attrs = unpickle_bytes_columns(nodes_attrs)
+        nodes_attrs = self._graph._cast_array_columns(self._graph.Node, nodes_attrs)
 
         if unpack:
             nodes_attrs = unpack_array_attrs(nodes_attrs)
@@ -264,10 +269,11 @@ class SQLFilter(BaseFilter):
             edges_df = pl.read_database(
                 self._graph._raw_query(query),
                 connection=session.connection(),
+                schema_overrides=self._graph._polars_schema_override(self._graph.Edge),
             )
 
-        edges_df = self._graph._cast_boolean_columns(self._graph.Edge, edges_df)
         edges_df = unpickle_bytes_columns(edges_df)
+        edges_df = self._graph._cast_array_columns(self._graph.Edge, edges_df)
 
         if unpack:
             edges_df = unpack_array_attrs(edges_df)
@@ -339,6 +345,19 @@ class SQLFilter(BaseFilter):
         )
 
         return graph
+
+
+def blob_default(engine: sa.Engine, value: bytes) -> sa.Text:
+    """Return a dialect-correct server_default for LargeBinary."""
+    hex_blob = binascii.hexlify(value).decode("ascii")
+    if engine.dialect.name == "sqlite":
+        return sa.text(f"X'{hex_blob}'")
+    elif engine.dialect.name in {"postgresql", "postgres"}:
+        # either works:
+        # return sa.text(f"decode('{hex_blob}','hex')")
+        return sa.text(f"'\\x{hex_blob}'::bytea")
+    else:
+        raise RuntimeError(f"Unsupported dialect {engine.dialect.name}")
 
 
 class SQLGraph(BaseGraph):
@@ -441,7 +460,8 @@ class SQLGraph(BaseGraph):
 
         # Create unique classes for this instance
         self._define_schema(overwrite=overwrite)
-        self._boolean_columns: dict[str, list[str]] = {self.Node.__tablename__: [], self.Edge.__tablename__: []}
+        self._boolean_columns: dict[str, SchemaDict] = {self.Node.__tablename__: {}, self.Edge.__tablename__: {}}
+        self._array_columns: dict[str, SchemaDict] = {self.Node.__tablename__: {}, self.Edge.__tablename__: {}}
 
         if overwrite:
             self.Base.metadata.drop_all(self._engine)
@@ -512,13 +532,16 @@ class SQLGraph(BaseGraph):
         self.Edge = Edge
         self.Overlap = Overlap
 
-    def _cast_boolean_columns(self, table_class: type[DeclarativeBase], df: pl.DataFrame) -> pl.DataFrame:
-        """
-        This is required because polars bypasses the boolean type and converts it to integer.
-        """
+    def _polars_schema_override(self, table_class: type[DeclarativeBase]) -> SchemaDict:
+        return {
+            **self._boolean_columns[table_class.__tablename__],
+        }
+
+    def _cast_array_columns(self, table_class: type[DeclarativeBase], df: pl.DataFrame) -> pl.DataFrame:
+        # this operation cannot be done with schema_overrides because they are blobs at the database level
         df = df.with_columns(
-            pl.col(col).cast(pl.Boolean)
-            for col in self._boolean_columns[table_class.__tablename__]
+            pl.Series(col, df[col].to_list(), dtype=pl_dtype)
+            for col, pl_dtype in self._array_columns[table_class.__tablename__].items()
             if col in df.columns
         )
         return df
@@ -720,7 +743,7 @@ class SQLGraph(BaseGraph):
             # Check if the node exists
             node = session.query(self.Node).filter(self.Node.node_id == node_id).first()
             if node is None:
-                raise ValueError(f"Node {node_id} does not exist in the graph")
+                raise ValueError(f"Node {node_id} does not exist in the graph.")
 
             # Remove all edges where this node is source or target
             session.query(self.Edge).filter(
@@ -986,9 +1009,10 @@ class SQLGraph(BaseGraph):
             node_df = pl.read_database(
                 query.statement,
                 connection=session.connection(),
+                schema_overrides=self._polars_schema_override(self.Node),
             )
-            node_df = self._cast_boolean_columns(self.Node, node_df)
             node_df = unpickle_bytes_columns(node_df)
+            node_df = self._cast_array_columns(self.Node, node_df)
 
         if single_node:
             return node_df
@@ -1147,12 +1171,13 @@ class SQLGraph(BaseGraph):
                     *[getattr(self.Node, key) for key in attr_keys],
                 )
 
-        nodes_df = pl.read_database(
-            self._raw_query(query),
-            connection=session.connection(),
-        )
-        nodes_df = self._cast_boolean_columns(self.Node, nodes_df)
-        nodes_df = unpickle_bytes_columns(nodes_df)
+            nodes_df = pl.read_database(
+                self._raw_query(query),
+                connection=session.connection(),
+                schema_overrides=self._polars_schema_override(self.Node),
+            )
+            nodes_df = unpickle_bytes_columns(nodes_df)
+            nodes_df = self._cast_array_columns(self.Node, nodes_df)
 
         # indices are included by default and must be removed
         if attr_keys is not None:
@@ -1192,9 +1217,10 @@ class SQLGraph(BaseGraph):
             edges_df = pl.read_database(
                 self._raw_query(query),
                 connection=session.connection(),
+                schema_overrides=self._polars_schema_override(self.Edge),
             )
-            edges_df = self._cast_boolean_columns(self.Edge, edges_df)
             edges_df = unpickle_bytes_columns(edges_df)
+            edges_df = self._cast_array_columns(self.Edge, edges_df)
 
         if unpack:
             edges_df = unpack_array_attrs(edges_df)
@@ -1248,7 +1274,15 @@ class SQLGraph(BaseGraph):
         sa_type = self._sqlalchemy_type_inference(default_value)
 
         if sa_type == sa.Boolean:
-            self._boolean_columns[table_class.__tablename__].append(key)
+            self._boolean_columns[table_class.__tablename__][key] = pl.Boolean
+
+        if sa_type == sa.PickleType and default_value is not None:
+            if isinstance(default_value, np.ndarray):
+                self._array_columns[table_class.__tablename__][key] = pl.Array(
+                    numpy_char_code_to_dtype(default_value.dtype.char), default_value.shape
+                )
+            # The following is required for all non-None PickleType columns
+            default_value = blob_default(self._engine, cloudpickle.dumps(default_value))  # None
 
         sa_column = sa.Column(key, sa_type, default=default_value)
 
@@ -1385,6 +1419,34 @@ class SQLGraph(BaseGraph):
     ) -> None:
         self._update_table(self.Edge, edge_ids, DEFAULT_ATTR_KEYS.EDGE_ID, attrs)
 
+    def assign_tracklet_ids(
+        self,
+        output_key: str = DEFAULT_ATTR_KEYS.TRACKLET_ID,
+        reset: bool = True,
+        tracklet_id_offset: int | None = None,
+        node_ids: list[int] | None = None,
+        return_id_update: bool = False,
+    ) -> rx.PyDiGraph | tuple[rx.PyDiGraph, pl.DataFrame]:
+        if node_ids is not None:
+            track_node_ids = list(set(self.tracklet_nodes(node_ids)))
+        else:
+            track_node_ids = None
+        if output_key in self.node_attr_keys:
+            node_attr_keys = [output_key]
+        else:
+            node_attr_keys = []
+
+        return (
+            self.filter(node_ids=track_node_ids)
+            .subgraph(node_attr_keys=node_attr_keys)
+            .assign_tracklet_ids(
+                output_key=output_key,
+                reset=reset,
+                tracklet_id_offset=tracklet_id_offset,
+                return_id_update=return_id_update,
+            )
+        )
+
     def _get_degree(
         self,
         node_ids: list[int] | int | None,
@@ -1441,8 +1503,8 @@ class SQLGraph(BaseGraph):
 
     def tracklet_graph(
         self,
-        track_id_key: str = DEFAULT_ATTR_KEYS.TRACK_ID,
-        ignore_track_id: int | None = None,
+        tracklet_id_key: str = DEFAULT_ATTR_KEYS.TRACKLET_ID,
+        ignore_tracklet_id: int | None = None,
     ) -> rx.PyDiGraph:
         """
         Create a compressed tracklet graph where each node is a tracklet
@@ -1454,9 +1516,9 @@ class SQLGraph(BaseGraph):
 
         Parameters
         ----------
-        track_id_key : str
+        tracklet_id_key : str
             The key of the track id attribute.
-        ignore_track_id : int | None
+        ignore_tracklet_id : int | None
             The track id to ignore. If None, all track ids are used.
 
         Returns
@@ -1465,11 +1527,11 @@ class SQLGraph(BaseGraph):
             A compressed tracklet graph.
         """
 
-        if track_id_key not in self.node_attr_keys:
-            raise ValueError(f"Track id key '{track_id_key}' not found in graph. Expected '{self.node_attr_keys}'")
+        if tracklet_id_key not in self.node_attr_keys:
+            raise ValueError(f"Track id key '{tracklet_id_key}' not found in graph. Expected '{self.node_attr_keys}'")
 
         with Session(self._engine) as session:
-            node_query = sa.select(getattr(self.Node, track_id_key)).distinct()
+            node_query = sa.select(getattr(self.Node, tracklet_id_key)).distinct()
 
             SourceNode = aliased(self.Node)
             TargetNode = aliased(self.Node)
@@ -1488,20 +1550,20 @@ class SQLGraph(BaseGraph):
                     TargetNode.node_id == self.Edge.target_id,
                 )
                 .filter(
-                    getattr(SourceNode, track_id_key) != getattr(TargetNode, track_id_key),
+                    getattr(SourceNode, tracklet_id_key) != getattr(TargetNode, tracklet_id_key),
                 )
             )
 
-            if ignore_track_id is not None:
-                node_query = node_query.filter(getattr(self.Node, track_id_key) != ignore_track_id)
+            if ignore_tracklet_id is not None:
+                node_query = node_query.filter(getattr(self.Node, tracklet_id_key) != ignore_tracklet_id)
                 edge_query = edge_query.filter(
-                    getattr(SourceNode, track_id_key) != ignore_track_id,
-                    getattr(TargetNode, track_id_key) != ignore_track_id,
+                    getattr(SourceNode, tracklet_id_key) != ignore_tracklet_id,
+                    getattr(TargetNode, tracklet_id_key) != ignore_tracklet_id,
                 )
 
             edge_query = edge_query.with_only_columns(
-                getattr(SourceNode, track_id_key).label("source_track_id"),
-                getattr(TargetNode, track_id_key).label("target_track_id"),
+                getattr(SourceNode, tracklet_id_key).label("source_tracklet_id"),
+                getattr(TargetNode, tracklet_id_key).label("target_tracklet_id"),
             )
 
             nodes_df = pl.read_database(
@@ -1515,13 +1577,13 @@ class SQLGraph(BaseGraph):
             )
 
         graph = rx.PyDiGraph()
-        tracklet_ids = nodes_df[track_id_key].to_list()
+        tracklet_ids = nodes_df[tracklet_id_key].to_list()
         tracklet_id_to_rx = dict(zip(tracklet_ids, graph.add_nodes_from(tracklet_ids), strict=False))
         graph.add_edges_from(
             zip(
-                edges_df["source_track_id"].map_elements(tracklet_id_to_rx.__getitem__, return_dtype=int).to_list(),
-                edges_df["target_track_id"].map_elements(tracklet_id_to_rx.__getitem__, return_dtype=int).to_list(),
-                zip(edges_df["source_track_id"].to_list(), edges_df["target_track_id"].to_list(), strict=False),
+                edges_df["source_tracklet_id"].map_elements(tracklet_id_to_rx.__getitem__, return_dtype=int).to_list(),
+                edges_df["target_tracklet_id"].map_elements(tracklet_id_to_rx.__getitem__, return_dtype=int).to_list(),
+                zip(edges_df["source_tracklet_id"].to_list(), edges_df["target_tracklet_id"].to_list(), strict=False),
                 strict=True,
             )
         )
@@ -1545,8 +1607,38 @@ class SQLGraph(BaseGraph):
         Return the edge id between two nodes.
         """
         with Session(self._engine) as session:
-            return (
+            edge_id = (
                 session.query(self.Edge.edge_id)
                 .filter(self.Edge.source_id == source_id, self.Edge.target_id == target_id)
                 .scalar()
             )
+            if edge_id is None:
+                raise ValueError(f"Edge {source_id}->{target_id} does not exist in the graph.")
+            return edge_id
+
+    def remove_edge(
+        self,
+        source_id: int | None = None,
+        target_id: int | None = None,
+        *,
+        edge_id: int | None = None,
+    ) -> None:
+        """
+        Remove an edge from the graph either by its ID or by its endpoints.
+        """
+        with Session(self._engine) as session:
+            if edge_id is None:
+                if source_id is None or target_id is None:
+                    raise ValueError("Provide either edge_id or both source_id and target_id.")
+                deleted = (
+                    session.query(self.Edge)
+                    .filter(self.Edge.source_id == source_id, self.Edge.target_id == target_id)
+                    .delete()
+                )
+                if not deleted:
+                    raise ValueError(f"Edge {source_id}->{target_id} does not exist in the graph.")
+            else:
+                deleted = session.query(self.Edge).filter(self.Edge.edge_id == edge_id).delete()
+                if not deleted:
+                    raise ValueError(f"Edge {edge_id} does not exist in the graph.")
+            session.commit()

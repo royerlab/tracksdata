@@ -1,3 +1,5 @@
+from typing import Any
+
 import numpy as np
 import polars as pl
 from cloudpickle import dumps, loads
@@ -35,19 +37,26 @@ _POLARS_DTYPE_TO_NUMPY_DTYPE = {
 }
 
 
-def polars_dtype_to_numpy_dtype(polars_dtype: DataType) -> np.dtype:
+def polars_dtype_to_numpy_dtype(polars_dtype: DataType, allow_sequence: bool = True) -> np.dtype:
     """Convert a polars dtype to a numpy dtype.
 
     Parameters
     ----------
     polars_dtype : DataType
         The polars dtype to convert.
+    allow_sequence : bool, optional
+        Whether to allow sequence types (List, Array). Default is True.
 
     Returns
     -------
     np.dtype
         The numpy dtype.
     """
+    while isinstance(polars_dtype, pl.Array | pl.List):
+        if not allow_sequence:
+            raise ValueError(f"Sequence types are not allowed: {polars_dtype}. Set allow_sequence=True to allow.")
+        polars_dtype = polars_dtype.inner
+
     try:
         return _POLARS_DTYPE_TO_NUMPY_DTYPE[polars_dtype]
     except KeyError as e:
@@ -114,3 +123,21 @@ def column_to_numpy(series: pl.Series) -> np.ndarray:
         return np.asarray(series.to_list())
     else:
         return series.to_numpy()
+
+
+def infer_default_value(sample_value: Any) -> Any:
+    """
+    Infer a sensible default value based on a sample attribute value.
+    """
+    if isinstance(sample_value, bool | np.bool_):
+        return False
+    dtype = getattr(sample_value, "dtype", None)
+    if dtype is not None and np.issubdtype(dtype, np.unsignedinteger):
+        return 0
+    if isinstance(sample_value, np.unsignedinteger):
+        return 0
+    if isinstance(sample_value, int | np.integer):
+        return -1
+    if isinstance(sample_value, float | np.floating):
+        return -1.0
+    return None

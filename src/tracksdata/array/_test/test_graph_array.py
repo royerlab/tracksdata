@@ -7,7 +7,7 @@ from pytest import fixture
 from tracksdata.array import GraphArrayView
 from tracksdata.array._graph_array import chain_indices
 from tracksdata.constants import DEFAULT_ATTR_KEYS
-from tracksdata.graph import RustWorkXGraph
+from tracksdata.graph import BaseGraph
 from tracksdata.nodes import RegionPropsNodes
 from tracksdata.nodes._mask import Mask
 from tracksdata.options import Options, get_options
@@ -17,7 +17,7 @@ from tracksdata.options import Options, get_options
 #  - https://github.com/royerlab/ultrack/blob/main/ultrack/utils/_test/test_utils_array.py
 
 
-def test_merge_indices() -> None:
+def test_chain_indices() -> None:
     assert chain_indices(slice(3, 20), slice(5, 15)) == slice(8, 18, 1)
     assert chain_indices(slice(3, 20), slice(5, None)) == slice(8, 20, 1)
     assert chain_indices(slice(3, 20), slice(None, 15)) == slice(3, 18, 1)
@@ -28,38 +28,40 @@ def test_merge_indices() -> None:
     assert chain_indices((5, 6, 7, 8, 9, 10), [3, 5]) == [8, 10]
 
 
-def test_graph_array_view_init() -> None:
+def test_graph_array_view_init(graph_backend: BaseGraph) -> None:
     """Test GraphArrayView initialization."""
-    graph = RustWorkXGraph()
-
     # Add a attribute key
-    graph.add_node_attr_key("label", 0)
+    graph_backend.add_node_attr_key("label", 0)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, np.asarray([0, 0, 0, 0, 0, 0]))
 
-    array_view = GraphArrayView(graph=graph, shape=(10, 100, 100), attr_key="label", offset=0)
+    array_view = GraphArrayView(graph=graph_backend, shape=(10, 100, 100), attr_key="label", offset=0)
 
-    assert array_view.graph is graph
+    assert array_view.graph is graph_backend
     assert array_view.shape == (10, 100, 100)
     assert array_view._attr_key == "label"
     assert array_view._offset == 0
     assert array_view.dtype == get_options().gav_default_dtype
     assert array_view.ndim == 3
     assert len(array_view) == 10
+    assert array_view.size == 10 * 100 * 100
 
 
-def test_graph_array_view_init_invalid_attr_key() -> None:
+def test_graph_array_view_init_invalid_attr_key(graph_backend: BaseGraph) -> None:
     """Test GraphArrayView initialization with invalid attribute key."""
-    graph = RustWorkXGraph()
 
     with pytest.raises(ValueError, match="Attribute key 'invalid_key' not found in graph"):
-        GraphArrayView(graph=graph, shape=(10, 100, 100), attr_key="invalid_key")
+        GraphArrayView(graph=graph_backend, shape=(10, 100, 100), attr_key="invalid_key")
 
 
-def test_graph_array_view_getitem_empty_time() -> None:
+def test_graph_array_view_getitem_empty_time(graph_backend: BaseGraph) -> None:
     """Test __getitem__ with empty time point (no nodes)."""
-    graph = RustWorkXGraph()
-    graph.add_node_attr_key("label", 0)
 
-    array_view = GraphArrayView(graph=graph, shape=(10, 100, 100), attr_key="label")
+    graph_backend.add_node_attr_key("label", 0)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, np.asarray([0, 0, 0, 0, 0, 0]))
+
+    array_view = GraphArrayView(graph=graph_backend, shape=(10, 100, 100), attr_key="label")
 
     # Get data for time point 0 (no nodes)
     result = array_view[0]
@@ -70,23 +72,22 @@ def test_graph_array_view_getitem_empty_time() -> None:
     assert array_view.dtype == get_options().gav_default_dtype
 
 
-def test_graph_array_view_getitem_with_nodes() -> None:
+def test_graph_array_view_getitem_with_nodes(graph_backend: BaseGraph) -> None:
     """Test __getitem__ with nodes at time point."""
-    graph = RustWorkXGraph()
 
     # Add attribute keys
-    graph.add_node_attr_key("label", 0)
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
-    graph.add_node_attr_key("y", 0)
-    graph.add_node_attr_key("x", 0)
+    graph_backend.add_node_attr_key("label", 0)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, np.asarray([0, 0, 0, 0]))
+    graph_backend.add_node_attr_key("y", 0)
+    graph_backend.add_node_attr_key("x", 0)
 
     # Create a mask
     mask_data = np.array([[True, True], [True, False]], dtype=bool)
     mask = Mask(mask_data, bbox=np.array([10, 20, 12, 22]))  # y_min, x_min, y_max, x_max
 
     # Add a node with mask and label
-    graph.add_node(
+    graph_backend.add_node(
         {
             DEFAULT_ATTR_KEYS.T: 0,
             "label": 5,
@@ -97,7 +98,7 @@ def test_graph_array_view_getitem_with_nodes() -> None:
         }
     )
 
-    array_view = GraphArrayView(graph=graph, shape=(10, 100, 100), attr_key="label")
+    array_view = GraphArrayView(graph=graph_backend, shape=(10, 100, 100), attr_key="label")
 
     # Get data for time point 0
     result = array_view[0]
@@ -121,16 +122,15 @@ def test_graph_array_view_getitem_with_nodes() -> None:
     assert np.asarray(result)[50, 50] == 0
 
 
-def test_graph_array_view_getitem_multiple_nodes() -> None:
+def test_graph_array_view_getitem_multiple_nodes(graph_backend: BaseGraph) -> None:
     """Test __getitem__ with multiple nodes at same time point."""
-    graph = RustWorkXGraph()
 
     # Add attribute keys
-    graph.add_node_attr_key("label", 0)
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
-    graph.add_node_attr_key("y", 0)
-    graph.add_node_attr_key("x", 0)
+    graph_backend.add_node_attr_key("label", 0)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, np.asarray([0, 0, 0, 0]))
+    graph_backend.add_node_attr_key("y", 0)
+    graph_backend.add_node_attr_key("x", 0)
 
     # Create two masks at different locations
     mask1_data = np.array([[True, True]], dtype=bool)
@@ -140,7 +140,7 @@ def test_graph_array_view_getitem_multiple_nodes() -> None:
     mask2 = Mask(mask2_data, bbox=np.array([30, 40, 31, 41]))
 
     # Add nodes with different labels
-    graph.add_node(
+    graph_backend.add_node(
         {
             DEFAULT_ATTR_KEYS.T: 0,
             "label": 3,
@@ -151,7 +151,7 @@ def test_graph_array_view_getitem_multiple_nodes() -> None:
         }
     )
 
-    graph.add_node(
+    graph_backend.add_node(
         {
             DEFAULT_ATTR_KEYS.T: 0,
             "label": 7,
@@ -162,7 +162,7 @@ def test_graph_array_view_getitem_multiple_nodes() -> None:
         }
     )
 
-    array_view = GraphArrayView(graph=graph, shape=(10, 100, 100), attr_key="label")
+    array_view = GraphArrayView(graph=graph_backend, shape=(10, 100, 100), attr_key="label")
 
     # Get data for time point 0
     result = array_view[0]
@@ -177,23 +177,22 @@ def test_graph_array_view_getitem_multiple_nodes() -> None:
     assert np.asarray(result)[50, 50] == 0
 
 
-def test_graph_array_view_getitem_boolean_dtype() -> None:
+def test_graph_array_view_getitem_boolean_dtype(graph_backend: BaseGraph) -> None:
     """Test __getitem__ with boolean attribute values."""
-    graph = RustWorkXGraph()
 
     # Add attribute keys
-    graph.add_node_attr_key("is_active", False)
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
-    graph.add_node_attr_key("y", 0)
-    graph.add_node_attr_key("x", 0)
+    graph_backend.add_node_attr_key("is_active", False)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, np.asarray([0, 0, 0, 0]))
+    graph_backend.add_node_attr_key("y", 0)
+    graph_backend.add_node_attr_key("x", 0)
 
     # Create a mask
     mask_data = np.array([[True]], dtype=bool)
     mask = Mask(mask_data, bbox=np.array([10, 20, 11, 21]))
 
     # Add a node with boolean attribute
-    graph.add_node(
+    graph_backend.add_node(
         {
             DEFAULT_ATTR_KEYS.T: 0,
             "is_active": True,
@@ -204,7 +203,7 @@ def test_graph_array_view_getitem_boolean_dtype() -> None:
         }
     )
 
-    array_view = GraphArrayView(graph=graph, shape=(10, 100, 100), attr_key="is_active")
+    array_view = GraphArrayView(graph=graph_backend, shape=(10, 100, 100), attr_key="is_active")
 
     # Get data for time point 0
     result = array_view[0]
@@ -215,23 +214,22 @@ def test_graph_array_view_getitem_boolean_dtype() -> None:
     assert np.asarray(result)[0, 0] == 0  # False -> 0
 
 
-def test_graph_array_view_dtype_inference() -> None:
+def test_graph_array_view_dtype_inference(graph_backend: BaseGraph) -> None:
     """Test that dtype is properly inferred from data."""
-    graph = RustWorkXGraph()
 
     # Add attribute keys
-    graph.add_node_attr_key("float_label", 0.0)
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
-    graph.add_node_attr_key("y", 0)
-    graph.add_node_attr_key("x", 0)
+    graph_backend.add_node_attr_key("float_label", 0.0)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, np.asarray([0, 0, 0, 0]))
+    graph_backend.add_node_attr_key("y", 0)
+    graph_backend.add_node_attr_key("x", 0)
 
     # Create a mask
     mask_data = np.array([[True]], dtype=bool)
     mask = Mask(mask_data, bbox=np.array([10, 20, 11, 21]))
 
     # Add a node with float attribute
-    graph.add_node(
+    graph_backend.add_node(
         {
             DEFAULT_ATTR_KEYS.T: 0,
             "float_label": 3.14,
@@ -242,7 +240,7 @@ def test_graph_array_view_dtype_inference() -> None:
         }
     )
 
-    array_view = GraphArrayView(graph=graph, shape=(10, 100, 100), attr_key="float_label")
+    array_view = GraphArrayView(graph=graph_backend, shape=(10, 100, 100), attr_key="float_label")
 
     # Get data to trigger dtype inference
     _ = array_view[0]
@@ -257,16 +255,16 @@ def test_graph_array_view_dtype_inference() -> None:
         (10, 100, 100, 100),
     ]
 )
-def multi_node_graph_from_image(request) -> GraphArrayView:
+def multi_node_graph_from_image(request, graph_backend) -> tuple[GraphArrayView, np.ndarray]:
     """Fixture to create a graph with multiple nodes for testing."""
     shape = request.param
     label = np.zeros(shape, dtype=np.uint8)
     for i in range(shape[0]):
         label[i, 10:20, 10:20] = i + 1
-    graph = RustWorkXGraph()
+
     nodes_operator = RegionPropsNodes(extra_properties=["label"])
-    nodes_operator.add_nodes(graph, labels=label)
-    return GraphArrayView(graph=graph, shape=shape, attr_key="label"), label
+    nodes_operator.add_nodes(graph_backend, labels=label)
+    return GraphArrayView(graph=graph_backend, shape=shape, attr_key="label"), label
 
 
 def test_graph_array_view_equal(multi_node_graph_from_image) -> None:
@@ -340,10 +338,40 @@ def test_graph_array_view_getitem_time_index_nested(multi_node_graph_from_image,
         assert np.array_equal(actual_array, expected_array), msg
 
 
-def test_graph_array_set_options() -> None:
+def test_graph_array_set_options(graph_backend: BaseGraph) -> None:
     with Options(gav_chunk_shape=(512, 512), gav_default_dtype=np.int16):
-        empty_graph = RustWorkXGraph()
-        empty_graph.add_node_attr_key("label", 0)
-        array_view = GraphArrayView(graph=empty_graph, shape=(10, 100, 100), attr_key="label")
+        graph_backend.add_node_attr_key("label", 0)
+        graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
+        graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, np.asarray([0, 0, 0, 0]))
+        array_view = GraphArrayView(graph=graph_backend, shape=(10, 100, 100), attr_key="label")
         assert array_view.chunk_shape == (512, 512)
         assert array_view.dtype == np.int16
+
+
+def test_graph_array_raise_error_on_absent_attr_key(graph_backend: BaseGraph) -> None:
+    """Test that GraphArrayView raises error if attr_key is absent in the graph or not specified."""
+
+    # Do not add any attribute keys
+
+    with pytest.raises(ValueError, match="Attribute key 'label' not found in graph"):
+        GraphArrayView(graph=graph_backend, shape=(10, 100, 100), attr_key="label")
+    with pytest.raises(TypeError, match="missing 1 required positional argument: 'attr_key'"):
+        GraphArrayView(graph=graph_backend, shape=(10, 100, 100))  # type: ignore
+
+
+def test_graph_array_raise_error_on_non_scalar_attr_key(graph_backend: BaseGraph) -> None:
+    """Test that GraphArrayView raises error if attr_key values are non-scalar."""
+
+    # Add a attribute key
+    graph_backend.add_node_attr_key("label", np.array([0, 1]))  # Non-scalar default value
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
+    graph_backend.add_node(
+        {
+            DEFAULT_ATTR_KEYS.T: 0,
+            "label": np.array([1, 2]),  # Non-scalar value
+            DEFAULT_ATTR_KEYS.MASK: Mask(np.array([[True]], dtype=bool), bbox=np.array([0, 0, 1, 1])),
+        }
+    )
+
+    with pytest.raises(ValueError, match="Attribute values for key 'label' must be scalar"):
+        GraphArrayView(graph=graph_backend, shape=(10, 100, 100), attr_key="label")
