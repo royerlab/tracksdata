@@ -233,7 +233,7 @@ def test_bbox_spatial_filter_error_handling() -> None:
 
 
 def test_add_and_remove_node(graph_backend: BaseGraph) -> None:
-    graph_backend.add_node_attr_key("bbox", None)
+    graph_backend.add_node_attr_key("bbox", np.asarray([0, 0, 0, 0]))
 
     # testing if _node_tree is created in BBoxSpatialFilter when graph is empty
     _ = BBoxSpatialFilter(graph_backend, frame_attr_key="t", bbox_attr_key="bbox")
