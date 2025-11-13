@@ -180,14 +180,14 @@ class GraphArrayView(BaseReadOnlyArray):
 
         chunk_shape = chunk_shape or get_options().gav_chunk_shape
         if isinstance(chunk_shape, int):
-            chunk_shape = (chunk_shape,) * (len(shape) - 1)
-        elif len(chunk_shape) < len(shape) - 1:
-            chunk_shape = (1,) * (len(shape) - 1 - len(chunk_shape)) + tuple(chunk_shape)
+            chunk_shape = (chunk_shape,) * (len(self.original_shape) - 1)
+        elif len(chunk_shape) < len(self.original_shape) - 1:
+            chunk_shape = (1,) * (len(self.original_shape) - 1 - len(chunk_shape)) + tuple(chunk_shape)
 
         self.chunk_shape = chunk_shape
         self.buffer_cache_size = buffer_cache_size or get_options().gav_buffer_cache_size
 
-        self._indices = tuple(slice(0, s) for s in shape)
+        self._indices = tuple(slice(0, s) for s in self.original_shape)
         self._cache = NDChunkCache(
             compute_func=self._fill_array,
             shape=self.shape[1:],
