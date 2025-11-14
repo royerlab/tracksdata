@@ -488,6 +488,8 @@ class SQLGraph(BaseGraph):
             pass
 
         if len(metadata.tables) > 0 and not overwrite:
+            for table in metadata.tables.values():
+                self._restore_pickled_column_types(table)
             for table_name, table in metadata.tables.items():
                 cls = type(
                     table_name,
@@ -536,6 +538,11 @@ class SQLGraph(BaseGraph):
         self.Edge = Edge
         self.Overlap = Overlap
         self.Metadata = Metadata
+
+    def _restore_pickled_column_types(self, table: sa.Table) -> None:
+        for column in table.columns:
+            if isinstance(column.type, sa.LargeBinary):
+                column.type = sa.PickleType()
 
     def _polars_schema_override(self, table_class: type[DeclarativeBase]) -> SchemaDict:
         return {

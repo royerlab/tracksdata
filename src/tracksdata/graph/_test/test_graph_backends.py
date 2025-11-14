@@ -1490,6 +1490,27 @@ def test_compute_overlaps_multiple_timepoints(graph_backend: BaseGraph) -> None:
     assert [node1_t0, node2_t0] in valid_overlaps
 
 
+def test_sql_graph_mask_update_survives_reload(tmp_path: Path) -> None:
+    """Ensure SQLGraph keeps pickled column types after reloading from disk."""
+    db_path = tmp_path / "mask_graph.db"
+    graph = SQLGraph("sqlite", str(db_path))
+    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
+
+    mask_data = np.array([[True, False], [False, True]], dtype=bool)
+    mask = Mask(mask_data, bbox=np.array([0, 0, 2, 2]))
+    node_id = graph.add_node({"t": 0, DEFAULT_ATTR_KEYS.MASK: mask})
+
+    # Dispose engine before reopening to ensure sqlite file is released.
+    graph._engine.dispose()
+
+    reloaded = SQLGraph("sqlite", str(db_path))
+    reloaded.update_node_attrs(node_ids=[node_id], attrs={DEFAULT_ATTR_KEYS.MASK: [mask]})
+    stored_mask = reloaded.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.MASK])[DEFAULT_ATTR_KEYS.MASK].to_list()[0]
+
+    assert isinstance(stored_mask, Mask)
+    np.testing.assert_array_equal(stored_mask.mask, mask_data)
+
+
 def test_compute_overlaps_invalid_threshold(graph_backend: BaseGraph) -> None:
     """Test compute_overlaps with invalid threshold values."""
     with pytest.raises(ValueError, match=r"iou_threshold must be between 0.0 and 1\.0"):
