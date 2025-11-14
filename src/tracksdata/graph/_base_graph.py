@@ -734,8 +734,9 @@ class BaseGraph(abc.ABC):
 
     def to_ctc(
         self,
-        shape: tuple[int, ...],
         output_dir: str | Path,
+        *,
+        shape: tuple[int, ...] | None = None,
         tracklet_id_key: str = DEFAULT_ATTR_KEYS.TRACKLET_ID,
         overwrite: bool = False,
     ) -> None:
@@ -744,10 +745,11 @@ class BaseGraph(abc.ABC):
 
         Parameters
         ----------
-        shape : tuple[int, ...]
-            The shape of the label images (T, (Z), Y, X)
         output_dir : str | Path
             The directory to save the graph to.
+        shape : tuple[int, ...]
+            The shape of the label images (T, (Z), Y, X).
+            If None, the shape is inferred from the graph metadata `shape` key.
         tracklet_id_key : str
             The attribute key to use for the track IDs.
         overwrite : bool
