@@ -332,10 +332,10 @@ def evaluate_ctc_metrics(
         LOG.warning("Input graph has no nodes, returning -1.0 for all metrics.")
         return dict.fromkeys(metrics, -1.0)
 
-    if input_tracklet_id_key not in input_graph.node_attr_keys:
+    if input_reset or input_tracklet_id_key not in input_graph.node_attr_keys:
         input_graph.assign_tracklet_ids(input_tracklet_id_key, reset=input_reset)
 
-    if reference_tracklet_id_key not in reference_graph.node_attr_keys:
+    if reference_reset or reference_tracklet_id_key not in reference_graph.node_attr_keys:
         reference_graph.assign_tracklet_ids(reference_tracklet_id_key, reset=reference_reset)
 
     input_tracks, reference_tracks, matching_data = compute_ctc_metrics_data(
