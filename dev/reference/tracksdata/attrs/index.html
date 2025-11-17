@@ -2202,7 +2202,9 @@ in ambiguous cases.</p>
 <h3 class="doc doc-heading" id="tracksdata.attrs.Attr._delegate_comparison_operator">
 <code class="doc-symbol doc-symbol-heading doc-symbol-method"></code> <span class="doc doc-object-name doc-function-name">_delegate_comparison_operator</span>
 </h3>
-<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a href="#__codelineno-0-1" id="__codelineno-0-1" name="__codelineno-0-1"></a><span class="nf">_delegate_comparison_operator</span><span class="p">(</span><span class="n">other</span><span class="p">:</span> <span class="n">ExprInput</span><span class="p">,</span> <span class="n">op</span><span class="p">:</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">reverse</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AttrComparison</span> <span class="o">|</span> <span class="n">Attr</span>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a href="#__codelineno-0-1" id="__codelineno-0-1" name="__codelineno-0-1"></a><span class="nf">_delegate_comparison_operator</span><span class="p">(</span>
+</span><span id="__span-0-2"><a href="#__codelineno-0-2" id="__codelineno-0-2" name="__codelineno-0-2"></a>    <span class="n">other</span><span class="p">:</span> <span class="n">ExprInput</span><span class="p">,</span> <span class="n">op</span><span class="p">:</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">reverse</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+</span><span id="__span-0-3"><a href="#__codelineno-0-3" id="__codelineno-0-3" name="__codelineno-0-3"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AttrComparison</span> <span class="o">|</span> <span class="n">Attr</span>
 </span></code></pre></div>
 <div class="doc doc-contents">
 <p>Simplified version of <code>_delegate_operator</code> for comparison operators.
@@ -2334,7 +2336,11 @@ not possible, it will return an <a class="autorefs autorefs-internal" href="#tra
 <h3 class="doc doc-heading" id="tracksdata.attrs.Attr._delegate_operator">
 <code class="doc-symbol doc-symbol-heading doc-symbol-method"></code> <span class="doc doc-object-name doc-function-name">_delegate_operator</span>
 </h3>
-<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a href="#__codelineno-0-1" id="__codelineno-0-1" name="__codelineno-0-1"></a><span class="nf">_delegate_operator</span><span class="p">(</span><span class="n">other</span><span class="p">:</span> <span class="n">ExprInput</span><span class="p">,</span> <span class="n">op</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[</span><span class="n">Expr</span><span class="p">,</span> <span class="n">Expr</span><span class="p">],</span> <span class="n">Expr</span><span class="p">],</span> <span class="n">reverse</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Attr</span>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a href="#__codelineno-0-1" id="__codelineno-0-1" name="__codelineno-0-1"></a><span class="nf">_delegate_operator</span><span class="p">(</span>
+</span><span id="__span-0-2"><a href="#__codelineno-0-2" id="__codelineno-0-2" name="__codelineno-0-2"></a>    <span class="n">other</span><span class="p">:</span> <span class="n">ExprInput</span><span class="p">,</span>
+</span><span id="__span-0-3"><a href="#__codelineno-0-3" id="__codelineno-0-3" name="__codelineno-0-3"></a>    <span class="n">op</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[</span><span class="n">Expr</span><span class="p">,</span> <span class="n">Expr</span><span class="p">],</span> <span class="n">Expr</span><span class="p">],</span>
+</span><span id="__span-0-4"><a href="#__codelineno-0-4" id="__codelineno-0-4" name="__codelineno-0-4"></a>    <span class="n">reverse</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-0-5"><a href="#__codelineno-0-5" id="__codelineno-0-5" name="__codelineno-0-5"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Attr</span>
 </span></code></pre></div>
 <div class="doc doc-contents">
 <p>Delegate the operator to the expression.</p>
@@ -2730,7 +2736,11 @@ not possible, it will return an <a class="autorefs autorefs-internal" href="#tra
 <h2 class="doc doc-heading" id="tracksdata.attrs.AttrComparison">
 <code class="doc-symbol doc-symbol-heading doc-symbol-class"></code> <span class="doc doc-object-name doc-class-name">AttrComparison</span>
 </h2>
-<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a href="#__codelineno-0-1" id="__codelineno-0-1" name="__codelineno-0-1"></a><span class="nf">AttrComparison</span><span class="p">(</span><span class="n">attr</span><span class="p">:</span> <span class="n">Attr</span><span class="p">,</span> <span class="n">op</span><span class="p">:</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">other</span><span class="p">:</span> <span class="n">ExprInput</span> <span class="o">|</span> <span class="n">MembershipExprInput</span><span class="p">)</span>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a href="#__codelineno-0-1" id="__codelineno-0-1" name="__codelineno-0-1"></a><span class="nf">AttrComparison</span><span class="p">(</span>
+</span><span id="__span-0-2"><a href="#__codelineno-0-2" id="__codelineno-0-2" name="__codelineno-0-2"></a>    <span class="n">attr</span><span class="p">:</span> <span class="n">Attr</span><span class="p">,</span>
+</span><span id="__span-0-3"><a href="#__codelineno-0-3" id="__codelineno-0-3" name="__codelineno-0-3"></a>    <span class="n">op</span><span class="p">:</span> <span class="n">Callable</span><span class="p">,</span>
+</span><span id="__span-0-4"><a href="#__codelineno-0-4" id="__codelineno-0-4" name="__codelineno-0-4"></a>    <span class="n">other</span><span class="p">:</span> <span class="n">ExprInput</span> <span class="o">|</span> <span class="n">MembershipExprInput</span><span class="p">,</span>
+</span><span id="__span-0-5"><a href="#__codelineno-0-5" id="__codelineno-0-5" name="__codelineno-0-5"></a><span class="p">)</span>
 </span></code></pre></div>
 <div class="doc doc-contents">
 <p>Class to store a comparison between an <a class="autorefs autorefs-internal" href="#tracksdata.attrs.Attr" title="            Attr">Attr</a> and a value
@@ -3125,7 +3135,9 @@ This is useful for evaluating the expression on a DataFrame.</p>
 <h3 class="doc doc-heading" id="tracksdata.attrs.EdgeAttr._delegate_comparison_operator">
 <code class="doc-symbol doc-symbol-heading doc-symbol-method"></code> <span class="doc doc-object-name doc-function-name">_delegate_comparison_operator</span>
 </h3>
-<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a href="#__codelineno-0-1" id="__codelineno-0-1" name="__codelineno-0-1"></a><span class="nf">_delegate_comparison_operator</span><span class="p">(</span><span class="n">other</span><span class="p">:</span> <span class="n">ExprInput</span><span class="p">,</span> <span class="n">op</span><span class="p">:</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">reverse</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AttrComparison</span> <span class="o">|</span> <span class="n">Attr</span>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a href="#__codelineno-0-1" id="__codelineno-0-1" name="__codelineno-0-1"></a><span class="nf">_delegate_comparison_operator</span><span class="p">(</span>
+</span><span id="__span-0-2"><a href="#__codelineno-0-2" id="__codelineno-0-2" name="__codelineno-0-2"></a>    <span class="n">other</span><span class="p">:</span> <span class="n">ExprInput</span><span class="p">,</span> <span class="n">op</span><span class="p">:</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">reverse</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+</span><span id="__span-0-3"><a href="#__codelineno-0-3" id="__codelineno-0-3" name="__codelineno-0-3"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AttrComparison</span> <span class="o">|</span> <span class="n">Attr</span>
 </span></code></pre></div>
 <div class="doc doc-contents">
 <p>Simplified version of <code>_delegate_operator</code> for comparison operators.
@@ -3257,7 +3269,11 @@ not possible, it will return an <a class="autorefs autorefs-internal" href="#tra
 <h3 class="doc doc-heading" id="tracksdata.attrs.EdgeAttr._delegate_operator">
 <code class="doc-symbol doc-symbol-heading doc-symbol-method"></code> <span class="doc doc-object-name doc-function-name">_delegate_operator</span>
 </h3>
-<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a href="#__codelineno-0-1" id="__codelineno-0-1" name="__codelineno-0-1"></a><span class="nf">_delegate_operator</span><span class="p">(</span><span class="n">other</span><span class="p">:</span> <span class="n">ExprInput</span><span class="p">,</span> <span class="n">op</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[</span><span class="n">Expr</span><span class="p">,</span> <span class="n">Expr</span><span class="p">],</span> <span class="n">Expr</span><span class="p">],</span> <span class="n">reverse</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Attr</span>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a href="#__codelineno-0-1" id="__codelineno-0-1" name="__codelineno-0-1"></a><span class="nf">_delegate_operator</span><span class="p">(</span>
+</span><span id="__span-0-2"><a href="#__codelineno-0-2" id="__codelineno-0-2" name="__codelineno-0-2"></a>    <span class="n">other</span><span class="p">:</span> <span class="n">ExprInput</span><span class="p">,</span>
+</span><span id="__span-0-3"><a href="#__codelineno-0-3" id="__codelineno-0-3" name="__codelineno-0-3"></a>    <span class="n">op</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[</span><span class="n">Expr</span><span class="p">,</span> <span class="n">Expr</span><span class="p">],</span> <span class="n">Expr</span><span class="p">],</span>
+</span><span id="__span-0-4"><a href="#__codelineno-0-4" id="__codelineno-0-4" name="__codelineno-0-4"></a>    <span class="n">reverse</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-0-5"><a href="#__codelineno-0-5" id="__codelineno-0-5" name="__codelineno-0-5"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Attr</span>
 </span></code></pre></div>
 <div class="doc doc-contents">
 <p>Delegate the operator to the expression.</p>
@@ -3908,7 +3924,9 @@ not possible, it will return an <a class="autorefs autorefs-internal" href="#tra
 <h3 class="doc doc-heading" id="tracksdata.attrs.NodeAttr._delegate_comparison_operator">
 <code class="doc-symbol doc-symbol-heading doc-symbol-method"></code> <span class="doc doc-object-name doc-function-name">_delegate_comparison_operator</span>
 </h3>
-<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a href="#__codelineno-0-1" id="__codelineno-0-1" name="__codelineno-0-1"></a><span class="nf">_delegate_comparison_operator</span><span class="p">(</span><span class="n">other</span><span class="p">:</span> <span class="n">ExprInput</span><span class="p">,</span> <span class="n">op</span><span class="p">:</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">reverse</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AttrComparison</span> <span class="o">|</span> <span class="n">Attr</span>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a href="#__codelineno-0-1" id="__codelineno-0-1" name="__codelineno-0-1"></a><span class="nf">_delegate_comparison_operator</span><span class="p">(</span>
+</span><span id="__span-0-2"><a href="#__codelineno-0-2" id="__codelineno-0-2" name="__codelineno-0-2"></a>    <span class="n">other</span><span class="p">:</span> <span class="n">ExprInput</span><span class="p">,</span> <span class="n">op</span><span class="p">:</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">reverse</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+</span><span id="__span-0-3"><a href="#__codelineno-0-3" id="__codelineno-0-3" name="__codelineno-0-3"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AttrComparison</span> <span class="o">|</span> <span class="n">Attr</span>
 </span></code></pre></div>
 <div class="doc doc-contents">
 <p>Simplified version of <code>_delegate_operator</code> for comparison operators.
@@ -4040,7 +4058,11 @@ not possible, it will return an <a class="autorefs autorefs-internal" href="#tra
 <h3 class="doc doc-heading" id="tracksdata.attrs.NodeAttr._delegate_operator">
 <code class="doc-symbol doc-symbol-heading doc-symbol-method"></code> <span class="doc doc-object-name doc-function-name">_delegate_operator</span>
 </h3>
-<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a href="#__codelineno-0-1" id="__codelineno-0-1" name="__codelineno-0-1"></a><span class="nf">_delegate_operator</span><span class="p">(</span><span class="n">other</span><span class="p">:</span> <span class="n">ExprInput</span><span class="p">,</span> <span class="n">op</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[</span><span class="n">Expr</span><span class="p">,</span> <span class="n">Expr</span><span class="p">],</span> <span class="n">Expr</span><span class="p">],</span> <span class="n">reverse</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Attr</span>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a href="#__codelineno-0-1" id="__codelineno-0-1" name="__codelineno-0-1"></a><span class="nf">_delegate_operator</span><span class="p">(</span>
+</span><span id="__span-0-2"><a href="#__codelineno-0-2" id="__codelineno-0-2" name="__codelineno-0-2"></a>    <span class="n">other</span><span class="p">:</span> <span class="n">ExprInput</span><span class="p">,</span>
+</span><span id="__span-0-3"><a href="#__codelineno-0-3" id="__codelineno-0-3" name="__codelineno-0-3"></a>    <span class="n">op</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[</span><span class="n">Expr</span><span class="p">,</span> <span class="n">Expr</span><span class="p">],</span> <span class="n">Expr</span><span class="p">],</span>
+</span><span id="__span-0-4"><a href="#__codelineno-0-4" id="__codelineno-0-4" name="__codelineno-0-4"></a>    <span class="n">reverse</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-0-5"><a href="#__codelineno-0-5" id="__codelineno-0-5" name="__codelineno-0-5"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Attr</span>
 </span></code></pre></div>
 <div class="doc doc-contents">
 <p>Delegate the operator to the expression.</p>
@@ -4558,7 +4580,9 @@ not possible, it will return an <a class="autorefs autorefs-internal" href="#tra
 <h2 class="doc doc-heading" id="tracksdata.attrs.attr_comps_to_strs">
 <code class="doc-symbol doc-symbol-heading doc-symbol-function"></code> <span class="doc doc-object-name doc-function-name">attr_comps_to_strs</span>
 </h2>
-<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a href="#__codelineno-0-1" id="__codelineno-0-1" name="__codelineno-0-1"></a><span class="nf">attr_comps_to_strs</span><span class="p">(</span><span class="n">attr_comps</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="n">AttrComparison</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a href="#__codelineno-0-1" id="__codelineno-0-1" name="__codelineno-0-1"></a><span class="nf">attr_comps_to_strs</span><span class="p">(</span>
+</span><span id="__span-0-2"><a href="#__codelineno-0-2" id="__codelineno-0-2" name="__codelineno-0-2"></a>    <span class="n">attr_comps</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="n">AttrComparison</span><span class="p">],</span>
+</span><span id="__span-0-3"><a href="#__codelineno-0-3" id="__codelineno-0-3" name="__codelineno-0-3"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>
 </span></code></pre></div>
 <div class="doc doc-contents">
 <p>Convert a list of attribute comparisons to a list of strings.</p>
@@ -4622,7 +4646,11 @@ not possible, it will return an <a class="autorefs autorefs-internal" href="#tra
 <h2 class="doc doc-heading" id="tracksdata.attrs.polars_reduce_attr_comps">
 <code class="doc-symbol doc-symbol-heading doc-symbol-function"></code> <span class="doc doc-object-name doc-function-name">polars_reduce_attr_comps</span>
 </h2>
-<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a href="#__codelineno-0-1" id="__codelineno-0-1" name="__codelineno-0-1"></a><span class="nf">polars_reduce_attr_comps</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">DataFrame</span><span class="p">,</span> <span class="n">attr_comps</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="n">AttrComparison</span><span class="p">],</span> <span class="n">reduce_op</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[</span><span class="n">Expr</span><span class="p">,</span> <span class="n">Expr</span><span class="p">],</span> <span class="n">Expr</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">pl</span><span class="o">.</span><span class="n">Expr</span>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a href="#__codelineno-0-1" id="__codelineno-0-1" name="__codelineno-0-1"></a><span class="nf">polars_reduce_attr_comps</span><span class="p">(</span>
+</span><span id="__span-0-2"><a href="#__codelineno-0-2" id="__codelineno-0-2" name="__codelineno-0-2"></a>    <span class="n">df</span><span class="p">:</span> <span class="n">DataFrame</span><span class="p">,</span>
+</span><span id="__span-0-3"><a href="#__codelineno-0-3" id="__codelineno-0-3" name="__codelineno-0-3"></a>    <span class="n">attr_comps</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="n">AttrComparison</span><span class="p">],</span>
+</span><span id="__span-0-4"><a href="#__codelineno-0-4" id="__codelineno-0-4" name="__codelineno-0-4"></a>    <span class="n">reduce_op</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[</span><span class="n">Expr</span><span class="p">,</span> <span class="n">Expr</span><span class="p">],</span> <span class="n">Expr</span><span class="p">],</span>
+</span><span id="__span-0-5"><a href="#__codelineno-0-5" id="__codelineno-0-5" name="__codelineno-0-5"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pl</span><span class="o">.</span><span class="n">Expr</span>
 </span></code></pre></div>
 <div class="doc doc-contents">
 <p>Reduce a list of attribute comparisons into a single polars expression.</p>
@@ -4726,7 +4754,9 @@ not possible, it will return an <a class="autorefs autorefs-internal" href="#tra
 <h2 class="doc doc-heading" id="tracksdata.attrs.split_attr_comps">
 <code class="doc-symbol doc-symbol-heading doc-symbol-function"></code> <span class="doc doc-object-name doc-function-name">split_attr_comps</span>
 </h2>
-<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a href="#__codelineno-0-1" id="__codelineno-0-1" name="__codelineno-0-1"></a><span class="nf">split_attr_comps</span><span class="p">(</span><span class="n">attr_comps</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="n">AttrComparison</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="n">AttrComparison</span><span class="p">],</span> <span class="nb">list</span><span class="p">[</span><span class="n">AttrComparison</span><span class="p">]]</span>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a href="#__codelineno-0-1" id="__codelineno-0-1" name="__codelineno-0-1"></a><span class="nf">split_attr_comps</span><span class="p">(</span>
+</span><span id="__span-0-2"><a href="#__codelineno-0-2" id="__codelineno-0-2" name="__codelineno-0-2"></a>    <span class="n">attr_comps</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="n">AttrComparison</span><span class="p">],</span>
+</span><span id="__span-0-3"><a href="#__codelineno-0-3" id="__codelineno-0-3" name="__codelineno-0-3"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="n">AttrComparison</span><span class="p">],</span> <span class="nb">list</span><span class="p">[</span><span class="n">AttrComparison</span><span class="p">]]</span>
 </span></code></pre></div>
 <div class="doc doc-contents">
 <p>Split a list of attribute comparisons into node and edge attribute comparisons.</p>
