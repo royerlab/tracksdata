@@ -773,6 +773,56 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#tracksdata.functional.ancestral_connected_edges" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-function"></code>&nbsp;ancestral_connected_edges
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" ancestral_connected_edges">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tracksdata.functional.ancestral_connected_edges(input_graph)" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-parameter"></code>&nbsp;input_graph
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tracksdata.functional.ancestral_connected_edges(reference_graph)" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-parameter"></code>&nbsp;reference_graph
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tracksdata.functional.ancestral_connected_edges(match)" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-parameter"></code>&nbsp;match
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#tracksdata.functional.apply_tiled" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1451,6 +1501,56 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#tracksdata.functional.ancestral_connected_edges" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-function"></code>&nbsp;ancestral_connected_edges
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" ancestral_connected_edges">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tracksdata.functional.ancestral_connected_edges(input_graph)" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-parameter"></code>&nbsp;input_graph
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tracksdata.functional.ancestral_connected_edges(reference_graph)" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-parameter"></code>&nbsp;reference_graph
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tracksdata.functional.ancestral_connected_edges(match)" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-parameter"></code>&nbsp;match
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#tracksdata.functional.apply_tiled" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1811,6 +1911,13 @@
 <p><span class="doc-section-title">Functions:</span></p>
     <ul>
           <li class="doc-section-item field-body">
+            <b><code><a class="autorefs autorefs-internal" title="            ancestral_connected_edges (tracksdata.functional.ancestral_connected_edges)" href="#tracksdata.functional.ancestral_connected_edges">ancestral_connected_edges</a></code></b>
+            –
+            <div class="doc-md-description">
+              <p>Let an ancestral path be any sequence from (target, source)-edges in the <code>reference_graph</code>.</p>
+            </div>
+          </li>
+          <li class="doc-section-item field-body">
             <b><code><a class="autorefs autorefs-internal" title="            apply_tiled (tracksdata.functional.apply_tiled)" href="#tracksdata.functional.apply_tiled">apply_tiled</a></code></b>
             –
             <div class="doc-md-description">
@@ -1947,6 +2054,192 @@ By default "t", "z", "y", "x" are included. If some columns are not present, the
 
 </div>
 
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="tracksdata.functional.ancestral_connected_edges" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-function"></code>            <span class="doc doc-object-name doc-function-name">ancestral_connected_edges</span>
+
+
+</h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">ancestral_connected_edges</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">input_graph</span><span class="p">:</span> <span class="n">BaseGraph</span><span class="p">,</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">reference_graph</span><span class="p">:</span> <span class="n">BaseGraph</span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">match</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Let an ancestral path be any sequence from (target, source)-edges in the <code>reference_graph</code>.
+This function returns the subset of edges in the <code>input_graph</code> that are
+part of an ancestral path in the reference graph.</p>
+<p>IMPORTANT: This function updates the <code>input_graph</code> in place when matching
+with the <code>reference_graph</code>.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+<h3 id="tracksdata.functional.ancestral_connected_edges(input_graph)" class="doc doc-heading doc-heading-parameter">              <b><code>input_graph</code></b>
+</h3>              (<code><a class="autorefs autorefs-internal" title="            BaseGraph (tracksdata.graph.BaseGraph)" href="../graph/#tracksdata.graph.BaseGraph">BaseGraph</a></code>)
+          –
+          <div class="doc-md-description">
+            <p>The input graph.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+<h3 id="tracksdata.functional.ancestral_connected_edges(reference_graph)" class="doc doc-heading doc-heading-parameter">              <b><code>reference_graph</code></b>
+</h3>              (<code><a class="autorefs autorefs-internal" title="            BaseGraph (tracksdata.graph.BaseGraph)" href="../graph/#tracksdata.graph.BaseGraph">BaseGraph</a></code>)
+          –
+          <div class="doc-md-description">
+            <p>The reference graph.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+<h3 id="tracksdata.functional.ancestral_connected_edges(match)" class="doc doc-heading doc-heading-parameter">              <b><code>match</code></b>
+</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#bool">bool</a></code>, default:
+                  <code>True</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Whether to match the input graph with the reference graph.</p>
+          </div>
+        </li>
+    </ul>
+
+
+            <details class="mkdocstrings-source">
+              <summary>Source code in <code>src/tracksdata/functional/_labeling.py</code></summary>
+              <div class="language-python highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-80"> 80</a></span>
+<span class="normal"><a href="#__codelineno-0-81"> 81</a></span>
+<span class="normal"><a href="#__codelineno-0-82"> 82</a></span>
+<span class="normal"><a href="#__codelineno-0-83"> 83</a></span>
+<span class="normal"><a href="#__codelineno-0-84"> 84</a></span>
+<span class="normal"><a href="#__codelineno-0-85"> 85</a></span>
+<span class="normal"><a href="#__codelineno-0-86"> 86</a></span>
+<span class="normal"><a href="#__codelineno-0-87"> 87</a></span>
+<span class="normal"><a href="#__codelineno-0-88"> 88</a></span>
+<span class="normal"><a href="#__codelineno-0-89"> 89</a></span>
+<span class="normal"><a href="#__codelineno-0-90"> 90</a></span>
+<span class="normal"><a href="#__codelineno-0-91"> 91</a></span>
+<span class="normal"><a href="#__codelineno-0-92"> 92</a></span>
+<span class="normal"><a href="#__codelineno-0-93"> 93</a></span>
+<span class="normal"><a href="#__codelineno-0-94"> 94</a></span>
+<span class="normal"><a href="#__codelineno-0-95"> 95</a></span>
+<span class="normal"><a href="#__codelineno-0-96"> 96</a></span>
+<span class="normal"><a href="#__codelineno-0-97"> 97</a></span>
+<span class="normal"><a href="#__codelineno-0-98"> 98</a></span>
+<span class="normal"><a href="#__codelineno-0-99"> 99</a></span>
+<span class="normal"><a href="#__codelineno-0-100">100</a></span>
+<span class="normal"><a href="#__codelineno-0-101">101</a></span>
+<span class="normal"><a href="#__codelineno-0-102">102</a></span>
+<span class="normal"><a href="#__codelineno-0-103">103</a></span>
+<span class="normal"><a href="#__codelineno-0-104">104</a></span>
+<span class="normal"><a href="#__codelineno-0-105">105</a></span>
+<span class="normal"><a href="#__codelineno-0-106">106</a></span>
+<span class="normal"><a href="#__codelineno-0-107">107</a></span>
+<span class="normal"><a href="#__codelineno-0-108">108</a></span>
+<span class="normal"><a href="#__codelineno-0-109">109</a></span>
+<span class="normal"><a href="#__codelineno-0-110">110</a></span>
+<span class="normal"><a href="#__codelineno-0-111">111</a></span>
+<span class="normal"><a href="#__codelineno-0-112">112</a></span>
+<span class="normal"><a href="#__codelineno-0-113">113</a></span>
+<span class="normal"><a href="#__codelineno-0-114">114</a></span>
+<span class="normal"><a href="#__codelineno-0-115">115</a></span>
+<span class="normal"><a href="#__codelineno-0-116">116</a></span>
+<span class="normal"><a href="#__codelineno-0-117">117</a></span>
+<span class="normal"><a href="#__codelineno-0-118">118</a></span>
+<span class="normal"><a href="#__codelineno-0-119">119</a></span>
+<span class="normal"><a href="#__codelineno-0-120">120</a></span>
+<span class="normal"><a href="#__codelineno-0-121">121</a></span>
+<span class="normal"><a href="#__codelineno-0-122">122</a></span>
+<span class="normal"><a href="#__codelineno-0-123">123</a></span>
+<span class="normal"><a href="#__codelineno-0-124">124</a></span>
+<span class="normal"><a href="#__codelineno-0-125">125</a></span>
+<span class="normal"><a href="#__codelineno-0-126">126</a></span>
+<span class="normal"><a href="#__codelineno-0-127">127</a></span>
+<span class="normal"><a href="#__codelineno-0-128">128</a></span>
+<span class="normal"><a href="#__codelineno-0-129">129</a></span>
+<span class="normal"><a href="#__codelineno-0-130">130</a></span>
+<span class="normal"><a href="#__codelineno-0-131">131</a></span>
+<span class="normal"><a href="#__codelineno-0-132">132</a></span>
+<span class="normal"><a href="#__codelineno-0-133">133</a></span>
+<span class="normal"><a href="#__codelineno-0-134">134</a></span>
+<span class="normal"><a href="#__codelineno-0-135">135</a></span>
+<span class="normal"><a href="#__codelineno-0-136">136</a></span>
+<span class="normal"><a href="#__codelineno-0-137">137</a></span>
+<span class="normal"><a href="#__codelineno-0-138">138</a></span>
+<span class="normal"><a href="#__codelineno-0-139">139</a></span>
+<span class="normal"><a href="#__codelineno-0-140">140</a></span>
+<span class="normal"><a href="#__codelineno-0-141">141</a></span></pre></div></td><td class="code"><div><pre><span></span><code><span id="__span-0-80"><a id="__codelineno-0-80" name="__codelineno-0-80"></a><span class="k">def</span><span class="w"> </span><span class="nf">ancestral_connected_edges</span><span class="p">(</span>
+</span><span id="__span-0-81"><a id="__codelineno-0-81" name="__codelineno-0-81"></a>    <span class="n">input_graph</span><span class="p">:</span> <span class="n">BaseGraph</span><span class="p">,</span>
+</span><span id="__span-0-82"><a id="__codelineno-0-82" name="__codelineno-0-82"></a>    <span class="n">reference_graph</span><span class="p">:</span> <span class="n">BaseGraph</span><span class="p">,</span>
+</span><span id="__span-0-83"><a id="__codelineno-0-83" name="__codelineno-0-83"></a>    <span class="n">match</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+</span><span id="__span-0-84"><a id="__codelineno-0-84" name="__codelineno-0-84"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">]:</span>
+</span><span id="__span-0-85"><a id="__codelineno-0-85" name="__codelineno-0-85"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+</span><span id="__span-0-86"><a id="__codelineno-0-86" name="__codelineno-0-86"></a><span class="sd">    Let an ancestral path be any sequence from (target, source)-edges in the `reference_graph`.</span>
+</span><span id="__span-0-87"><a id="__codelineno-0-87" name="__codelineno-0-87"></a><span class="sd">    This function returns the subset of edges in the `input_graph` that are</span>
+</span><span id="__span-0-88"><a id="__codelineno-0-88" name="__codelineno-0-88"></a><span class="sd">    part of an ancestral path in the reference graph.</span>
+</span><span id="__span-0-89"><a id="__codelineno-0-89" name="__codelineno-0-89"></a>
+</span><span id="__span-0-90"><a id="__codelineno-0-90" name="__codelineno-0-90"></a><span class="sd">    IMPORTANT: This function updates the `input_graph` in place when matching</span>
+</span><span id="__span-0-91"><a id="__codelineno-0-91" name="__codelineno-0-91"></a><span class="sd">    with the `reference_graph`.</span>
+</span><span id="__span-0-92"><a id="__codelineno-0-92" name="__codelineno-0-92"></a>
+</span><span id="__span-0-93"><a id="__codelineno-0-93" name="__codelineno-0-93"></a><span class="sd">    Parameters</span>
+</span><span id="__span-0-94"><a id="__codelineno-0-94" name="__codelineno-0-94"></a><span class="sd">    ----------</span>
+</span><span id="__span-0-95"><a id="__codelineno-0-95" name="__codelineno-0-95"></a><span class="sd">    input_graph : BaseGraph</span>
+</span><span id="__span-0-96"><a id="__codelineno-0-96" name="__codelineno-0-96"></a><span class="sd">        The input graph.</span>
+</span><span id="__span-0-97"><a id="__codelineno-0-97" name="__codelineno-0-97"></a><span class="sd">    reference_graph : BaseGraph</span>
+</span><span id="__span-0-98"><a id="__codelineno-0-98" name="__codelineno-0-98"></a><span class="sd">        The reference graph.</span>
+</span><span id="__span-0-99"><a id="__codelineno-0-99" name="__codelineno-0-99"></a><span class="sd">    match : bool, optional</span>
+</span><span id="__span-0-100"><a id="__codelineno-0-100" name="__codelineno-0-100"></a><span class="sd">        Whether to match the input graph with the reference graph.</span>
+</span><span id="__span-0-101"><a id="__codelineno-0-101" name="__codelineno-0-101"></a><span class="sd">    &quot;&quot;&quot;</span>
+</span><span id="__span-0-102"><a id="__codelineno-0-102" name="__codelineno-0-102"></a>    <span class="k">if</span> <span class="n">DEFAULT_ATTR_KEYS</span><span class="o">.</span><span class="n">TRACKLET_ID</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">reference_graph</span><span class="o">.</span><span class="n">node_attr_keys</span><span class="p">:</span>
+</span><span id="__span-0-103"><a id="__codelineno-0-103" name="__codelineno-0-103"></a>        <span class="n">tracklet_graph</span> <span class="o">=</span> <span class="n">reference_graph</span><span class="o">.</span><span class="n">assign_tracklet_ids</span><span class="p">()</span>
+</span><span id="__span-0-104"><a id="__codelineno-0-104" name="__codelineno-0-104"></a>    <span class="k">else</span><span class="p">:</span>
+</span><span id="__span-0-105"><a id="__codelineno-0-105" name="__codelineno-0-105"></a>        <span class="n">tracklet_graph</span> <span class="o">=</span> <span class="n">reference_graph</span><span class="o">.</span><span class="n">tracklet_graph</span><span class="p">()</span>
+</span><span id="__span-0-106"><a id="__codelineno-0-106" name="__codelineno-0-106"></a>
+</span><span id="__span-0-107"><a id="__codelineno-0-107" name="__codelineno-0-107"></a>    <span class="k">if</span> <span class="n">match</span><span class="p">:</span>
+</span><span id="__span-0-108"><a id="__codelineno-0-108" name="__codelineno-0-108"></a>        <span class="n">input_graph</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">reference_graph</span><span class="p">)</span>
+</span><span id="__span-0-109"><a id="__codelineno-0-109" name="__codelineno-0-109"></a>
+</span><span id="__span-0-110"><a id="__codelineno-0-110" name="__codelineno-0-110"></a>    <span class="k">elif</span> <span class="n">DEFAULT_ATTR_KEYS</span><span class="o">.</span><span class="n">MATCHED_NODE_ID</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">input_graph</span><span class="o">.</span><span class="n">node_attr_keys</span><span class="p">:</span>
+</span><span id="__span-0-111"><a id="__codelineno-0-111" name="__codelineno-0-111"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+</span><span id="__span-0-112"><a id="__codelineno-0-112" name="__codelineno-0-112"></a>            <span class="s2">&quot;`ancestral_connected_edges` requires the input graph to previously matched &quot;</span>
+</span><span id="__span-0-113"><a id="__codelineno-0-113" name="__codelineno-0-113"></a>            <span class="sa">f</span><span class="s2">&quot;and have a `</span><span class="si">{</span><span class="n">DEFAULT_ATTR_KEYS</span><span class="o">.</span><span class="n">MATCHED_NODE_ID</span><span class="si">}</span><span class="s2">` column when `match=False`&quot;</span>
+</span><span id="__span-0-114"><a id="__codelineno-0-114" name="__codelineno-0-114"></a>        <span class="p">)</span>
+</span><span id="__span-0-115"><a id="__codelineno-0-115" name="__codelineno-0-115"></a>
+</span><span id="__span-0-116"><a id="__codelineno-0-116" name="__codelineno-0-116"></a>    <span class="n">in_node_attrs</span> <span class="o">=</span> <span class="n">input_graph</span><span class="o">.</span><span class="n">node_attrs</span><span class="p">(</span><span class="n">attr_keys</span><span class="o">=</span><span class="p">[</span><span class="n">DEFAULT_ATTR_KEYS</span><span class="o">.</span><span class="n">NODE_ID</span><span class="p">,</span> <span class="n">DEFAULT_ATTR_KEYS</span><span class="o">.</span><span class="n">MATCHED_NODE_ID</span><span class="p">])</span>
+</span><span id="__span-0-117"><a id="__codelineno-0-117" name="__codelineno-0-117"></a>    <span class="n">ref_node_attrs</span> <span class="o">=</span> <span class="n">reference_graph</span><span class="o">.</span><span class="n">node_attrs</span><span class="p">(</span><span class="n">attr_keys</span><span class="o">=</span><span class="p">[</span><span class="n">DEFAULT_ATTR_KEYS</span><span class="o">.</span><span class="n">NODE_ID</span><span class="p">,</span> <span class="n">DEFAULT_ATTR_KEYS</span><span class="o">.</span><span class="n">TRACKLET_ID</span><span class="p">])</span>
+</span><span id="__span-0-118"><a id="__codelineno-0-118" name="__codelineno-0-118"></a>
+</span><span id="__span-0-119"><a id="__codelineno-0-119" name="__codelineno-0-119"></a>    <span class="n">in_node_attrs</span> <span class="o">=</span> <span class="n">in_node_attrs</span><span class="o">.</span><span class="n">filter</span><span class="p">(</span>
+</span><span id="__span-0-120"><a id="__codelineno-0-120" name="__codelineno-0-120"></a>        <span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="n">DEFAULT_ATTR_KEYS</span><span class="o">.</span><span class="n">MATCHED_NODE_ID</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">0</span><span class="p">,</span>
+</span><span id="__span-0-121"><a id="__codelineno-0-121" name="__codelineno-0-121"></a>    <span class="p">)</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+</span><span id="__span-0-122"><a id="__codelineno-0-122" name="__codelineno-0-122"></a>        <span class="n">ref_node_attrs</span><span class="p">,</span>
+</span><span id="__span-0-123"><a id="__codelineno-0-123" name="__codelineno-0-123"></a>        <span class="n">left_on</span><span class="o">=</span><span class="n">DEFAULT_ATTR_KEYS</span><span class="o">.</span><span class="n">MATCHED_NODE_ID</span><span class="p">,</span>
+</span><span id="__span-0-124"><a id="__codelineno-0-124" name="__codelineno-0-124"></a>        <span class="n">right_on</span><span class="o">=</span><span class="n">DEFAULT_ATTR_KEYS</span><span class="o">.</span><span class="n">NODE_ID</span><span class="p">,</span>
+</span><span id="__span-0-125"><a id="__codelineno-0-125" name="__codelineno-0-125"></a>        <span class="n">how</span><span class="o">=</span><span class="s2">&quot;left&quot;</span><span class="p">,</span>
+</span><span id="__span-0-126"><a id="__codelineno-0-126" name="__codelineno-0-126"></a>    <span class="p">)</span>
+</span><span id="__span-0-127"><a id="__codelineno-0-127" name="__codelineno-0-127"></a>
+</span><span id="__span-0-128"><a id="__codelineno-0-128" name="__codelineno-0-128"></a>    <span class="n">edge_attrs</span> <span class="o">=</span> <span class="n">input_graph</span><span class="o">.</span><span class="n">edge_attrs</span><span class="p">(</span><span class="n">attr_keys</span><span class="o">=</span><span class="p">[])</span>
+</span><span id="__span-0-129"><a id="__codelineno-0-129" name="__codelineno-0-129"></a>
+</span><span id="__span-0-130"><a id="__codelineno-0-130" name="__codelineno-0-130"></a>    <span class="n">edge_attrs</span> <span class="o">=</span> <span class="n">join_node_attrs_to_edges</span><span class="p">(</span>
+</span><span id="__span-0-131"><a id="__codelineno-0-131" name="__codelineno-0-131"></a>        <span class="n">node_attrs</span><span class="o">=</span><span class="n">in_node_attrs</span><span class="o">.</span><span class="n">select</span><span class="p">(</span><span class="n">DEFAULT_ATTR_KEYS</span><span class="o">.</span><span class="n">NODE_ID</span><span class="p">,</span> <span class="n">DEFAULT_ATTR_KEYS</span><span class="o">.</span><span class="n">TRACKLET_ID</span><span class="p">),</span>
+</span><span id="__span-0-132"><a id="__codelineno-0-132" name="__codelineno-0-132"></a>        <span class="n">edge_attrs</span><span class="o">=</span><span class="n">edge_attrs</span><span class="p">,</span>
+</span><span id="__span-0-133"><a id="__codelineno-0-133" name="__codelineno-0-133"></a>    <span class="p">)</span>
+</span><span id="__span-0-134"><a id="__codelineno-0-134" name="__codelineno-0-134"></a>
+</span><span id="__span-0-135"><a id="__codelineno-0-135" name="__codelineno-0-135"></a>    <span class="n">tracklet_ancestral_edges</span> <span class="o">=</span> <span class="n">_ancestral_edges</span><span class="p">(</span><span class="n">tracklet_graph</span><span class="p">)</span>
+</span><span id="__span-0-136"><a id="__codelineno-0-136" name="__codelineno-0-136"></a>    <span class="n">input_graph_ancestral_edges</span> <span class="o">=</span> <span class="n">_input_graph_ancestral_edges</span><span class="p">(</span>
+</span><span id="__span-0-137"><a id="__codelineno-0-137" name="__codelineno-0-137"></a>        <span class="n">edge_attrs</span><span class="o">=</span><span class="n">edge_attrs</span><span class="p">,</span>
+</span><span id="__span-0-138"><a id="__codelineno-0-138" name="__codelineno-0-138"></a>        <span class="n">ancestral_edges</span><span class="o">=</span><span class="n">tracklet_ancestral_edges</span><span class="p">,</span>
+</span><span id="__span-0-139"><a id="__codelineno-0-139" name="__codelineno-0-139"></a>    <span class="p">)</span>
+</span><span id="__span-0-140"><a id="__codelineno-0-140" name="__codelineno-0-140"></a>
+</span><span id="__span-0-141"><a id="__codelineno-0-141" name="__codelineno-0-141"></a>    <span class="k">return</span> <span class="n">input_graph_ancestral_edges</span>
+</span></code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-function">
 
