@@ -2137,7 +2137,7 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
     graph_backend.add_node_attr_key("x", 0.0)
     graph_backend.add_node_attr_key("y", 0.0)
     graph_backend.add_node_attr_key("z", 0.0)
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, np.array([0, 0, 1, 1], dtype=int))
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACKLET_ID, -1)
     graph_backend.add_node_attr_key("ndfeature", np.asarray([[1.0], [2.0], [3.0]]))
@@ -2305,3 +2305,19 @@ def test_pickle_roundtrip(graph_backend: BaseGraph) -> None:
 
     assert unpickled_graph.node_attr_keys == graph_backend.node_attr_keys
     assert unpickled_graph.edge_attr_keys == graph_backend.edge_attr_keys
+
+
+@pytest.mark.slow
+def test_sql_graph_huge_update() -> None:
+    # test is only executed if `--slow` is passed to pytest
+    graph = SQLGraph("sqlite", ":memory:")
+
+    n_nodes = 30_000_000
+    random_t = np.random.randint(0, 1000, n_nodes).tolist()
+    random_x = np.random.rand(n_nodes).tolist()
+    graph.bulk_add_nodes([{"t": t} for t in random_t])
+    graph.add_node_attr_key("x", -1.0)
+    graph.update_node_attrs(
+        attrs={"x": random_x},
+        node_ids=graph.node_ids(),
+    )

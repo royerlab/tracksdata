@@ -67,7 +67,7 @@ jobs:
     - name: Run tests with coverage
       uses: aganders3/headless-gui@v2
       with:
-        run: uv run pytest --cov=tracksdata --cov-report=xml
+        run: uv run pytest --cov=tracksdata --cov-report=xml src/tracksdata
 
     - name: Upload coverage to Codecov
       if: matrix.python-version == '3.12'

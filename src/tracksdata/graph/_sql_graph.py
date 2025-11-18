@@ -1,5 +1,5 @@
 import binascii
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
@@ -722,9 +722,7 @@ class SQLGraph(BaseGraph):
             node[DEFAULT_ATTR_KEYS.NODE_ID] = node_id
             node_ids.append(node_id)
 
-        with Session(self._engine) as session:
-            session.execute(sa.insert(self.Node), nodes)
-            session.commit()
+        self._chunked_sa_operation(Session.bulk_insert_mappings, self.Node, nodes)
 
         if is_signal_on(self.node_added):
             for node_id in node_ids:
@@ -876,14 +874,15 @@ class SQLGraph(BaseGraph):
         for edge in edges:
             _data_numpy_to_native(edge)
 
-        with Session(self._engine) as session:
-            if return_ids:
+        if return_ids:
+            with Session(self._engine) as session:
                 result = session.execute(sa.insert(self.Edge).returning(self.Edge.edge_id), edges)
                 session.commit()
                 return list(result.scalars().all())
-            else:
-                session.execute(sa.insert(self.Edge), edges)
-                session.commit()
+
+        else:
+            self._chunked_sa_operation(Session.bulk_insert_mappings, self.Edge, edges)
+            return None
 
     def add_overlap(
         self,
@@ -936,9 +935,7 @@ class SQLGraph(BaseGraph):
             overlaps = overlaps.tolist()
 
         overlaps = [{"source_id": source_id, "target_id": target_id} for source_id, target_id in overlaps]
-        with Session(self._engine) as session:
-            session.execute(sa.insert(self.Overlap), overlaps)
-            session.commit()
+        self._chunked_sa_operation(Session.bulk_insert_mappings, self.Overlap, overlaps)
 
     def overlaps(
         self,
@@ -1412,35 +1409,34 @@ class SQLGraph(BaseGraph):
         if ids is None:
             raise ValueError("`ids` must be provided to update with variable values.")
 
-        # Prepare values for bulk update
-        update_data = []
-
         for k, v in attrs.items():
-            if np.isscalar(v):
-                # Convert scalar to list of same length as ids
-                attrs[k] = [v] * len(ids)
-            else:
-                if hasattr(v, "tolist"):
-                    attrs[k] = v.tolist()
+            if not np.isscalar(v) and len(attrs[k]) != len(ids):
+                raise ValueError(f"Length mismatch: {len(attrs[k])} values for {len(ids)} {id_key}s")
 
-                # Validate length matches ids
-                if len(attrs[k]) != len(ids):
-                    raise ValueError(f"Length mismatch: {len(attrs[k])} values for {len(ids)} {id_key}s")
-
-        # Create list of dictionaries for bulk update (simple primary key)
-        for i, row_id in enumerate(ids):
-            row_data = {id_key: row_id}
-
-            # Add the attribute updates
-            for k, v_list in attrs.items():
-                row_data[k] = v_list[i]
-            update_data.append(row_data)
+        attrs[id_key] = ids
+        # using polars is faster and simpler than iterating in python
+        update_data = pl.DataFrame(attrs).to_dicts()
 
         LOG.info("update %s table with %d rows", table_class.__table__, len(update_data))
         LOG.info("update data sample: %s", update_data[:2])
 
+        self._chunked_sa_operation(Session.bulk_update_mappings, table_class, update_data)
+
+    def _chunked_sa_operation(
+        self,
+        session_op: Callable[[Session, type[DeclarativeBase], list[dict[str, Any]]], None],
+        table_class: type[DeclarativeBase],
+        data: list[dict[str, Any]],
+    ) -> None:
+        if len(data) == 0:
+            return
+
+        # chunked update is faster
+        # keep under 1000 values including every column
+        chunk_size = max(1, int(900 / len(data[0])))
         with Session(self._engine) as session:
-            session.execute(sa.update(table_class), update_data)
+            for i in range(0, len(data), chunk_size):
+                session_op(session, table_class, data[i : i + chunk_size])
             session.commit()
 
     def update_node_attrs(
