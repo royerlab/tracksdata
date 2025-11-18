@@ -23,7 +23,6 @@ def _ancestral_edges(tracklet_graph: rx.PyDiGraph) -> set[tuple[int, int]]:
     """
     # transverse graph backwards to find tracklet paths
     path_edges = set()
-    print(tracklet_graph.nodes())
 
     for rx_target_id in tracklet_graph.node_indices():
         target_track_id = tracklet_graph[rx_target_id]
