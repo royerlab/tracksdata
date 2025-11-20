@@ -1374,6 +1374,15 @@ class SQLGraph(BaseGraph):
         with Session(self._engine) as session:
             return int(session.query(self.Node).count())
 
+    def _sql_chunk_size(self) -> int:
+        if self._engine.dialect.name == "postgresql":
+            chunk_size = 30_000
+        else:  # for now everything else will use sqlite chunk size
+            # elif self._engine.dialect.name == "sqlite":
+            chunk_size = 900
+
+        return chunk_size
+
     def _update_table(
         self,
         table_class: type[DeclarativeBase],
@@ -1398,12 +1407,18 @@ class SQLGraph(BaseGraph):
             LOG.info("update %s table with scalar values: %s", table_class.__table__, attrs)
 
             with Session(self._engine) as session:
-                query = session.query(table_class)
-                if ids is not None:
-                    query = query.filter(getattr(table_class, id_key).in_(ids))
-                query.update(attrs)
-                session.commit()
-
+                if ids is None:
+                    query = session.query(table_class)
+                    query.update(attrs)
+                    session.commit()
+                else:
+                    # a bit custom and cannot be used with `_chunked_sa_operation`
+                    chunk_size = max(1, int(self._sql_chunk_size() / len(attrs)))
+                    table_id_attrs = getattr(table_class, id_key)
+                    for i in range(0, len(ids), chunk_size):
+                        query = session.query(table_class).filter(table_id_attrs.in_(ids[i : i + chunk_size]))
+                        query.update(attrs)
+                    session.commit()
             return
 
         if ids is None:
@@ -1433,7 +1448,7 @@ class SQLGraph(BaseGraph):
 
         # chunked update is faster
         # keep under 1000 values including every column
-        chunk_size = max(1, int(900 / len(data[0])))
+        chunk_size = max(1, int(self._sql_chunk_size() / len(data[0])))
         with Session(self._engine) as session:
             for i in range(0, len(data), chunk_size):
                 session_op(session, table_class, data[i : i + chunk_size])

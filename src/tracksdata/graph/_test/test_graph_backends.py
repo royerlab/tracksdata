@@ -2317,7 +2317,15 @@ def test_sql_graph_huge_update() -> None:
     random_x = np.random.rand(n_nodes).tolist()
     graph.bulk_add_nodes([{"t": t} for t in random_t])
     graph.add_node_attr_key("x", -1.0)
+
+    # testing with varying values
     graph.update_node_attrs(
         attrs={"x": random_x},
+        node_ids=graph.node_ids(),
+    )
+
+    # testing with scalar values
+    graph.update_node_attrs(
+        attrs={"x": 1.0},
         node_ids=graph.node_ids(),
     )
