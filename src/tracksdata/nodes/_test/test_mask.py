@@ -14,6 +14,49 @@ def test_mask_init() -> None:
     assert np.array_equal(mask._bbox, bbox)
 
 
+def test_mask_regionprops_bbox_aware() -> None:
+    """Regionprops should return absolute coordinates using the bbox offset."""
+    mask_array = np.array([[False, True], [True, False]], dtype=bool)
+    bbox = np.array([5, 10, 7, 12])
+
+    props = Mask(mask_array, bbox).regionprops
+
+    np.testing.assert_array_equal(props.bbox, bbox)
+    assert props.area == 2
+    np.testing.assert_allclose(props.centroid, np.array([5.5, 10.5]))
+
+    coords = np.array(sorted(map(tuple, props.coords.tolist())))
+    expected_coords = np.array(sorted([(5, 11), (6, 10)]))
+    np.testing.assert_array_equal(coords, expected_coords)
+
+
+def test_mask_regionprops_bbox_aware_3d() -> None:
+    """Regionprops should handle 3D masks and preserve absolute coordinates."""
+    mask_array = np.zeros((2, 2, 2), dtype=bool)
+    mask_array[0, 0, 1] = True
+    mask_array[1, 1, 0] = True
+    bbox = np.array([3, 4, 5, 5, 6, 7])
+
+    props = Mask(mask_array, bbox).regionprops
+
+    np.testing.assert_array_equal(props.bbox, bbox)
+    assert props.area == 2
+    np.testing.assert_allclose(props.centroid, np.array([3.5, 4.5, 5.5]))
+
+    coords = np.array(sorted(map(tuple, props.coords.tolist())))
+    expected_coords = np.array(sorted([(3, 4, 6), (4, 5, 5)]))
+    np.testing.assert_array_equal(coords, expected_coords)
+
+
+def test_mask_regionprops_empty() -> None:
+    """Regionprops should raise for empty masks."""
+    mask_array = np.zeros((2, 2), dtype=bool)
+    bbox = np.array([0, 0, 2, 2])
+
+    with pytest.raises(ValueError, match="single region"):
+        _ = Mask(mask_array, bbox).regionprops
+
+
 def test_mask_getstate_setstate() -> None:
     """Test Mask serialization and deserialization."""
     mask_array = np.array([[True, False], [False, True]], dtype=bool)

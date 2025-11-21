@@ -6,10 +6,30 @@ import blosc2
 import numpy as np
 import skimage.morphology as morph
 from numpy.typing import ArrayLike, NDArray
+from skimage.measure import regionprops
 
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.functional._iou import fast_intersection_with_bbox, fast_iou_with_bbox
 from tracksdata.nodes._generic_nodes import GenericFuncNodeAttrs
+
+
+class _MaskRegionProperties:
+    """
+    Lightweight wrapper around skimage's RegionProperties that adjusts
+    bounding box coordinates to the absolute image frame.
+    This is used since regionprops returns bbox coordinates relative to the mask.
+    """
+
+    def __init__(self, props, bbox: NDArray[np.int64]):
+        self._props = props
+        self._bbox = tuple(bbox.tolist())
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._props, name)
+
+    @property
+    def bbox(self) -> tuple[int, ...]:
+        return self._bbox
 
 
 @lru_cache(maxsize=5)
@@ -365,6 +385,26 @@ class Mask:
         self._bbox[self._mask.ndim :] += offset
         if image_shape is not None:
             self._crop_overhang(image_shape)
+
+    @cached_property
+    def regionprops(self):
+        """
+        Compute scikit-image regionprops for this mask.
+
+        The computation is aware of the mask bounding box, so coordinate-based
+        properties (e.g. centroid, coords, bbox) are returned in absolute
+        image coordinates.
+        """
+        props = regionprops(
+            self._mask.astype(np.uint16),
+            cache=True,
+            offset=tuple(self._bbox[: self._mask.ndim]),
+        )
+
+        if len(props) != 1:
+            raise ValueError("Expected a single region in mask to compute regionprops.")
+
+        return _MaskRegionProperties(props[0], self._bbox)
 
     @cached_property
     def size(self) -> int:
