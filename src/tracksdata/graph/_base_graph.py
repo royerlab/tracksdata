@@ -1521,7 +1521,7 @@ class BaseGraph(abc.ABC):
 
     def to_traccuracy_graph(self, array_view_kwargs: dict[str, Any] | None = None) -> "TrackingGraph":
         """
-        Convert the graph to a traccuracy graph.
+        Convert the graph to a `traccuracy.TrackingGraph`.
 
         Parameters
         ----------
@@ -1532,11 +1532,6 @@ class BaseGraph(abc.ABC):
         -------
         TrackingGraph
             A traccuracy graph.
-
-        See Also
-        --------
-        [to_traccuracy_graph][tracksdata.metrics._traccuracy.to_traccuracy_graph]:
-            Convert the graph to a traccuracy graph.
         """
         from tracksdata.metrics._traccuracy import to_traccuracy_graph
 
