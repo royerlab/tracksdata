@@ -2329,3 +2329,59 @@ def test_sql_graph_huge_update() -> None:
         attrs={"x": 1.0},
         node_ids=graph.node_ids(),
     )
+
+
+def test_to_traccuracy_graph(graph_backend: BaseGraph) -> None:
+    pytest.importorskip("traccuracy")
+    from traccuracy import run_metrics
+    from traccuracy.matchers import CTCMatcher
+    from traccuracy.metrics import CTCMetrics
+
+    # Create first graph (self) with masks
+    graph_backend.add_node_attr_key("x", 0.0)
+    graph_backend.add_node_attr_key("y", 0.0)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, np.zeros(4, dtype=int))
+    graph_backend.update_metadata(
+        shape=[3, 25, 25],
+    )
+
+    # Create masks for first graph
+    mask1_data = np.array([[True, True], [True, True]], dtype=bool)
+    mask1 = Mask(mask1_data, bbox=np.array([0, 0, 2, 2]))
+
+    mask2_data = np.array([[True, False], [True, False]], dtype=bool)
+    mask2 = Mask(mask2_data, bbox=np.array([10, 10, 12, 12]))
+
+    mask3_data = np.array([[True, True, True, True, True]], dtype=bool)
+    mask3 = Mask(mask3_data, bbox=np.array([20, 20, 21, 25]))
+
+    # Add nodes to first graph
+    node1 = graph_backend.add_node(
+        {"t": 0, "x": 1.0, "y": 1.0, DEFAULT_ATTR_KEYS.MASK: mask1, DEFAULT_ATTR_KEYS.BBOX: mask1.bbox}
+    )
+    node2 = graph_backend.add_node(
+        {"t": 1, "x": 2.0, "y": 2.0, DEFAULT_ATTR_KEYS.MASK: mask2, DEFAULT_ATTR_KEYS.BBOX: mask2.bbox}
+    )
+    node3 = graph_backend.add_node(
+        {"t": 2, "x": 3.0, "y": 3.0, DEFAULT_ATTR_KEYS.MASK: mask3, DEFAULT_ATTR_KEYS.BBOX: mask3.bbox}
+    )
+
+    graph_backend.add_edge_attr_key("weight", 0.0)
+    graph_backend.add_edge(node1, node2, {"weight": 0.5})
+    graph_backend.add_edge(node2, node3, {"weight": 0.3})
+    graph_backend.add_edge(node1, node3, {"weight": 0.3})
+
+    traccuracy_graph = graph_backend.to_traccuracy_graph()
+
+    # trivial matching with itself
+    ctc_results, _ = run_metrics(
+        gt_data=traccuracy_graph,
+        pred_data=traccuracy_graph,
+        matcher=CTCMatcher(),
+        metrics=[CTCMetrics()],
+    )
+    ctc_results = ctc_results[0]["results"]
+
+    for name in ["TRA", "DET", "LNK"]:
+        assert ctc_results[name] == 1.0

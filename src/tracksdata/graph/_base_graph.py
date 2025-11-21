@@ -26,11 +26,15 @@ from tracksdata.utils._logging import LOG
 from tracksdata.utils._multiprocessing import multiprocessing_apply
 
 if TYPE_CHECKING:
+    from traccuracy import TrackingGraph
+
     from tracksdata.graph.filters._base_filter import BaseFilter
     from tracksdata.graph.filters._spatial_filter import (
         BBoxSpatialFilter,
         SpatialFilter,
     )
+else:
+    TrackingGraph = Any
 
 
 T = TypeVar("T", bound="BaseGraph")
@@ -1514,6 +1518,29 @@ class BaseGraph(abc.ABC):
             metadata=geff_metadata,
             zarr_format=zarr_format,
         )
+
+    def to_traccuracy_graph(self, array_view_kwargs: dict[str, Any] | None = None) -> "TrackingGraph":
+        """
+        Convert the graph to a traccuracy graph.
+
+        Parameters
+        ----------
+        array_view_kwargs : dict[str, Any] | None
+            Additional keyword arguments to pass to the `GraphArrayView` constructor used to create the segmentation.
+
+        Returns
+        -------
+        TrackingGraph
+            A traccuracy graph.
+
+        See Also
+        --------
+        [to_traccuracy_graph][tracksdata.metrics._traccuracy.to_traccuracy_graph]:
+            Convert the graph to a traccuracy graph.
+        """
+        from tracksdata.metrics._traccuracy import to_traccuracy_graph
+
+        return to_traccuracy_graph(self, array_view_kwargs=array_view_kwargs)
 
     @abc.abstractmethod
     def has_edge(self, source_id: int, target_id: int) -> bool:

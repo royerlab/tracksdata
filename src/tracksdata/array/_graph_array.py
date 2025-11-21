@@ -221,7 +221,7 @@ class GraphArrayView(BaseReadOnlyArray):
     @property
     def dtype(self) -> np.dtype:
         """Returns the dtype of the array."""
-        return self._dtype
+        return np.dtype(self._dtype)
 
     def __getitem__(self, index: ArrayIndex) -> "GraphArrayView":
         """Return a sliced view of the GraphArrayView.
