@@ -1830,18 +1830,20 @@ def test_tracklet_graph_basic(graph_backend: BaseGraph) -> None:
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACKLET_ID, -1)
 
     # Create nodes with different track IDs
-    node1 = graph_backend.add_node({"t": 0, DEFAULT_ATTR_KEYS.TRACKLET_ID: 1})
-    node2 = graph_backend.add_node({"t": 1, DEFAULT_ATTR_KEYS.TRACKLET_ID: 2})
-    node3 = graph_backend.add_node({"t": 1, DEFAULT_ATTR_KEYS.TRACKLET_ID: 3})
-    node4 = graph_backend.add_node({"t": 2, DEFAULT_ATTR_KEYS.TRACKLET_ID: 2})
-    node5 = graph_backend.add_node({"t": 2, DEFAULT_ATTR_KEYS.TRACKLET_ID: 3})
-    node6 = graph_backend.add_node({"t": 0, DEFAULT_ATTR_KEYS.TRACKLET_ID: 4})
-    node7 = graph_backend.add_node({"t": 1, DEFAULT_ATTR_KEYS.TRACKLET_ID: 4})
-    node8 = graph_backend.add_node({"t": 2, DEFAULT_ATTR_KEYS.TRACKLET_ID: 4})
+    node0 = graph_backend.add_node({"t": 0, DEFAULT_ATTR_KEYS.TRACKLET_ID: 1})
+    node1 = graph_backend.add_node({"t": 1, DEFAULT_ATTR_KEYS.TRACKLET_ID: 1})
+    node2 = graph_backend.add_node({"t": 2, DEFAULT_ATTR_KEYS.TRACKLET_ID: 2})
+    node3 = graph_backend.add_node({"t": 2, DEFAULT_ATTR_KEYS.TRACKLET_ID: 3})
+    node4 = graph_backend.add_node({"t": 3, DEFAULT_ATTR_KEYS.TRACKLET_ID: 2})
+    node5 = graph_backend.add_node({"t": 3, DEFAULT_ATTR_KEYS.TRACKLET_ID: 3})
+    node6 = graph_backend.add_node({"t": 1, DEFAULT_ATTR_KEYS.TRACKLET_ID: 4})
+    node7 = graph_backend.add_node({"t": 2, DEFAULT_ATTR_KEYS.TRACKLET_ID: 4})
+    node8 = graph_backend.add_node({"t": 3, DEFAULT_ATTR_KEYS.TRACKLET_ID: 4})
 
     graph_backend.add_edge_attr_key("weight", 0.0)
 
     # Add edges within tracks (will be filtered out)
+    graph_backend.add_edge(node0, node1, {"weight": 0.5})
     graph_backend.add_edge(node1, node2, {"weight": 0.8})
     graph_backend.add_edge(node1, node3, {"weight": 0.9})
     graph_backend.add_edge(node2, node4, {"weight": 0.5})
