@@ -1512,6 +1512,20 @@ def test_sql_graph_mask_update_survives_reload(tmp_path: Path) -> None:
     np.testing.assert_array_equal(stored_mask.mask, mask_data)
 
 
+def test_sql_graph_max_id_restored_per_timepoint(tmp_path: Path) -> None:
+    """Reloading a SQLGraph should respect existing max IDs per time point."""
+    db_path = tmp_path / "id_restore.db"
+    graph = SQLGraph("sqlite", str(db_path))
+
+    first_id = graph.add_node({DEFAULT_ATTR_KEYS.T: 1})
+    graph._engine.dispose()
+
+    reloaded = SQLGraph("sqlite", str(db_path))
+    next_id = reloaded.add_node({DEFAULT_ATTR_KEYS.T: 1})
+
+    assert next_id == first_id + 1
+
+
 def test_compute_overlaps_invalid_threshold(graph_backend: BaseGraph) -> None:
     """Test compute_overlaps with invalid threshold values."""
     with pytest.raises(ValueError, match=r"iou_threshold must be between 0.0 and 1\.0"):
