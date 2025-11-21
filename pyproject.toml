@@ -73,6 +73,7 @@ docs = [
   "mkdocstrings-python-xref",
   "mkdocs-mermaid2-plugin",
   "mike",
+  "traccuracy>=0.4.2",
 ]
 
 [project.urls]
