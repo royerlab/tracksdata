@@ -1135,7 +1135,14 @@ class BaseGraph(abc.ABC):
         """
         from tracksdata.graph.filters._spatial_filter import SpatialFilter
 
-        return SpatialFilter(self, attr_keys=attr_keys)
+        cache_key = None if attr_keys is None else tuple(attr_keys)
+        if not hasattr(self, "_spatial_filter_cache"):
+            self._spatial_filter_cache: dict[tuple[str, ...] | None, SpatialFilter] = {}
+
+        if cache_key not in self._spatial_filter_cache:
+            self._spatial_filter_cache[cache_key] = SpatialFilter(self, attr_keys=attr_keys)
+
+        return self._spatial_filter_cache[cache_key]
 
     def bbox_spatial_filter(
         self,
