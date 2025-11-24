@@ -1,6 +1,10 @@
+from types import MethodType
+
 import numpy as np
+import polars as pl
 import pytest
 
+from tracksdata import DEFAULT_ATTR_KEYS
 from tracksdata.graph import BaseGraph, RustWorkXGraph
 from tracksdata.graph.filters._spatial_filter import BBoxSpatialFilter, SpatialFilter
 
@@ -279,3 +283,38 @@ def test_add_and_remove_node(graph_backend: BaseGraph) -> None:
             graph.remove_node(node_id)
 
         assert graph.num_nodes == 2
+
+
+def test_bbox_spatial_filter_handles_list_dtype(graph_backend: BaseGraph) -> None:
+    """Ensure bounding boxes stored as list dtype still work with the spatial filter."""
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+    first = graph_backend.add_node({"t": 0, "bbox": [0, 0, 2, 2]})
+    second = graph_backend.add_node({"t": 1, "bbox": [5, 5, 8, 8]})
+
+    original_node_attrs = graph_backend.node_attrs
+    list_df = original_node_attrs(
+        attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.T, DEFAULT_ATTR_KEYS.BBOX],
+        unpack=False,
+    ).with_columns(pl.col(DEFAULT_ATTR_KEYS.BBOX).cast(pl.List(pl.Int64)))
+
+    def _list_dtype_node_attrs(
+        self: BaseGraph, *, attr_keys: list[str] | None = None, unpack: bool = False
+    ) -> pl.DataFrame:
+        if attr_keys is None or set(attr_keys) == {
+            DEFAULT_ATTR_KEYS.NODE_ID,
+            DEFAULT_ATTR_KEYS.T,
+            DEFAULT_ATTR_KEYS.BBOX,
+        }:
+            return list_df
+        return original_node_attrs(attr_keys=attr_keys, unpack=unpack)
+
+    graph_backend.node_attrs = MethodType(_list_dtype_node_attrs, graph_backend)
+
+    spatial_filter = BBoxSpatialFilter(
+        graph_backend,
+        frame_attr_key=DEFAULT_ATTR_KEYS.T,
+        bbox_attr_key=DEFAULT_ATTR_KEYS.BBOX,
+    )
+    result_ids = spatial_filter[0:0, 0:3, 0:3].node_ids()
+    assert first in result_ids
+    assert second not in result_ids
