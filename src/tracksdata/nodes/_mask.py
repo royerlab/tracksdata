@@ -1,11 +1,15 @@
 from collections.abc import Sequence
 from functools import cached_property, lru_cache
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import blosc2
 import numpy as np
 import skimage.morphology as morph
 from numpy.typing import ArrayLike, NDArray
+from skimage.measure import regionprops
+
+if TYPE_CHECKING:
+    from skimage.measure._regionprops import RegionProperties
 
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.functional._iou import fast_intersection_with_bbox, fast_iou_with_bbox
@@ -365,6 +369,25 @@ class Mask:
         self._bbox[self._mask.ndim :] += offset
         if image_shape is not None:
             self._crop_overhang(image_shape)
+
+    def regionprops(self) -> "RegionProperties":
+        """
+        Compute scikit-image regionprops for this mask.
+
+        The computation is aware of the mask bounding box, so coordinate-based
+        properties (e.g. centroid, coords) are returned in absolute
+        image coordinates.
+        """
+        props = regionprops(
+            self._mask.astype(np.uint16),
+            cache=True,
+            offset=tuple(self._bbox[: self._mask.ndim]),
+        )
+
+        if len(props) != 1:
+            raise ValueError("Expected a single region in mask to compute regionprops.")
+
+        return props[0]
 
     @cached_property
     def size(self) -> int:

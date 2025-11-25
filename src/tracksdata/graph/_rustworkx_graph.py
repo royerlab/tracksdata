@@ -9,12 +9,12 @@ import rustworkx as rx
 
 from tracksdata.attrs import AttrComparison, split_attr_comps
 from tracksdata.constants import DEFAULT_ATTR_KEYS
-from tracksdata.functional._rx import _assign_tracklet_ids
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.graph._mapped_graph_mixin import MappedGraphMixin
 from tracksdata.graph.filters._base_filter import BaseFilter, cache_method
 from tracksdata.utils._dataframe import unpack_array_attrs
 from tracksdata.utils._logging import LOG
+from tracksdata.utils._signal import is_signal_on
 
 if TYPE_CHECKING:
     from tracksdata.graph._graph_view import GraphView
@@ -321,12 +321,24 @@ class RustWorkXGraph(BaseGraph):
         self._overlaps: list[list[int, 2]] = []
 
         if rx_graph is None:
-            self._graph = rx.PyDiGraph()
+            self._graph = rx.PyDiGraph(attrs={})
             self._node_attr_keys.append(DEFAULT_ATTR_KEYS.NODE_ID)
             self._node_attr_keys.append(DEFAULT_ATTR_KEYS.T)
 
         else:
             self._graph = rx_graph
+
+            if self._graph.attrs is None:
+                self._graph.attrs = {}
+
+            elif not isinstance(self._graph.attrs, dict):
+                LOG.warning(
+                    "previous attribute %s will be added to key 'old_attrs' of `graph.metadata`",
+                    self._graph.attrs,
+                )
+                self._graph.attrs = {
+                    "old_attrs": self._graph.attrs,
+                }
 
             unique_node_attr_keys = set()
             unique_edge_attr_keys = set()
@@ -409,6 +421,7 @@ class RustWorkXGraph(BaseGraph):
 
         node_id = self.rx_graph.add_node(attrs)
         self._time_to_nodes.setdefault(attrs["t"], []).append(node_id)
+        self.node_added.emit_fast(node_id)
         return node_id
 
     def bulk_add_nodes(self, nodes: list[dict[str, Any]], indices: list[int] | None = None) -> list[int]:
@@ -436,6 +449,12 @@ class RustWorkXGraph(BaseGraph):
         node_indices = list(self.rx_graph.add_nodes_from(nodes))
         for node, index in zip(nodes, node_indices, strict=True):
             self._time_to_nodes.setdefault(node["t"], []).append(index)
+
+        # checking if it has connections to reduce overhead
+        if is_signal_on(self.node_added):
+            for node_id in node_indices:
+                self.node_added.emit_fast(node_id)
+
         return node_indices
 
     def remove_node(self, node_id: int) -> None:
@@ -457,6 +476,8 @@ class RustWorkXGraph(BaseGraph):
         """
         if node_id not in self.rx_graph.node_indices():
             raise ValueError(f"Node {node_id} does not exist in the graph.")
+
+        self.node_removed.emit_fast(node_id)
 
         # Get the time value before removing the node
         t = self.rx_graph[node_id]["t"]
@@ -637,7 +658,9 @@ class RustWorkXGraph(BaseGraph):
         neighbors_func: Callable[[rx.PyDiGraph, int], rx.NodeIndices],
         node_ids: list[int] | int,
         attr_keys: Sequence[str] | str | None = None,
-    ) -> dict[int, pl.DataFrame] | pl.DataFrame:
+        *,
+        return_attrs: bool = False,
+    ) -> dict[int, pl.DataFrame] | pl.DataFrame | dict[int, list[int]] | list[int]:
         """
         Get the predecessors or sucessors of a list of nodes.
         See more information below.
@@ -647,53 +670,58 @@ class RustWorkXGraph(BaseGraph):
             node_ids = [node_ids]
             single_node = True
 
+        rx_graph = self.rx_graph
+        if not return_attrs and attr_keys is not None:
+            LOG.warning("attr_keys is ignored when return_attrs is False.")
+
         if isinstance(attr_keys, str):
             attr_keys = [attr_keys]
-
-        rx_graph = self.rx_graph
         valid_schema = None
-
-        neighbors = {}
+        neighbors: dict[int, list[int]] | dict[int, pl.DataFrame] = {}
         for node_id in node_ids:
             neighbors_indices = neighbors_func(rx_graph, node_id)
-            neighbors_data: list[dict[str, Any]] = [rx_graph[i] for i in neighbors_indices]
+            if not return_attrs:
+                neighbors[node_id] = [int(idx) for idx in neighbors_indices]
+            else:
+                neighbors_data: list[dict[str, Any]] = [rx_graph[i] for i in neighbors_indices]
 
-            if attr_keys is not None:
-                neighbors_data = [
-                    {k: edge_data[k] for k in attr_keys if k != DEFAULT_ATTR_KEYS.NODE_ID}
-                    for edge_data in neighbors_data
-                ]
+                if attr_keys is not None:
+                    neighbors_data = [
+                        {k: neigh_attr[k] for k in attr_keys if k != DEFAULT_ATTR_KEYS.NODE_ID}
+                        for neigh_attr in neighbors_data
+                    ]
 
-            if len(neighbors_data) > 0:
-                df = pl.DataFrame(neighbors_data)
-                if attr_keys is None or DEFAULT_ATTR_KEYS.NODE_ID in attr_keys:
-                    df = df.with_columns(
-                        pl.Series(DEFAULT_ATTR_KEYS.NODE_ID, np.asarray(neighbors_indices, dtype=int)),
-                    )
-                neighbors[node_id] = df
-                valid_schema = neighbors[node_id].schema
+                if len(neighbors_data) > 0:
+                    df = pl.DataFrame(neighbors_data)
+                    if attr_keys is None or DEFAULT_ATTR_KEYS.NODE_ID in attr_keys:
+                        df = df.with_columns(
+                            pl.Series(DEFAULT_ATTR_KEYS.NODE_ID, np.asarray(neighbors_indices, dtype=int)),
+                        )
+                    neighbors[node_id] = df
+                    valid_schema = neighbors[node_id].schema
+
+        if not return_attrs:
+            default_value = []
+        elif valid_schema is None:
+            default_value = pl.DataFrame()
+        else:
+            default_value = pl.DataFrame(schema=valid_schema)
 
         if single_node:
-            try:
-                # could not find sucessors for this node
-                return neighbors[node_ids[0]]
-            except KeyError:
-                return pl.DataFrame()
+            return neighbors.get(node_ids[0], default_value)
+        else:
+            for node_id in node_ids:
+                neighbors.setdefault(node_id, default_value)
 
-        for node_id in node_ids:
-            if node_id not in neighbors:
-                if valid_schema is None:
-                    neighbors[node_id] = pl.DataFrame()
-                else:
-                    neighbors[node_id] = pl.DataFrame(schema=valid_schema)
-
-        return neighbors
+            return neighbors
 
     def successors(
         self,
         node_ids: list[int] | int,
         attr_keys: Sequence[str] | str | None = None,
-    ) -> dict[int, pl.DataFrame] | pl.DataFrame:
+        *,
+        return_attrs: bool = False,
+    ) -> dict[int, pl.DataFrame] | pl.DataFrame | dict[int, list[int]] | list[int]:
         """
         Get the sucessors of a list of nodes.
 
@@ -702,25 +730,34 @@ class RustWorkXGraph(BaseGraph):
         node_ids : list[int] | int
             The IDs of the nodes to get the sucessors for.
         attr_keys : Sequence[str] | str | None
-            The attribute keys to get.
-            If None, all attributesare used.
+            The attribute keys to retrieve when ``return_attrs`` is True.
+            If None, all attributes are included.
+        return_attrs : bool, default False
+            Whether to return the attributes DataFrame. When False only successor
+            node IDs are returned.
 
         Returns
         -------
-        dict[int, pl.DataFrame] | pl.DataFrame
-            The sucessors of the nodes indexed by node ID if a list of nodes is provided.
+        dict[int, pl.DataFrame] | pl.DataFrame | dict[int, list[int]] | list[int]
+            When ``return_attrs`` is True, returns a DataFrame for a single node or a dictionary
+            mapping each node ID to a DataFrame of neighbor attributes. Otherwise returns a list
+            of neighbor node IDs for a single node or a dictionary mapping each node ID to its
+            neighbor ID list.
         """
         return self._get_neighbors(
             rx.PyDiGraph.successor_indices,
             node_ids,
             attr_keys,
+            return_attrs=return_attrs,
         )
 
     def predecessors(
         self,
         node_ids: list[int] | int,
         attr_keys: Sequence[str] | str | None = None,
-    ) -> dict[int, pl.DataFrame] | pl.DataFrame:
+        *,
+        return_attrs: bool = False,
+    ) -> dict[int, pl.DataFrame] | pl.DataFrame | dict[int, list[int]] | list[int]:
         """
         Get the predecessors of a list of nodes.
 
@@ -729,18 +766,25 @@ class RustWorkXGraph(BaseGraph):
         node_ids : list[int] | int
             The IDs of the nodes to get the predecessors for.
         attr_keys : Sequence[str] | str | None
-            The attribute keys to get.
-            If None, all attributesare used.
+            The attribute keys to retrieve when ``return_attrs`` is True.
+            If None, all attributes are included.
+        return_attrs : bool, default False
+            Whether to return the attributes DataFrame. When False only predecessor
+            node IDs are returned.
 
         Returns
         -------
-        dict[int, pl.DataFrame] | pl.DataFrame
-            The predecessors of the nodes indexed by node ID if a list of nodes is provided.
+        dict[int, pl.DataFrame] | pl.DataFrame | dict[int, list[int]] | list[int]
+            When ``return_attrs`` is True, returns a DataFrame for a single node or a dictionary
+            mapping each node ID to a DataFrame of neighbor attributes. Otherwise returns a list
+            of neighbor node IDs for a single node or a dictionary mapping each node ID to its
+            neighbor ID list.
         """
         return self._get_neighbors(
             rx.PyDiGraph.predecessor_indices,
             node_ids,
             attr_keys,
+            return_attrs=return_attrs,
         )
 
     def _filter_nodes_by_attrs(
@@ -1090,6 +1134,9 @@ class RustWorkXGraph(BaseGraph):
         node_ids: list[int] | None = None,
         return_id_update: bool = False,
     ) -> rx.PyDiGraph | tuple[rx.PyDiGraph, pl.DataFrame]:
+        # local import to avoid circular import
+        from tracksdata.functional._rx import _assign_tracklet_ids
+
         if node_ids is not None:
             track_node_ids = set(self.tracklet_nodes(node_ids))
             return (
@@ -1304,6 +1351,16 @@ class RustWorkXGraph(BaseGraph):
         """
         return self.rx_graph.get_edge_data(source_id, target_id)[DEFAULT_ATTR_KEYS.EDGE_ID]
 
+    @property
+    def metadata(self) -> dict[str, Any]:
+        return self._graph.attrs
+
+    def update_metadata(self, **kwargs) -> None:
+        self._graph.attrs.update(kwargs)
+
+    def remove_metadata(self, key: str) -> None:
+        self._graph.attrs.pop(key, None)
+
 
 class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
     """
@@ -1393,7 +1450,9 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
         int
             The index of the node.
         """
-        node_id = super().add_node(attrs, validate_keys)
+        with self.node_added.blocked():
+            node_id = super().add_node(attrs, validate_keys)
+
         if index is None:
             index = self._get_next_available_external_id()
         else:
@@ -1401,6 +1460,7 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
             self._next_external_id = max(self._next_external_id, index + 1)
         # Add mapping using mixin
         self._add_id_mapping(node_id, index)
+        self.node_added.emit_fast(index)
         return index
 
     def bulk_add_nodes(
@@ -1429,7 +1489,8 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
 
         self._validate_indices_length(nodes, indices)
 
-        graph_ids = super().bulk_add_nodes(nodes)
+        with self.node_added.blocked():
+            graph_ids = super().bulk_add_nodes(nodes)
 
         if indices is None:
             # All nodes get auto-generated indices
@@ -1443,6 +1504,10 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
             self._next_external_id = max(self._next_external_id, max(indices) + 1)
 
         self._add_id_mappings(list(zip(graph_ids, indices, strict=True)))
+
+        if is_signal_on(self.node_added):
+            for index in indices:
+                self.node_added.emit_fast(index)
 
         return indices
 
@@ -1682,17 +1747,27 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
         neighbors_func: Callable[[rx.PyDiGraph, int], rx.NodeIndices],
         node_ids: list[int] | int | None = None,
         attr_keys: Sequence[str] | str | None = None,
-    ) -> dict[int, pl.DataFrame] | pl.DataFrame:
+        *,
+        return_attrs: bool = False,
+    ) -> dict[int, pl.DataFrame] | pl.DataFrame | dict[int, list[int]] | list[int]:
         node_ids = self._get_local_ids() if node_ids is None else self._map_to_local(node_ids)
-        dfs = super()._get_neighbors(neighbors_func, node_ids, attr_keys)
-        if isinstance(dfs, pl.DataFrame):
-            dfs = self._map_df_to_external(dfs, [DEFAULT_ATTR_KEYS.NODE_ID])
+        neighbors = super()._get_neighbors(neighbors_func, node_ids, attr_keys, return_attrs=return_attrs)
+        if not return_attrs:
+            if isinstance(neighbors, list):
+                return self._map_to_external(neighbors)
+            else:
+                return {
+                    self._map_to_external(node_id): self._map_to_external(neighbor_ids)
+                    for node_id, neighbor_ids in neighbors.items()
+                }
         else:
-            dfs = {
-                self._map_to_external(node_id): self._map_df_to_external(df, [DEFAULT_ATTR_KEYS.NODE_ID])
-                for node_id, df in dfs.items()
-            }
-        return dfs
+            if isinstance(neighbors, pl.DataFrame):
+                return self._map_df_to_external(neighbors, [DEFAULT_ATTR_KEYS.NODE_ID])
+            else:
+                return {
+                    self._map_to_external(node_id): self._map_df_to_external(df, [DEFAULT_ATTR_KEYS.NODE_ID])
+                    for node_id, df in neighbors.items()
+                }
 
     def update_node_attrs(
         self,
@@ -1731,7 +1806,11 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
             raise ValueError(f"Node {node_id} does not exist in the graph.")
 
         local_node_id = self._map_to_local(node_id)
-        super().remove_node(local_node_id)
+
+        self.node_removed.emit_fast(node_id)
+        with self.node_removed.blocked():
+            super().remove_node(local_node_id)
+
         self._remove_id_mapping(external_id=node_id)
 
     def filter(

@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Any
 
+import cloudpickle
 import numpy as np
 import polars as pl
 import pytest
@@ -640,32 +641,45 @@ def test_sucessors_and_degree(graph_backend: BaseGraph) -> None:
     graph_backend.add_edge(node1, node2, {"weight": 0.3})  # node1 -> node2
 
     # Test successors of node0 (should return node1 and node3)
-    successors_df = graph_backend.successors(node0)
-    assert isinstance(successors_df, pl.DataFrame)
-    assert len(successors_df) == 2  # node0 has 2 successors
+    successors = graph_backend.successors(node0)
+    assert isinstance(successors, list)
+    assert len(successors) == 2  # node0 has 2 successors
     assert graph_backend.out_degree(node0) == 2
 
     # Check that we get the correct target nodes (order doesn't matter)
-    successor_nodes = set(successors_df[DEFAULT_ATTR_KEYS.NODE_ID].to_list())
+    successor_nodes = set(successors)
     assert successor_nodes == {node1, node3}
 
-    # Test successors of node1 (should return node2)
-    successors_df = graph_backend.successors(node1)
+    successors_df = graph_backend.successors(node0, return_attrs=True)
     assert isinstance(successors_df, pl.DataFrame)
-    assert len(successors_df) == 1  # node1 has 1 successor
-    assert successors_df[DEFAULT_ATTR_KEYS.NODE_ID].to_list()[0] == node2
+    assert set(successors_df[DEFAULT_ATTR_KEYS.NODE_ID].to_list()) == {node1, node3}
+
+    # Test successors of node1 (should return node2)
+    successors = graph_backend.successors(node1)
+    assert isinstance(successors, list)
+    assert len(successors) == 1  # node1 has 1 successor
+    assert successors[0] == node2
     assert graph_backend.out_degree(node1) == 1
 
     # Test successors of node2 (should return empty - no successors)
-    successors_df = graph_backend.successors(node2)
-    assert isinstance(successors_df, pl.DataFrame)
-    assert len(successors_df) == 0  # node2 has no successors
+    successors = graph_backend.successors(node2)
+    assert isinstance(successors, list)
+    assert len(successors) == 0  # node2 has no successors
     assert graph_backend.out_degree(node2) == 0
 
     # Test with multiple nodes
     successors_dict = graph_backend.successors([node0, node1, node2])
     assert isinstance(successors_dict, dict)
     assert len(successors_dict) == 3
+    assert sorted(successors_dict[node0]) == sorted([node1, node3])
+    assert successors_dict[node1] == [node2]
+    assert successors_dict[node2] == []
+
+    successors_dict_df = graph_backend.successors([node0, node1, node2], return_attrs=True)
+    assert isinstance(successors_dict_df[node0], pl.DataFrame)
+    assert set(successors_dict_df[node0][DEFAULT_ATTR_KEYS.NODE_ID].to_list()) == {node1, node3}
+    assert set(successors_dict_df[node1][DEFAULT_ATTR_KEYS.NODE_ID].to_list()) == {node2}
+    assert len(successors_dict_df[node2]) == 0
 
     # testing query all
     assert graph_backend.out_degree() == [2, 1, 0, 0]
@@ -675,11 +689,11 @@ def test_sucessors_and_degree(graph_backend: BaseGraph) -> None:
     assert graph_backend.out_degree([node1, node2, node0]) == [1, 0, 2]
 
     # Check node0's successors
-    assert len(successors_dict[node0]) == 2
+    assert len(successors_dict_df[node0]) == 2
     # Check node1's successors
-    assert len(successors_dict[node1]) == 1
+    assert len(successors_dict_df[node1]) == 1
     # Check node2's successors (empty)
-    assert len(successors_dict[node2]) == 0
+    assert len(successors_dict_df[node2]) == 0
 
 
 def test_predecessors_and_degree(graph_backend: BaseGraph) -> None:
@@ -702,38 +716,47 @@ def test_predecessors_and_degree(graph_backend: BaseGraph) -> None:
     graph_backend.add_edge(node1, node2, {"weight": 0.3})  # node1 -> node2
 
     # Test predecessors of node0 (should return empty - no predecessors)
-    predecessors_df = graph_backend.predecessors(node0)
-    assert isinstance(predecessors_df, pl.DataFrame)
-    assert len(predecessors_df) == 0  # node0 has no predecessors
+    predecessors = graph_backend.predecessors(node0)
+    assert isinstance(predecessors, list)
+    assert len(predecessors) == 0  # node0 has no predecessors
     assert graph_backend.in_degree(node0) == 0
 
     # Test predecessors of node1 (should return node0)
-    predecessors_df = graph_backend.predecessors(node1)
-    assert isinstance(predecessors_df, pl.DataFrame)
-    assert len(predecessors_df) == 1  # node1 has 1 predecessor
+    predecessors = graph_backend.predecessors(node1)
+    assert isinstance(predecessors, list)
+    assert len(predecessors) == 1  # node1 has 1 predecessor
     assert graph_backend.in_degree(node1) == 1
-
-    # Check that we get the correct source node
-    assert predecessors_df[DEFAULT_ATTR_KEYS.NODE_ID].to_list()[0] == node0
+    assert predecessors[0] == node0
 
     # Test predecessors of node2 (should return node1)
-    predecessors_df = graph_backend.predecessors(node2)
-    assert isinstance(predecessors_df, pl.DataFrame)
-    assert len(predecessors_df) == 1  # node2 has 1 predecessor
-    assert predecessors_df[DEFAULT_ATTR_KEYS.NODE_ID].to_list()[0] == node1
+    predecessors = graph_backend.predecessors(node2)
+    assert isinstance(predecessors, list)
+    assert len(predecessors) == 1  # node2 has 1 predecessor
+    assert predecessors[0] == node1
     assert graph_backend.in_degree(node2) == 1
 
     # Test predecessors of node3 (should return node0)
-    predecessors_df = graph_backend.predecessors(node3)
-    assert isinstance(predecessors_df, pl.DataFrame)
-    assert len(predecessors_df) == 1  # node3 has 1 predecessor
-    assert predecessors_df[DEFAULT_ATTR_KEYS.NODE_ID].to_list()[0] == node0
+    predecessors = graph_backend.predecessors(node3)
+    assert isinstance(predecessors, list)
+    assert len(predecessors) == 1  # node3 has 1 predecessor
+    assert predecessors[0] == node0
     assert graph_backend.in_degree(node3) == 1
 
     # Test with multiple nodes
     predecessors_dict = graph_backend.predecessors([node0, node1, node2, node3])
     assert isinstance(predecessors_dict, dict)
     assert len(predecessors_dict) == 4
+    assert predecessors_dict[node0] == []
+    assert predecessors_dict[node1] == [node0]
+    assert predecessors_dict[node2] == [node1]
+    assert predecessors_dict[node3] == [node0]
+
+    predecessors_dict_df = graph_backend.predecessors([node0, node1, node2, node3], return_attrs=True)
+    assert isinstance(predecessors_dict_df[node1], pl.DataFrame)
+    assert predecessors_dict_df[node0].is_empty()
+    assert set(predecessors_dict_df[node1][DEFAULT_ATTR_KEYS.NODE_ID].to_list()) == {node0}
+    assert set(predecessors_dict_df[node2][DEFAULT_ATTR_KEYS.NODE_ID].to_list()) == {node1}
+    assert set(predecessors_dict_df[node3][DEFAULT_ATTR_KEYS.NODE_ID].to_list()) == {node0}
     assert graph_backend.in_degree() == [0, 1, 1, 1]
     # testing different ordering
     assert graph_backend.in_degree([node0, node1, node2, node3]) == [0, 1, 1, 1]
@@ -764,7 +787,10 @@ def test_sucessors_with_attr_keys(graph_backend: BaseGraph) -> None:
     graph_backend.add_edge(node0, node2, {"weight": 0.7})
 
     # Test with single attribute key as string
-    successors_df = graph_backend.successors(node0, attr_keys="x")
+    successors_ids = graph_backend.successors(node0)
+    assert isinstance(successors_ids, list)
+
+    successors_df = graph_backend.successors(node0, attr_keys="x", return_attrs=True)
     assert isinstance(successors_df, pl.DataFrame)
     assert "x" in successors_df.columns
     assert "y" not in successors_df.columns
@@ -775,7 +801,7 @@ def test_sucessors_with_attr_keys(graph_backend: BaseGraph) -> None:
     assert "x" in available_cols
 
     # Test with multiple attribute keys as list
-    successors_df = graph_backend.successors(node0, attr_keys=["x", "label"])
+    successors_df = graph_backend.successors(node0, attr_keys=["x", "label"], return_attrs=True)
     assert isinstance(successors_df, pl.DataFrame)
     assert "x" in successors_df.columns
     assert "label" in successors_df.columns
@@ -808,14 +834,17 @@ def test_predecessors_with_attr_keys(graph_backend: BaseGraph) -> None:
     graph_backend.add_edge(node1, node2, {"weight": 0.7})
 
     # Test with single attribute key as string
-    predecessors_df = graph_backend.predecessors(node2, attr_keys="label")
+    predecessors_ids = graph_backend.predecessors(node2)
+    assert isinstance(predecessors_ids, list)
+
+    predecessors_df = graph_backend.predecessors(node2, attr_keys="label", return_attrs=True)
     assert isinstance(predecessors_df, pl.DataFrame)
     assert "label" in predecessors_df.columns
     assert "y" not in predecessors_df.columns
     assert "x" not in predecessors_df.columns
 
     # Test with multiple attribute keys as list
-    predecessors_df = graph_backend.predecessors(node2, attr_keys=["x", "label"])
+    predecessors_df = graph_backend.predecessors(node2, attr_keys=["x", "label"], return_attrs=True)
     assert isinstance(predecessors_df, pl.DataFrame)
     assert "x" in predecessors_df.columns
     assert "label" in predecessors_df.columns
@@ -841,11 +870,17 @@ def test_sucessors_predecessors_edge_cases(graph_backend: BaseGraph) -> None:
     node1 = graph_backend.add_node({"t": 1, "x": 1.0})
 
     # Test successors/predecessors of isolated nodes
-    successors_df = graph_backend.successors(node0)
+    successors = graph_backend.successors(node0)
+    assert isinstance(successors, list)
+    assert len(successors) == 0
+    successors_df = graph_backend.successors(node0, return_attrs=True)
     assert isinstance(successors_df, pl.DataFrame)
     assert len(successors_df) == 0
 
-    predecessors_df = graph_backend.predecessors(node1)
+    predecessors = graph_backend.predecessors(node1)
+    assert isinstance(predecessors, list)
+    assert len(predecessors) == 0
+    predecessors_df = graph_backend.predecessors(node1, return_attrs=True)
     assert isinstance(predecessors_df, pl.DataFrame)
     assert len(predecessors_df) == 0
 
@@ -861,8 +896,7 @@ def test_sucessors_predecessors_edge_cases(graph_backend: BaseGraph) -> None:
     # Test with non-existent attribute keys (should work but return limited columns)
     # This depends on implementation - some might raise errors, others might ignore
     try:
-        successors_df = graph_backend.successors(node0, attr_keys=["nonexistent"])
-        # If it doesn't raise an error, it should return empty or handle gracefully
+        successors_df = graph_backend.successors(node0, attr_keys=["nonexistent"], return_attrs=True)
         assert isinstance(successors_df, pl.DataFrame)
     except (KeyError, AttributeError):
         # This is also acceptable behavior
@@ -1457,6 +1491,43 @@ def test_compute_overlaps_multiple_timepoints(graph_backend: BaseGraph) -> None:
     assert [node1_t0, node2_t0] in valid_overlaps
 
 
+def test_sql_graph_mask_update_survives_reload(tmp_path: Path) -> None:
+    """Ensure SQLGraph keeps pickled column types after reloading from disk."""
+    db_path = tmp_path / "mask_graph.db"
+    graph = SQLGraph("sqlite", str(db_path))
+    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
+
+    mask_data = np.array([[True, False], [False, True]], dtype=bool)
+    mask = Mask(mask_data, bbox=np.array([0, 0, 2, 2]))
+    node_id = graph.add_node({"t": 0, DEFAULT_ATTR_KEYS.MASK: mask})
+
+    # Dispose engine before reopening to ensure sqlite file is released.
+    graph._engine.dispose()
+
+    reloaded = SQLGraph("sqlite", str(db_path))
+    reloaded.update_node_attrs(node_ids=[node_id], attrs={DEFAULT_ATTR_KEYS.MASK: [mask]})
+    stored_mask = reloaded.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.MASK])[DEFAULT_ATTR_KEYS.MASK].to_list()[0]
+
+    assert isinstance(stored_mask, Mask)
+    np.testing.assert_array_equal(stored_mask.mask, mask_data)
+
+
+def test_sql_graph_max_id_restored_per_timepoint(tmp_path: Path) -> None:
+    """Reloading a SQLGraph should respect existing max IDs per time point."""
+    db_path = tmp_path / "id_restore.db"
+    graph = SQLGraph("sqlite", str(db_path))
+
+    _ = graph.add_node({DEFAULT_ATTR_KEYS.T: 1})
+    _ = graph.add_node({DEFAULT_ATTR_KEYS.T: 2})
+    first_id = graph.add_node({DEFAULT_ATTR_KEYS.T: 1})
+    graph._engine.dispose()
+
+    reloaded = SQLGraph("sqlite", str(db_path))
+    next_id = reloaded.add_node({DEFAULT_ATTR_KEYS.T: 1})
+
+    assert next_id == first_id + 1
+
+
 def test_compute_overlaps_invalid_threshold(graph_backend: BaseGraph) -> None:
     """Test compute_overlaps with invalid threshold values."""
     with pytest.raises(ValueError, match=r"iou_threshold must be between 0.0 and 1\.0"):
@@ -1775,18 +1846,20 @@ def test_tracklet_graph_basic(graph_backend: BaseGraph) -> None:
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACKLET_ID, -1)
 
     # Create nodes with different track IDs
-    node1 = graph_backend.add_node({"t": 0, DEFAULT_ATTR_KEYS.TRACKLET_ID: 1})
-    node2 = graph_backend.add_node({"t": 1, DEFAULT_ATTR_KEYS.TRACKLET_ID: 2})
-    node3 = graph_backend.add_node({"t": 1, DEFAULT_ATTR_KEYS.TRACKLET_ID: 3})
-    node4 = graph_backend.add_node({"t": 2, DEFAULT_ATTR_KEYS.TRACKLET_ID: 2})
-    node5 = graph_backend.add_node({"t": 2, DEFAULT_ATTR_KEYS.TRACKLET_ID: 3})
-    node6 = graph_backend.add_node({"t": 0, DEFAULT_ATTR_KEYS.TRACKLET_ID: 4})
-    node7 = graph_backend.add_node({"t": 1, DEFAULT_ATTR_KEYS.TRACKLET_ID: 4})
-    node8 = graph_backend.add_node({"t": 2, DEFAULT_ATTR_KEYS.TRACKLET_ID: 4})
+    node0 = graph_backend.add_node({"t": 0, DEFAULT_ATTR_KEYS.TRACKLET_ID: 1})
+    node1 = graph_backend.add_node({"t": 1, DEFAULT_ATTR_KEYS.TRACKLET_ID: 1})
+    node2 = graph_backend.add_node({"t": 2, DEFAULT_ATTR_KEYS.TRACKLET_ID: 2})
+    node3 = graph_backend.add_node({"t": 2, DEFAULT_ATTR_KEYS.TRACKLET_ID: 3})
+    node4 = graph_backend.add_node({"t": 3, DEFAULT_ATTR_KEYS.TRACKLET_ID: 2})
+    node5 = graph_backend.add_node({"t": 3, DEFAULT_ATTR_KEYS.TRACKLET_ID: 3})
+    node6 = graph_backend.add_node({"t": 1, DEFAULT_ATTR_KEYS.TRACKLET_ID: 4})
+    node7 = graph_backend.add_node({"t": 2, DEFAULT_ATTR_KEYS.TRACKLET_ID: 4})
+    node8 = graph_backend.add_node({"t": 3, DEFAULT_ATTR_KEYS.TRACKLET_ID: 4})
 
     graph_backend.add_edge_attr_key("weight", 0.0)
 
     # Add edges within tracks (will be filtered out)
+    graph_backend.add_edge(node0, node1, {"weight": 0.5})
     graph_backend.add_edge(node1, node2, {"weight": 0.8})
     graph_backend.add_edge(node1, node3, {"weight": 0.9})
     graph_backend.add_edge(node2, node4, {"weight": 0.5})
@@ -2082,12 +2155,17 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
     graph_backend.add_node_attr_key("x", 0.0)
     graph_backend.add_node_attr_key("y", 0.0)
     graph_backend.add_node_attr_key("z", 0.0)
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, np.array([0, 0, 1, 1], dtype=int))
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACKLET_ID, -1)
     graph_backend.add_node_attr_key("ndfeature", np.asarray([[1.0], [2.0], [3.0]]))
 
     graph_backend.add_edge_attr_key("weight", 0.0)
+
+    graph_backend.update_metadata(
+        shape=[1, 25, 25],
+        path="path/to/image.ome.zarr",
+    )
 
     node1 = graph_backend.add_node(
         {
@@ -2139,6 +2217,12 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
 
     geff_graph, _ = IndexedRXGraph.from_geff(output_store)
 
+    assert "geff" in geff_graph.metadata
+
+    # geff metadata was not stored in original graph
+    geff_graph.metadata.pop("geff")
+    assert geff_graph.metadata == graph_backend.metadata
+
     assert geff_graph.num_nodes == 3
     assert geff_graph.num_edges == 2
 
@@ -2154,4 +2238,168 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
         rx_graph,
         geff_graph.rx_graph,
     )
-    # Ensure SQLGraph matches RX behavior as well
+
+
+def test_metadata_multiple_dtypes(graph_backend: BaseGraph) -> None:
+    """Test metadata with various datatypes."""
+    # Test basic types, None, nested structures, and numpy arrays
+    test_metadata = {
+        "string": "test_value",
+        "integer": 42,
+        "float": 3.14159,
+        "boolean": True,
+        "none_value": None,
+        "list_simple": [1, 2, 3],
+        "list_nested": [[1, 2], [3, 4], [5, 6]],
+        "dict_simple": {"a": 1, "b": 2},
+        "dict_nested": {"outer": {"inner": [1, 2, 3]}, "value": 42},
+        "mixed_list": [1, "two", 3.0, None, {"key": "value"}],
+        "numpy_list": [1.0, 2.0, 3.0],  # Will be serialized as JSON list
+    }
+
+    # Update metadata with all test values
+    graph_backend.update_metadata(**test_metadata)
+
+    # Retrieve and verify
+    retrieved = graph_backend.metadata
+
+    for key, expected_value in test_metadata.items():
+        assert key in retrieved, f"Key '{key}' not found in metadata"
+        assert retrieved[key] == expected_value, f"Value mismatch for '{key}': {retrieved[key]} != {expected_value}"
+
+    # Test updating existing keys
+    graph_backend.update_metadata(string="updated_value", new_key="new_value")
+    retrieved = graph_backend.metadata
+
+    assert retrieved["string"] == "updated_value"
+    assert retrieved["new_key"] == "new_value"
+    assert retrieved["integer"] == 42  # Other values unchanged
+
+    # Testing removing metadata
+    graph_backend.remove_metadata("string")
+    retrieved = graph_backend.metadata
+    assert "string" not in retrieved
+
+    graph_backend.remove_metadata("mixed_list")
+    retrieved = graph_backend.metadata
+    assert "string" not in retrieved
+    assert "mixed_list" not in retrieved
+
+
+def test_pickle_roundtrip(graph_backend: BaseGraph) -> None:
+    if isinstance(graph_backend, SQLGraph):
+        pytest.skip("SQLGraph does not support pickle roundtrip")
+
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
+    graph_backend.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+
+    bbox = np.array([0, 0, 2, 2])
+    mask = Mask(np.array([[True, True], [True, True]], dtype=bool), bbox=bbox)
+
+    node_1 = graph_backend.add_node(
+        {
+            DEFAULT_ATTR_KEYS.T: 0,
+            DEFAULT_ATTR_KEYS.BBOX: bbox,
+            DEFAULT_ATTR_KEYS.MASK: mask,
+        }
+    )
+
+    node_2 = graph_backend.add_node(
+        {
+            DEFAULT_ATTR_KEYS.T: 1,
+            DEFAULT_ATTR_KEYS.BBOX: bbox,
+            DEFAULT_ATTR_KEYS.MASK: mask,
+        }
+    )
+
+    graph_backend.add_edge(node_1, node_2, {DEFAULT_ATTR_KEYS.EDGE_DIST: 1.0})
+
+    pickled_graph = cloudpickle.dumps(graph_backend)
+    unpickled_graph = cloudpickle.loads(pickled_graph)
+
+    assert unpickled_graph.num_nodes == graph_backend.num_nodes
+    assert unpickled_graph.num_edges == graph_backend.num_edges
+
+    assert unpickled_graph.node_attr_keys == graph_backend.node_attr_keys
+    assert unpickled_graph.edge_attr_keys == graph_backend.edge_attr_keys
+
+
+@pytest.mark.slow
+def test_sql_graph_huge_update() -> None:
+    # test is only executed if `--slow` is passed to pytest
+    graph = SQLGraph("sqlite", ":memory:")
+
+    n_nodes = 30_000_000
+    random_t = np.random.randint(0, 1000, n_nodes).tolist()
+    random_x = np.random.rand(n_nodes).tolist()
+    graph.bulk_add_nodes([{"t": t} for t in random_t])
+    graph.add_node_attr_key("x", -1.0)
+
+    # testing with varying values
+    graph.update_node_attrs(
+        attrs={"x": random_x},
+        node_ids=graph.node_ids(),
+    )
+
+    # testing with scalar values
+    graph.update_node_attrs(
+        attrs={"x": 1.0},
+        node_ids=graph.node_ids(),
+    )
+
+
+def test_to_traccuracy_graph(graph_backend: BaseGraph) -> None:
+    pytest.importorskip("traccuracy")
+    from traccuracy import run_metrics
+    from traccuracy.matchers import CTCMatcher
+    from traccuracy.metrics import CTCMetrics
+
+    # Create first graph (self) with masks
+    graph_backend.add_node_attr_key("x", 0.0)
+    graph_backend.add_node_attr_key("y", 0.0)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, np.zeros(4, dtype=int))
+    graph_backend.update_metadata(
+        shape=[3, 25, 25],
+    )
+
+    # Create masks for first graph
+    mask1_data = np.array([[True, True], [True, True]], dtype=bool)
+    mask1 = Mask(mask1_data, bbox=np.array([0, 0, 2, 2]))
+
+    mask2_data = np.array([[True, False], [True, False]], dtype=bool)
+    mask2 = Mask(mask2_data, bbox=np.array([10, 10, 12, 12]))
+
+    mask3_data = np.array([[True, True, True, True, True]], dtype=bool)
+    mask3 = Mask(mask3_data, bbox=np.array([20, 20, 21, 25]))
+
+    # Add nodes to first graph
+    node1 = graph_backend.add_node(
+        {"t": 0, "x": 1.0, "y": 1.0, DEFAULT_ATTR_KEYS.MASK: mask1, DEFAULT_ATTR_KEYS.BBOX: mask1.bbox}
+    )
+    node2 = graph_backend.add_node(
+        {"t": 1, "x": 2.0, "y": 2.0, DEFAULT_ATTR_KEYS.MASK: mask2, DEFAULT_ATTR_KEYS.BBOX: mask2.bbox}
+    )
+    node3 = graph_backend.add_node(
+        {"t": 2, "x": 3.0, "y": 3.0, DEFAULT_ATTR_KEYS.MASK: mask3, DEFAULT_ATTR_KEYS.BBOX: mask3.bbox}
+    )
+
+    graph_backend.add_edge_attr_key("weight", 0.0)
+    graph_backend.add_edge(node1, node2, {"weight": 0.5})
+    graph_backend.add_edge(node2, node3, {"weight": 0.3})
+    graph_backend.add_edge(node1, node3, {"weight": 0.3})
+
+    traccuracy_graph = graph_backend.to_traccuracy_graph()
+
+    # trivial matching with itself
+    ctc_results, _ = run_metrics(
+        gt_data=traccuracy_graph,
+        pred_data=traccuracy_graph,
+        matcher=CTCMatcher(),
+        metrics=[CTCMetrics()],
+    )
+    ctc_results = ctc_results[0]["results"]
+
+    for name in ["TRA", "DET", "LNK"]:
+        assert ctc_results[name] == 1.0

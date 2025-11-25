@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.functional import to_napari_format
@@ -6,7 +7,8 @@ from tracksdata.graph import RustWorkXGraph
 from tracksdata.nodes import MaskDiskAttrs
 
 
-def test_napari_conversion() -> None:
+@pytest.mark.parametrize("metadata_shape", [True, False])
+def test_napari_conversion(metadata_shape: bool) -> None:
     positions = np.asarray(
         [
             [0, 5, 10, 20],  # t=0, z=5, y=10, x=20
@@ -18,8 +20,6 @@ def test_napari_conversion() -> None:
     tracklet_ids = np.asarray([1, 2, 3])
     tracklet_id_graph = {3: 1, 2: 1}
 
-    image_shape = (10, 22, 32)
-
     graph = RustWorkXGraph.from_array(
         positions,
         tracklet_ids=tracklet_ids,
@@ -28,9 +28,16 @@ def test_napari_conversion() -> None:
     graph.add_node_attr_key(DEFAULT_ATTR_KEYS.SOLUTION, True)
     graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.SOLUTION, True)
 
+    shape = (2, 10, 22, 32)
+    if metadata_shape:
+        graph.update_metadata(shape=shape)
+        arg_shape = None
+    else:
+        arg_shape = shape
+
     mask_attrs = MaskDiskAttrs(
         radius=2,
-        image_shape=image_shape,
+        image_shape=shape[1:],
         output_key=DEFAULT_ATTR_KEYS.MASK,
     )
     mask_attrs.add_node_attrs(graph)
@@ -45,7 +52,7 @@ def test_napari_conversion() -> None:
 
     tracks_df, dict_graph, array_view = to_napari_format(
         graph,
-        shape=(2, *image_shape),
+        shape=arg_shape,
         mask_key=DEFAULT_ATTR_KEYS.MASK,
     )
 

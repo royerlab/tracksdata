@@ -1,13 +1,15 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph import RustWorkXGraph
 from tracksdata.nodes._mask import Mask
 
 
-def test_export_from_ctc_roundtrip(tmp_path: Path):
+@pytest.mark.parametrize("metadata_shape", [True, False])
+def test_export_from_ctc_roundtrip(tmp_path: Path, metadata_shape: bool) -> None:
     """Test that exporting and loading CTC format preserves graph structure."""
     # Create original graph with nodes and edges
     in_graph = RustWorkXGraph()
@@ -64,7 +66,13 @@ def test_export_from_ctc_roundtrip(tmp_path: Path):
     in_graph.add_edge(node_1, node_2, attrs={DEFAULT_ATTR_KEYS.EDGE_DIST: 1.0})
     in_graph.add_edge(node_1, node_3, attrs={DEFAULT_ATTR_KEYS.EDGE_DIST: 1.0})
 
-    in_graph.to_ctc(shape=(2, 4, 4), output_dir=tmp_path)
+    if metadata_shape:
+        in_graph.update_metadata(shape=(2, 4, 4))
+        shape = None
+    else:
+        shape = (2, 4, 4)
+
+    in_graph.to_ctc(output_dir=tmp_path, shape=shape)
 
     out_graph = RustWorkXGraph.from_ctc(tmp_path)
 

@@ -1,5 +1,5 @@
 import binascii
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
@@ -19,6 +19,7 @@ from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.graph.filters._base_filter import BaseFilter, cache_method
 from tracksdata.utils._dataframe import unpack_array_attrs, unpickle_bytes_columns
 from tracksdata.utils._logging import LOG
+from tracksdata.utils._signal import is_signal_on
 
 if TYPE_CHECKING:
     from tracksdata.graph._graph_view import GraphView
@@ -488,6 +489,8 @@ class SQLGraph(BaseGraph):
             pass
 
         if len(metadata.tables) > 0 and not overwrite:
+            for table in metadata.tables.values():
+                self._restore_pickled_column_types(table)
             for table_name, table in metadata.tables.items():
                 cls = type(
                     table_name,
@@ -525,11 +528,22 @@ class SQLGraph(BaseGraph):
             source_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"))
             target_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"))
 
+        class Metadata(Base):
+            __tablename__ = "Metadata"
+            key = sa.Column(sa.String, primary_key=True)
+            value = sa.Column(sa.JSON)
+
         # Assign to instance variables
         self.Base = Base
         self.Node = Node
         self.Edge = Edge
         self.Overlap = Overlap
+        self.Metadata = Metadata
+
+    def _restore_pickled_column_types(self, table: sa.Table) -> None:
+        for column in table.columns:
+            if isinstance(column.type, sa.LargeBinary):
+                column.type = sa.PickleType()
 
     def _polars_schema_override(self, table_class: type[DeclarativeBase]) -> SchemaDict:
         return {
@@ -554,8 +568,8 @@ class SQLGraph(BaseGraph):
         have unique IDs.
         """
         with Session(self._engine) as session:
-            for t in session.query(self.Node.t).distinct():
-                self._max_id_per_time[t] = int(session.query(sa.func.max(self.Node.node_id)).scalar())
+            stmt = sa.select(self.Node.t, sa.func.max(self.Node.node_id)).group_by(self.Node.t)
+            self._max_id_per_time = {int(time): int(max_id) for time, max_id in session.execute(stmt).all()}
 
     def filter(
         self,
@@ -644,6 +658,8 @@ class SQLGraph(BaseGraph):
         if index is None:
             self._max_id_per_time[time] = node_id
 
+        self.node_added.emit_fast(node_id)
+
         return node_id
 
     def bulk_add_nodes(
@@ -706,9 +722,11 @@ class SQLGraph(BaseGraph):
             node[DEFAULT_ATTR_KEYS.NODE_ID] = node_id
             node_ids.append(node_id)
 
-        with Session(self._engine) as session:
-            session.execute(sa.insert(self.Node), nodes)
-            session.commit()
+        self._chunked_sa_operation(Session.bulk_insert_mappings, self.Node, nodes)
+
+        if is_signal_on(self.node_added):
+            for node_id in node_ids:
+                self.node_added.emit_fast(node_id)
 
         return node_ids
 
@@ -730,6 +748,8 @@ class SQLGraph(BaseGraph):
         ValueError
             If the node_id does not exist in the graph.
         """
+        self.node_removed.emit_fast(node_id)
+
         with Session(self._engine) as session:
             # Check if the node exists
             node = session.query(self.Node).filter(self.Node.node_id == node_id).first()
@@ -854,14 +874,15 @@ class SQLGraph(BaseGraph):
         for edge in edges:
             _data_numpy_to_native(edge)
 
-        with Session(self._engine) as session:
-            if return_ids:
+        if return_ids:
+            with Session(self._engine) as session:
                 result = session.execute(sa.insert(self.Edge).returning(self.Edge.edge_id), edges)
                 session.commit()
                 return list(result.scalars().all())
-            else:
-                session.execute(sa.insert(self.Edge), edges)
-                session.commit()
+
+        else:
+            self._chunked_sa_operation(Session.bulk_insert_mappings, self.Edge, edges)
+            return None
 
     def add_overlap(
         self,
@@ -914,9 +935,7 @@ class SQLGraph(BaseGraph):
             overlaps = overlaps.tolist()
 
         overlaps = [{"source_id": source_id, "target_id": target_id} for source_id, target_id in overlaps]
-        with Session(self._engine) as session:
-            session.execute(sa.insert(self.Overlap), overlaps)
-            session.commit()
+        self._chunked_sa_operation(Session.bulk_insert_mappings, self.Overlap, overlaps)
 
     def overlaps(
         self,
@@ -952,7 +971,9 @@ class SQLGraph(BaseGraph):
         neighbor_key: str,
         node_ids: list[int] | int,
         attr_keys: Sequence[str] | str | None = None,
-    ) -> dict[int, pl.DataFrame] | pl.DataFrame:
+        *,
+        return_attrs: bool = False,
+    ) -> dict[int, pl.DataFrame] | pl.DataFrame | dict[int, list[int]] | list[int]:
         """
         Get the predecessors or successors of nodes via database joins.
 
@@ -968,15 +989,19 @@ class SQLGraph(BaseGraph):
         node_ids : list[int] | int
             The IDs of the nodes to get neighbors for.
         attr_keys : Sequence[str] | str | None, optional
-            The attribute keys to retrieve for neighbor nodes. If None,
-            all attributes are retrieved.
+            The attribute keys to retrieve for neighbor nodes when ``return_attrs`` is True.
+            If None, all attributes are retrieved.
+        return_attrs : bool, default False
+            Whether to return the attributes DataFrame. When False only neighbor
+            node IDs are returned.
 
         Returns
         -------
-        dict[int, pl.DataFrame] | pl.DataFrame
-            If multiple node_ids are provided, returns a dictionary mapping
-            each node_id to a DataFrame of its neighbors. If a single node_id
-            is provided, returns the DataFrame directly.
+        dict[int, pl.DataFrame] | pl.DataFrame | dict[int, list[int]] | list[int]
+            When ``return_attrs`` is True, returns a DataFrame for a single node or a dictionary
+            mapping each node ID to a DataFrame of neighbor attributes. Otherwise returns a list
+            of neighbor node IDs for a single node or a dictionary mapping each node ID to its
+            neighbor ID list.
         """
         single_node = False
         if isinstance(node_ids, int):
@@ -990,6 +1015,12 @@ class SQLGraph(BaseGraph):
             if attr_keys is None:
                 # all columns
                 node_columns = [self.Node]
+            elif not return_attrs:
+                # only neighbor IDs
+                node_columns = [self.Node.node_id]
+                if attr_keys is not None:
+                    LOG.warning("attr_keys is ignored when return_attrs is False.")
+                    attr_keys = None
             else:
                 node_columns = [getattr(self.Node, key) for key in attr_keys]
 
@@ -1006,20 +1037,26 @@ class SQLGraph(BaseGraph):
             node_df = self._cast_array_columns(self.Node, node_df)
 
         if single_node:
-            return node_df
-
-        neighbors_dict = {node_id: group for (node_id,), group in node_df.group_by(node_key)}
-        for node_id in node_ids:
-            if node_id not in neighbors_dict:
-                neighbors_dict[node_id] = pl.DataFrame(schema=node_df.schema)
-
-        return neighbors_dict
+            if not return_attrs:
+                return node_df[DEFAULT_ATTR_KEYS.NODE_ID].to_list()
+            else:
+                return node_df
+        else:
+            neighbors_dict = {node_id: group for (node_id,), group in node_df.group_by(node_key)}
+            for node_id in node_ids:
+                neighbors_dict.setdefault(node_id, pl.DataFrame(schema=node_df.schema))
+            if not return_attrs:
+                return {node_id: df[DEFAULT_ATTR_KEYS.NODE_ID].to_list() for node_id, df in neighbors_dict.items()}
+            else:
+                return neighbors_dict
 
     def successors(
         self,
         node_ids: list[int] | int,
         attr_keys: Sequence[str] | str | None = None,
-    ) -> dict[int, pl.DataFrame] | pl.DataFrame:
+        *,
+        return_attrs: bool = False,
+    ) -> dict[int, pl.DataFrame] | pl.DataFrame | dict[int, list[int]] | list[int]:
         """
         Get the successor nodes of given nodes.
 
@@ -1032,21 +1069,25 @@ class SQLGraph(BaseGraph):
         node_ids : list[int] | int
             The IDs of the nodes to get successors for.
         attr_keys : Sequence[str] | str | None, optional
-            The attribute keys to retrieve for successor nodes. If None,
-            all attributes are retrieved.
+            The attribute keys to retrieve for successor nodes when ``return_attrs`` is True.
+            If None, all attributes are retrieved.
+        return_attrs : bool, default False
+            Whether to return the attributes DataFrame. When False only successor
+            node IDs are returned.
 
         Returns
         -------
-        dict[int, pl.DataFrame] | pl.DataFrame
-            If a list of node_ids is provided, returns a dictionary mapping
-            each node_id to a DataFrame of its successors. If a single node_id
-            is provided, returns the DataFrame directly.
+        dict[int, pl.DataFrame] | pl.DataFrame | dict[int, list[int]] | list[int]
+            When ``return_attrs`` is True, returns a DataFrame for a single node or a dictionary
+            mapping each node ID to a DataFrame of successor attributes. Otherwise returns a list
+            of successor node IDs for a single node or a dictionary mapping each node ID to its
+            successor ID list.
 
         Examples
         --------
         ```python
-        successors_df = graph.sucessors(node_id)
-        successors_dict = graph.sucessors([node1, node2, node3])
+        successors_df = graph.sucessors(node_id, return_attrs=True)
+        successors_dict = graph.sucessors([node1, node2, node3], return_attrs=True)
         ```
         """
         return self._get_neighbors(
@@ -1054,13 +1095,16 @@ class SQLGraph(BaseGraph):
             neighbor_key=DEFAULT_ATTR_KEYS.EDGE_TARGET,
             node_ids=node_ids,
             attr_keys=attr_keys,
+            return_attrs=return_attrs,
         )
 
     def predecessors(
         self,
         node_ids: list[int] | int,
         attr_keys: Sequence[str] | str | None = None,
-    ) -> dict[int, pl.DataFrame] | pl.DataFrame:
+        *,
+        return_attrs: bool = False,
+    ) -> dict[int, pl.DataFrame] | pl.DataFrame | dict[int, list[int]] | list[int]:
         """
         Get the predecessor nodes of given nodes.
 
@@ -1073,21 +1117,25 @@ class SQLGraph(BaseGraph):
         node_ids : list[int] | int
             The IDs of the nodes to get predecessors for.
         attr_keys : Sequence[str] | str | None, optional
-            The attribute keys to retrieve for predecessor nodes. If None,
-            all attributes are retrieved.
+            The attribute keys to retrieve for predecessor nodes when ``return_attrs`` is True.
+            If None, all attributes are retrieved.
+        return_attrs : bool, default False
+            Whether to return the attributes DataFrame. When False only predecessor
+            node IDs are returned.
 
         Returns
         -------
-        dict[int, pl.DataFrame] | pl.DataFrame
-            If a list of node_ids is provided, returns a dictionary mapping
-            each node_id to a DataFrame of its predecessors. If a single node_id
-            is provided, returns the DataFrame directly.
+        dict[int, pl.DataFrame] | pl.DataFrame | dict[int, list[int]] | list[int]
+            When ``return_attrs`` is True, returns a DataFrame for a single node or a dictionary
+            mapping each node ID to a DataFrame of predecessor attributes. Otherwise returns a list
+            of predecessor node IDs for a single node or a dictionary mapping each node ID to its
+            predecessor ID list.
 
         Examples
         --------
         ```python
-        predecessors_df = graph.predecessors(node_id)
-        predecessors_dict = graph.predecessors([node1, node2, node3])
+        predecessors_df = graph.predecessors(node_id, return_attrs=True)
+        predecessors_dict = graph.predecessors([node1, node2, node3], return_attrs=True)
         ```
         """
         return self._get_neighbors(
@@ -1095,6 +1143,7 @@ class SQLGraph(BaseGraph):
             neighbor_key=DEFAULT_ATTR_KEYS.EDGE_SOURCE,
             node_ids=node_ids,
             attr_keys=attr_keys,
+            return_attrs=return_attrs,
         )
 
     def node_ids(self) -> list[int]:
@@ -1325,6 +1374,15 @@ class SQLGraph(BaseGraph):
         with Session(self._engine) as session:
             return int(session.query(self.Node).count())
 
+    def _sql_chunk_size(self) -> int:
+        if self._engine.dialect.name == "postgresql":
+            chunk_size = 30_000
+        else:  # for now everything else will use sqlite chunk size
+            # elif self._engine.dialect.name == "sqlite":
+            chunk_size = 900
+
+        return chunk_size
+
     def _update_table(
         self,
         table_class: type[DeclarativeBase],
@@ -1349,46 +1407,51 @@ class SQLGraph(BaseGraph):
             LOG.info("update %s table with scalar values: %s", table_class.__table__, attrs)
 
             with Session(self._engine) as session:
-                query = session.query(table_class)
-                if ids is not None:
-                    query = query.filter(getattr(table_class, id_key).in_(ids))
-                query.update(attrs)
-                session.commit()
-
+                if ids is None:
+                    query = session.query(table_class)
+                    query.update(attrs)
+                    session.commit()
+                else:
+                    # a bit custom and cannot be used with `_chunked_sa_operation`
+                    chunk_size = max(1, int(self._sql_chunk_size() / len(attrs)))
+                    table_id_attrs = getattr(table_class, id_key)
+                    for i in range(0, len(ids), chunk_size):
+                        query = session.query(table_class).filter(table_id_attrs.in_(ids[i : i + chunk_size]))
+                        query.update(attrs)
+                    session.commit()
             return
 
         if ids is None:
             raise ValueError("`ids` must be provided to update with variable values.")
 
-        # Prepare values for bulk update
-        update_data = []
-
         for k, v in attrs.items():
-            if np.isscalar(v):
-                # Convert scalar to list of same length as ids
-                attrs[k] = [v] * len(ids)
-            else:
-                if hasattr(v, "tolist"):
-                    attrs[k] = v.tolist()
+            if not np.isscalar(v) and len(attrs[k]) != len(ids):
+                raise ValueError(f"Length mismatch: {len(attrs[k])} values for {len(ids)} {id_key}s")
 
-                # Validate length matches ids
-                if len(attrs[k]) != len(ids):
-                    raise ValueError(f"Length mismatch: {len(attrs[k])} values for {len(ids)} {id_key}s")
-
-        # Create list of dictionaries for bulk update (simple primary key)
-        for i, row_id in enumerate(ids):
-            row_data = {id_key: row_id}
-
-            # Add the attribute updates
-            for k, v_list in attrs.items():
-                row_data[k] = v_list[i]
-            update_data.append(row_data)
+        attrs[id_key] = ids
+        # using polars is faster and simpler than iterating in python
+        update_data = pl.DataFrame(attrs).to_dicts()
 
         LOG.info("update %s table with %d rows", table_class.__table__, len(update_data))
         LOG.info("update data sample: %s", update_data[:2])
 
+        self._chunked_sa_operation(Session.bulk_update_mappings, table_class, update_data)
+
+    def _chunked_sa_operation(
+        self,
+        session_op: Callable[[Session, type[DeclarativeBase], list[dict[str, Any]]], None],
+        table_class: type[DeclarativeBase],
+        data: list[dict[str, Any]],
+    ) -> None:
+        if len(data) == 0:
+            return
+
+        # chunked update is faster
+        # keep under 1000 values including every column
+        chunk_size = max(1, int(self._sql_chunk_size() / len(data[0])))
         with Session(self._engine) as session:
-            session.execute(sa.update(table_class), update_data)
+            for i in range(0, len(data), chunk_size):
+                session_op(session, table_class, data[i : i + chunk_size])
             session.commit()
 
     def update_node_attrs(
@@ -1482,7 +1545,7 @@ class SQLGraph(BaseGraph):
 
     def __getstate__(self) -> dict:
         data_dict = self.__dict__.copy()
-        for k in ["Base", "Node", "Edge", "Overlap", "_engine"]:
+        for k in ["Base", "Node", "Edge", "Overlap", "Metadata", "_engine"]:
             del data_dict[k]
         return data_dict
 
@@ -1632,4 +1695,22 @@ class SQLGraph(BaseGraph):
                 deleted = session.query(self.Edge).filter(self.Edge.edge_id == edge_id).delete()
                 if not deleted:
                     raise ValueError(f"Edge {edge_id} does not exist in the graph.")
+            session.commit()
+
+    @property
+    def metadata(self) -> dict[str, Any]:
+        with Session(self._engine) as session:
+            result = session.query(self.Metadata).all()
+            return {row.key: row.value for row in result}
+
+    def update_metadata(self, **kwargs) -> None:
+        with Session(self._engine) as session:
+            for key, value in kwargs.items():
+                metadata_entry = self.Metadata(key=key, value=value)
+                session.merge(metadata_entry)
+            session.commit()
+
+    def remove_metadata(self, key: str) -> None:
+        with Session(self._engine) as session:
+            session.query(self.Metadata).filter(self.Metadata.key == key).delete()
             session.commit()
