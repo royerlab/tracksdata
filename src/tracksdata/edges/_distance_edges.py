@@ -281,7 +281,7 @@ class DistanceEdges(BaseEdgesOperator):
 
         if self.neighbors_per_frame:
             # Query each previous time frame separately
-            for prev_t in range(t - self.delta_t, t):
+            for prev_t in range(int(t - self.delta_t), int(t)):
                 kdtree, _, prev_node_ids = self._build_kdtree_data(graph, prev_t, attr_keys)
 
                 if kdtree is None:
