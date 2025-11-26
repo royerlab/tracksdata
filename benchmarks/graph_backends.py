@@ -1,128 +1,54 @@
-import logging
-import time
-from collections.abc import Callable
-from pathlib import Path
+from __future__ import annotations
 
-import polars as pl
-from tabulate import tabulate
+from collections.abc import Callable
 
 from tracksdata.attrs import EdgeAttr, NodeAttr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.edges import DistanceEdges
-from tracksdata.graph import IndexedRXGraph, RustWorkXGraph, SQLGraph
+from tracksdata.graph import IndexedRXGraph, RustWorkXGraph
+from tracksdata.graph import SQLGraph as _BaseSQLGraph
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.nodes import RandomNodes
-from tracksdata.options import get_options, set_options
+from tracksdata.options import set_options
 from tracksdata.solvers import NearestNeighborsSolver
-from tracksdata.utils._logging import LOG
+
+N_TIME_POINTS = 50
+NODE_SIZES = (1_000, 10_000, 100_000)
+WORKER_COUNTS = (1, 4)
 
 
-class SQLGraphWithMemory(SQLGraph):
-    def __init__(self):
+class SQLGraphWithMemory(_BaseSQLGraph):
+    def __init__(self) -> None:
         super().__init__(drivername="sqlite", database=":memory:", overwrite=True)
 
 
-class SQLGraphDisk(SQLGraph):
-    def __init__(self):
+class SQLGraphDisk(_BaseSQLGraph):
+    def __init__(self) -> None:
         import datetime
 
         path = f"/tmp/_benchmarks_tracksdata_db_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
         super().__init__(drivername="sqlite", database=path, overwrite=True)
 
 
-def _run_benchmark(
-    backend: type[BaseGraph],
-    pipeline: list[tuple[str, Callable[[BaseGraph], None]]],
-) -> pl.DataFrame:
-    data = []
-    total_time = 0
-
-    start = time.perf_counter()
-    graph = backend()
-    end = time.perf_counter()
-
-    data.append(
-        {
-            "operation": "init",
-            "time": end - start,
-        }
-    )
-    total_time += end - start
-
-    for name, func in pipeline:
-        start = time.perf_counter()
-        output = func(graph)
-        # replace graph with output if it is not None
-        # it's used for the subgraph operation
-        if output is not None:
-            graph = output
-        end = time.perf_counter()
-        data.append(
-            {
-                "operation": name,
-                "time": end - start,
-            }
-        )
-        total_time += end - start
-
-    data.append(
-        {
-            "operation": "total",
-            "time": total_time,
-        }
-    )
-
-    df = pl.DataFrame(data)
-    df = df.with_columns(
-        pl.col("operation").cast(pl.Categorical),
-        pl.col("time").cast(pl.Float64),
-    )
-    return df
-
-
-def _format_markdown_table(df: pl.DataFrame, output_file: Path | None = None) -> str:
-    # Create time string column
-    df = df.with_columns(time_str=pl.format("{} ± {}", pl.col("time_avg").round(3), pl.col("time_std").round(3)))
-
-    # Pivot the table to get n_nodes as columns
-    pivoted = df.pivot(values="time_str", index=["backend", "operation"], on="n_nodes", aggregate_function="first")
-
-    # Format the results for markdown table
-    prev_backend = pivoted["backend"][0]
-    table_data = []
-    for row in pivoted.iter_rows(named=True):
-        if row["backend"] != prev_backend:
-            table_data.append([""] * (len(df["n_nodes"].unique()) + 2))  # Empty row for separation
-        table_data.append([row["backend"], row["operation"], *[row[str(n)] for n in sorted(df["n_nodes"].unique())]])
-        prev_backend = row["backend"]
-
-    # Print markdown table
-    node_counts = sorted(df["n_nodes"].unique())
-    headers = ["Backend", "Operation"] + [f"{n:,} nodes" for n in node_counts]
-
-    print(f"\n| {get_options().n_workers} worker(s)")
-    print("|:-----------")
-
-    mk_table = tabulate(table_data, headers=headers, tablefmt="pipe", numalign="right")
-    print(mk_table)
-
-    if output_file is not None:
-        with open(output_file, "w") as f:
-            f.write(mk_table)
-            f.write("\n")
-
-    return mk_table
+BACKENDS: dict[str, type[BaseGraph]] = {
+    "RustWorkXGraph": RustWorkXGraph,
+    "IndexedRXGraph": IndexedRXGraph,
+    "SQLGraphWithMemory": SQLGraphWithMemory,
+    "SQLGraphDisk": SQLGraphDisk,
+}
 
 
 def _build_pipeline(
     n_time_points: int, n_nodes_per_tp: int
 ) -> list[tuple[str, Callable[[BaseGraph], None | BaseGraph]]]:
+    lower = max(1, int(n_nodes_per_tp * 0.95))
+    upper = max(lower, int(n_nodes_per_tp * 1.05))
     return [
         (
             "random_nodes",
             RandomNodes(
                 n_time_points=n_time_points,
-                n_nodes_per_tp=(n_nodes_per_tp * 0.95, n_nodes_per_tp * 1.05),
+                n_nodes_per_tp=(lower, upper),
                 n_dim=3,
             ).add_nodes,
         ),
@@ -146,51 +72,61 @@ def _build_pipeline(
     ]
 
 
-def main() -> None:
-    LOG.setLevel(logging.CRITICAL)
+class GraphBackendsBenchmark:
+    """
+    ASV benchmark suite that times each step of the graph-building pipeline per backend.
+    """
 
-    n_repeats = 3
-    n_time_points = 50
-    first_round = True
-    set_options(show_progress=False)
+    param_names = ("backend", "n_nodes", "n_workers")
+    params = (tuple(BACKENDS), NODE_SIZES, WORKER_COUNTS)
 
-    for n_workers in [4, 1]:
-        data = []
-        set_options(n_workers=n_workers)
-        for _ in range(n_repeats):
-            for n_nodes in [1_000, 10_000, 100_000]:
-                n_nodes_per_tp = int(n_nodes / n_time_points)
-                pipeline = _build_pipeline(n_time_points, n_nodes_per_tp)
-                for backend in [RustWorkXGraph, IndexedRXGraph, SQLGraphWithMemory, SQLGraphDisk]:
-                    # SQLGraphWithMemory does not support multiprocessing
-                    if backend == SQLGraphWithMemory and n_workers > 1:
-                        continue
+    def setup(self, backend_name: str, n_nodes: int, n_workers: int) -> None:
+        if backend_name == "SQLGraphWithMemory" and n_workers > 1:
+            msg = "SQLGraphWithMemory does not support multiprocessing."
+            raise NotImplementedError(msg)
 
-                    df = _run_benchmark(backend, pipeline)
+        self.backend_name = backend_name
+        self.n_nodes = n_nodes
+        self.n_workers = n_workers
 
-                    if first_round:
-                        # first round is re-executed because it required compiling numba code
-                        df = _run_benchmark(backend, pipeline)
-                        first_round = False
+        set_options(show_progress=False, n_workers=n_workers)
+        self.backend_cls = BACKENDS[backend_name]
+        n_nodes_per_tp = max(1, n_nodes // N_TIME_POINTS)
+        self.pipeline = _build_pipeline(N_TIME_POINTS, n_nodes_per_tp)
 
-                    df = df.with_columns(
-                        backend=pl.lit(backend.__name__),
-                        n_nodes=pl.lit(n_nodes),
-                    )
-                    data.append(df)
+    def _fresh_graph(self) -> BaseGraph:
+        return self.backend_cls()
 
-        df = pl.concat(data)
-        df = df.group_by(["backend", "n_nodes", "operation"], maintain_order=True).agg(
-            pl.col("time").std().alias("time_std"),
-            pl.col("time").mean().alias("time_avg"),
-        )
+    def _prepare_graph_for(self, step_name: str) -> tuple[BaseGraph, Callable[[BaseGraph], None | BaseGraph]]:
+        graph = self._fresh_graph()
+        for name, func in self.pipeline:
+            if name == step_name:
+                return graph, func
+            result = func(graph)
+            if result is not None:
+                graph = result
+        msg = f"Unknown pipeline step '{step_name}'."
+        raise ValueError(msg)
 
-        file_path = Path(__file__)
-        _format_markdown_table(
-            df,
-            output_file=file_path.parent / f"outputs/{file_path.stem}.md",
-        )
+    def time_graph_init(self, backend_name: str, n_nodes: int, n_workers: int) -> None:
+        self._fresh_graph()
 
+    def time_random_nodes(self, backend_name: str, n_nodes: int, n_workers: int) -> None:
+        graph, func = self._prepare_graph_for("random_nodes")
+        func(graph)
 
-if __name__ == "__main__":
-    main()
+    def time_distance_edges(self, backend_name: str, n_nodes: int, n_workers: int) -> None:
+        graph, func = self._prepare_graph_for("distance_edges")
+        func(graph)
+
+    def time_nearest_neighbors_solver(self, backend_name: str, n_nodes: int, n_workers: int) -> None:
+        graph, func = self._prepare_graph_for("nearest_neighbors_solver")
+        func(graph)
+
+    def time_subgraph(self, backend_name: str, n_nodes: int, n_workers: int) -> None:
+        graph, func = self._prepare_graph_for("subgraph")
+        func(graph)
+
+    def time_assign_tracks(self, backend_name: str, n_nodes: int, n_workers: int) -> None:
+        graph, func = self._prepare_graph_for("assign_tracks")
+        func(graph)
