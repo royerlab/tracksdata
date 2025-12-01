@@ -1086,7 +1086,7 @@ class BaseGraph(abc.ABC):
 
         return summary
 
-    def spatial_filter(self, attr_keys: list[str] | None = None) -> "SpatialFilter":
+    def spatial_filter(self, attr_keys: list[str] | None = None, clear_cache: bool = False) -> "SpatialFilter":
         """
         Create a spatial filter for efficient spatial queries of graph nodes.
 
@@ -1102,6 +1102,9 @@ class BaseGraph(abc.ABC):
             - 2D: ["y", "x"]
             - 3D: ["z", "y", "x"] or ["t", "y", "x"]
             - 4D: ["t", "z", "y", "x"]
+        clear_cache : bool
+            Whether to clear the spatial filter cache before creating a new filter.
+            Default is False.
 
         Returns
         -------
@@ -1135,12 +1138,20 @@ class BaseGraph(abc.ABC):
         """
         from tracksdata.graph.filters._spatial_filter import SpatialFilter
 
-        return SpatialFilter(self, attr_keys=attr_keys)
+        cache_key = None if attr_keys is None else tuple(attr_keys)
+        if not hasattr(self, "_spatial_filter_cache") or clear_cache:
+            self._spatial_filter_cache: dict[tuple[str, ...] | None, SpatialFilter] = {}
+
+        if cache_key not in self._spatial_filter_cache:
+            self._spatial_filter_cache[cache_key] = SpatialFilter(self, attr_keys=attr_keys)
+
+        return self._spatial_filter_cache[cache_key]
 
     def bbox_spatial_filter(
         self,
         frame_attr_key: str | None = DEFAULT_ATTR_KEYS.T,
         bbox_attr_key: str = DEFAULT_ATTR_KEYS.BBOX,
+        clear_cache: bool = False,
     ) -> "BBoxSpatialFilter":
         """
         Create a spatial filter for efficient spatial queries of graph nodes using bounding boxes.
@@ -1160,6 +1171,9 @@ class BaseGraph(abc.ABC):
             The bounding box coordinates should be in the format:
             [min_x, min_y, min_z, ..., max_x, max_y, max_z, ...]
             where each dimension has a min and max value.
+        clear_cache : bool
+            Whether to clear the spatial filter cache before creating a new filter.
+            Default is False.
 
         Returns
         -------
@@ -1193,7 +1207,15 @@ class BaseGraph(abc.ABC):
         """
         from tracksdata.graph.filters._spatial_filter import BBoxSpatialFilter
 
-        return BBoxSpatialFilter(self, frame_attr_key=frame_attr_key, bbox_attr_key=bbox_attr_key)
+        cache_key = (frame_attr_key, bbox_attr_key)
+        if not hasattr(self, "_bbox_spatial_filter_cache") or clear_cache:
+            self._bbox_spatial_filter_cache: dict[tuple[str | None, str], BBoxSpatialFilter] = {}
+
+        if cache_key not in self._bbox_spatial_filter_cache:
+            self._bbox_spatial_filter_cache[cache_key] = BBoxSpatialFilter(
+                self, frame_attr_key=frame_attr_key, bbox_attr_key=bbox_attr_key
+            )
+        return self._bbox_spatial_filter_cache[cache_key]
 
     @overload
     def assign_tracklet_ids(

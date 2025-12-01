@@ -63,6 +63,58 @@ def test_spatial_filter_initialization(sample_graph: RustWorkXGraph) -> None:
     assert spatial_filter._df_filter._attr_keys == custom_attrs
 
 
+def test_spatial_filter_caches_filters(sample_graph: RustWorkXGraph, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure spatial filters are reused when called with the same arguments."""
+    created_attr_keys = []
+
+    class DummySpatialFilter:
+        def __init__(self, graph: BaseGraph, attr_keys: list[str] | None = None) -> None:
+            self.graph = graph
+            self.attr_keys = attr_keys
+            created_attr_keys.append(attr_keys)
+
+    monkeypatch.setattr("tracksdata.graph.filters._spatial_filter.SpatialFilter", DummySpatialFilter)
+
+    first = sample_graph.spatial_filter(attr_keys=["y", "x"])
+    second = sample_graph.spatial_filter(attr_keys=["y", "x"])
+    default_first = sample_graph.spatial_filter()
+    default_second = sample_graph.spatial_filter()
+
+    assert first is second
+    assert default_first is default_second
+    assert first is not default_first
+    assert created_attr_keys == [["y", "x"], None]
+
+    third = sample_graph.spatial_filter(attr_keys=["y", "x"], clear_cache=True)
+    assert third is not first
+    assert created_attr_keys == [["y", "x"], None, ["y", "x"]]
+
+
+def test_bbox_spatial_filter_caches_filters(sample_graph: RustWorkXGraph, monkeypatch: pytest.MonkeyPatch) -> None:
+    created_attr_keys = []
+
+    class DummyBBoxSpatialFilter:
+        def __init__(self, graph: "BaseGraph", frame_attr_key: str | None = "t", bbox_attr_key: str = "bbox") -> None:
+            self.graph = graph
+            created_attr_keys.append((frame_attr_key, bbox_attr_key))
+
+    monkeypatch.setattr("tracksdata.graph.filters._spatial_filter.BBoxSpatialFilter", DummyBBoxSpatialFilter)
+
+    first = sample_graph.bbox_spatial_filter(frame_attr_key="frame", bbox_attr_key="bbox2")
+    second = sample_graph.bbox_spatial_filter(frame_attr_key="frame", bbox_attr_key="bbox2")
+    default_first = sample_graph.bbox_spatial_filter()
+    default_second = sample_graph.bbox_spatial_filter()
+
+    assert first is second
+    assert default_first is default_second
+    assert first is not default_first
+    assert created_attr_keys == [("frame", "bbox2"), (DEFAULT_ATTR_KEYS.T, DEFAULT_ATTR_KEYS.BBOX)]
+
+    third = sample_graph.bbox_spatial_filter(frame_attr_key="frame", bbox_attr_key="bbox2", clear_cache=True)
+    assert third is not first
+    assert created_attr_keys == [("frame", "bbox2"), (DEFAULT_ATTR_KEYS.T, DEFAULT_ATTR_KEYS.BBOX), ("frame", "bbox2")]
+
+
 def test_spatial_filter_querying(sample_graph: RustWorkXGraph) -> None:
     """Test spatial querying with different bounds and dimensions."""
     spatial_filter = SpatialFilter(sample_graph)
