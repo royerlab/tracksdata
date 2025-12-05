@@ -294,8 +294,11 @@ class SQLFilter(BaseFilter):
             node_attr_keys = [DEFAULT_ATTR_KEYS.T, *node_attr_keys]
         else:
             node_attr_keys = [DEFAULT_ATTR_KEYS.T, *self._graph.node_attr_keys]
+
+        node_attr_keys = list(dict.fromkeys(node_attr_keys))
+
         if edge_attr_keys is None:
-            edge_attr_keys = self._graph.edge_attr_keys
+            edge_attr_keys = self._graph.edge_attr_keys.copy()
 
         node_query = self._query_from_attr_keys(
             query=self._node_query,
