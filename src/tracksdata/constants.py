@@ -24,7 +24,7 @@ class DefaultAttrKeys:
         For a 3D image, the bounding box is a tuple of (x_start, y_start, z_start, x_end, y_end, z_end).
     SOLUTION : str
         Default key for solution information.
-    TRACK_ID : str
+    tracklet_id : str
         Default key for track identifiers.
     EDGE_ID : str
         Default key for edge identifiers.
@@ -56,7 +56,7 @@ class DefaultAttrKeys:
     MASK = "mask"
     BBOX = "bbox"
     SOLUTION = "solution"
-    TRACK_ID = "track_id"
+    TRACKLET_ID = "tracklet_id"
 
     EDGE_ID = "edge_id"
     EDGE_DIST = "distance"

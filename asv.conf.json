@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "project": "tracksdata",
+  "project_url": "https://github.com/royerlab/tracksdata",
+  "repo": ".",
+  "benchmark_dir": "benchmarks",
+  "env_dir": ".asv/env",
+  "results_dir": ".asv/results",
+  "html_dir": ".asv/html",
+  "environment_type": "virtualenv",
+  "build_command": [],
+  "pythons": [
+    "3.12"
+  ],
+  "install_command": [
+    "python -mpip install --force-reinstall ."
+  ],
+  "matrix": {},
+  "show_commit_url": "https://github.com/royerlab/tracksdata/commit/",
+  "branches": [
+    "main"
+  ]
+}

@@ -800,6 +800,7 @@ def test_sucessors_with_data(graph_backend: BaseGraph, use_subgraph: bool) -> No
     edges_df = graph_with_data.edge_attrs()
 
     successors_dict = graph_with_data.successors(node_ids)
+    successors_dict_df = graph_with_data.successors(node_ids, return_attrs=True)
     out_degree = graph_with_data.out_degree(node_ids)
 
     for i, node_id in enumerate(node_ids):
@@ -807,7 +808,9 @@ def test_sucessors_with_data(graph_backend: BaseGraph, use_subgraph: bool) -> No
         expected_sucessors = edges_df.filter(pl.col(DEFAULT_ATTR_KEYS.EDGE_SOURCE) == node_id)[
             DEFAULT_ATTR_KEYS.EDGE_TARGET
         ].to_list()
-        assert set(sucessors[DEFAULT_ATTR_KEYS.NODE_ID].to_list()) == set(expected_sucessors)
+        assert set(sucessors) == set(expected_sucessors)
+        df = successors_dict_df[node_id]
+        assert set(df[DEFAULT_ATTR_KEYS.NODE_ID].to_list()) == set(expected_sucessors)
         assert out_degree[i] == len(expected_sucessors)
 
     # test out of sync
@@ -829,6 +832,7 @@ def test_predecessors_with_data(graph_backend: BaseGraph, use_subgraph: bool) ->
     edges_df = graph_with_data.edge_attrs()
 
     predecessors_dict = graph_with_data.predecessors(node_ids)
+    predecessors_dict_df = graph_with_data.predecessors(node_ids, return_attrs=True)
     in_degree = graph_with_data.in_degree(node_ids)
 
     for i, node_id in enumerate(node_ids):
@@ -836,7 +840,9 @@ def test_predecessors_with_data(graph_backend: BaseGraph, use_subgraph: bool) ->
         expected_predecessors = edges_df.filter(pl.col(DEFAULT_ATTR_KEYS.EDGE_TARGET) == node_id)[
             DEFAULT_ATTR_KEYS.EDGE_SOURCE
         ].to_list()
-        assert set(predecessors[DEFAULT_ATTR_KEYS.NODE_ID].to_list()) == set(expected_predecessors)
+        assert set(predecessors) == set(expected_predecessors)
+        df = predecessors_dict_df[node_id]
+        assert set(df[DEFAULT_ATTR_KEYS.NODE_ID].to_list()) == set(expected_predecessors)
         assert in_degree[i] == len(expected_predecessors)
 
     # test out of sync

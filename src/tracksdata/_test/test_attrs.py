@@ -626,3 +626,27 @@ def test_attr_comparison_method_delegation() -> None:
     result = comp.alias("new_name")
     assert isinstance(result, Attr)
     assert result.columns == ["test_column"]
+
+
+def test_attr_is_in_creates_membership_expression() -> None:
+    df = pl.DataFrame({"col": [1, 2, 3, 4]})
+    comp = Attr("col").is_in([1, 3, 4])
+
+    assert isinstance(comp, AttrComparison)
+    evaluated = comp.to_attr().evaluate(df)
+    assert evaluated.to_list() == [True, False, True, True]
+
+
+def test_attr_is_in_errors() -> None:
+    with pytest.raises(
+        ValueError, match=r"Cannot use 'is_in' method with non-membership values. Found '1' of type <class 'int'>."
+    ):
+        Attr("col").is_in(1)
+
+
+def test_attr_is_in_accepts_numpy_arrays() -> None:
+    df = pl.DataFrame({"col": [5, 6, 7]})
+    comp = Attr("col").is_in(np.array([6, 8], dtype=np.int64))
+
+    evaluated = comp.to_attr().evaluate(df)
+    assert evaluated.to_list() == [False, True, False]

@@ -71,8 +71,8 @@ def test_ctc_metrics(ctc_data_dir: Path) -> None:
     input_tracks, reference_tracks, matching_data = compute_ctc_metrics_data(
         input_graph,
         reference_graph,
-        input_track_id_key=DEFAULT_ATTR_KEYS.TRACK_ID,
-        reference_track_id_key=DEFAULT_ATTR_KEYS.TRACK_ID,
+        input_tracklet_id_key=DEFAULT_ATTR_KEYS.TRACKLET_ID,
+        reference_tracklet_id_key=DEFAULT_ATTR_KEYS.TRACKLET_ID,
     )
 
     np.testing.assert_array_equal(input_tracks, ref_input_tracks)

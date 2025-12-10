@@ -42,6 +42,32 @@ def test_regionprops_attr_keys() -> None:
     assert operator.attr_keys() == []
 
 
+SUPPORTED_PROPERTIES = [
+    "area",
+    "area_bbox",
+    "area_convex",
+    "area_filled",
+    "axis_major_length",
+    "axis_minor_length",
+    "equivalent_diameter_area",
+    "extent",
+    "solidity",
+]
+SUPPORTED_PROPERTIES_2D = [
+    "eccentricity",
+    "feret_diameter_max",
+    "orientation",
+    "perimeter",
+    "perimeter_crofton",
+]
+SUPPORTED_PROPERTIES_INTENSITY = [
+    "intensity_max",
+    "intensity_mean",
+    "intensity_min",
+    "intensity_std",
+]
+
+
 def test_regionprops_add_nodes_2d() -> None:
     """Test adding nodes from 2D labels."""
     graph = RustWorkXGraph()
@@ -49,9 +75,12 @@ def test_regionprops_add_nodes_2d() -> None:
     # Create simple 2D labels
     labels = np.array([[[1, 1, 0], [1, 0, 2], [0, 2, 2]]], dtype=np.int32)
 
-    operator = RegionPropsNodes(extra_properties=["area"])
-
+    extra_properties = SUPPORTED_PROPERTIES + SUPPORTED_PROPERTIES_2D
+    operator = RegionPropsNodes(extra_properties=extra_properties)
     operator.add_nodes(graph, labels=labels)
+
+    assert "shape" in graph.metadata
+    assert graph.metadata["shape"] == labels.shape
 
     # Check that nodes were added
     assert graph.num_nodes == 2  # Two regions (labels 1 and 2)
@@ -82,9 +111,12 @@ def test_regionprops_add_nodes_3d() -> None:
 
     assert labels.shape == (2, 1, 3, 3)
 
-    operator = RegionPropsNodes(extra_properties=["area"])
-
+    extra_properties = SUPPORTED_PROPERTIES
+    operator = RegionPropsNodes(extra_properties=extra_properties)
     operator.add_nodes(graph, labels=labels)
+
+    assert "shape" in graph.metadata
+    assert graph.metadata["shape"] == labels.shape
 
     # Check that nodes were added
     assert graph.num_nodes == 2  # Two regions
@@ -113,16 +145,20 @@ def test_regionprops_add_nodes_with_intensity() -> None:
 
     assert intensity.ndim == 3
 
-    operator = RegionPropsNodes(extra_properties=["mean_intensity"])
+    extra_properties = SUPPORTED_PROPERTIES + SUPPORTED_PROPERTIES_INTENSITY
+    operator = RegionPropsNodes(extra_properties=extra_properties)
 
     operator.add_nodes(graph, labels=labels, intensity_image=intensity)
 
+    assert "shape" in graph.metadata
+    assert graph.metadata["shape"] == labels.shape
+
     # Check that nodes were added with intensity attributes
     nodes_df = graph.node_attrs()
-    assert "mean_intensity" in nodes_df.columns
+    assert "intensity_mean" in nodes_df.columns
 
     # Check that mean intensities are calculated
-    mean_intensities = sorted(nodes_df["mean_intensity"])
+    mean_intensities = sorted(nodes_df["intensity_mean"])
     # Region 1: pixels (10, 20, 30) -> mean = 20
     # Region 2: pixels (40, 50, 60) -> mean = 50
     assert abs(mean_intensities[0] - 20.0) < 1e-6
@@ -139,10 +175,14 @@ def test_regionprops_add_nodes_timelapse(n_workers: int) -> None:
 
     assert labels.ndim == 3
 
-    operator = RegionPropsNodes(extra_properties=["area"])
+    extra_properties = SUPPORTED_PROPERTIES + SUPPORTED_PROPERTIES_2D
+    operator = RegionPropsNodes(extra_properties=extra_properties)
 
     with options_context(n_workers=n_workers):
         operator.add_nodes(graph, labels=labels)
+
+    assert "shape" in graph.metadata
+    assert graph.metadata["shape"] == labels.shape
 
     # Check that nodes were added for both time points
     nodes_df = graph.node_attrs()
@@ -164,13 +204,17 @@ def test_regionprops_add_nodes_timelapse_with_intensity() -> None:
 
     intensity = np.array([[[10, 20], [0, 0]], [[0, 30], [40, 50]]], dtype=np.float32)  # t=0  # t=1
 
-    operator = RegionPropsNodes(extra_properties=["mean_intensity"])
+    extra_properties = SUPPORTED_PROPERTIES + SUPPORTED_PROPERTIES_2D + SUPPORTED_PROPERTIES_INTENSITY
+    operator = RegionPropsNodes(extra_properties=extra_properties)
 
     operator.add_nodes(graph, labels=labels, intensity_image=intensity)
 
+    assert "shape" in graph.metadata
+    assert graph.metadata["shape"] == labels.shape
+
     # Check that nodes were added with intensity attributes
     nodes_df = graph.node_attrs()
-    assert "mean_intensity" in nodes_df.columns
+    assert "intensity_mean" in nodes_df.columns
 
     # Check mean intensities for each time point
     for t in [0, 1]:
@@ -192,6 +236,9 @@ def test_regionprops_custom_properties() -> None:
     operator = RegionPropsNodes(extra_properties=[double_area, "area"])
 
     operator.add_nodes(graph, labels=labels, t=0)
+
+    assert "shape" in graph.metadata
+    assert graph.metadata["shape"] == labels.shape
 
     # Check that custom property was calculated
     nodes_df = graph.node_attrs()
@@ -228,6 +275,9 @@ def test_regionprops_mask_creation() -> None:
 
     operator.add_nodes(graph, labels=labels, t=0)
 
+    assert "shape" in graph.metadata
+    assert graph.metadata["shape"] == labels.shape
+
     # Check that masks were created
     nodes_df = graph.node_attrs()
     masks = nodes_df[DEFAULT_ATTR_KEYS.MASK]
@@ -250,6 +300,9 @@ def test_regionprops_spacing() -> None:
 
     operator.add_nodes(graph, labels=labels, t=0)
 
+    assert "shape" in graph.metadata
+    assert graph.metadata["shape"] == labels.shape
+
     # Check that nodes were added (spacing affects internal calculations)
     nodes_df = graph.node_attrs()
 
@@ -269,6 +322,9 @@ def test_regionprops_empty_labels() -> None:
     operator = RegionPropsNodes()
 
     operator.add_nodes(graph, labels=labels, t=0)
+
+    assert "shape" in graph.metadata
+    assert graph.metadata["shape"] == labels.shape
 
     # No nodes should be added
     assert graph.num_nodes == 0

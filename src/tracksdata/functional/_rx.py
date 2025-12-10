@@ -45,7 +45,7 @@ def _fast_path_transverse(
 def _fast_dag_transverse(
     starts: np.ndarray,
     dag: dict[int, int],
-    track_id_offset: int,
+    tracklet_id_offset: int,
 ) -> tuple[list[np.ndarray], np.ndarray, np.ndarray, dict[int, int], dict[int, int]]:
     """
     Traverse the tracks DAG creating a distinct id to each linear path.
@@ -62,40 +62,40 @@ def _fast_dag_transverse(
     dag : dict[int, int]
         Directed acyclic graph mapping parent → child for linear paths only.
         Dividing edges are excluded and handled separately.
-    track_id_offset : int
+    tracklet_id_offset : int
         The starting track id, useful when assigning track ids to a subgraph.
 
     Returns
     -------
     tuple[list[np.ndarray], np.ndarray, np.ndarray, dict[int, int], dict[int, int]]
         - sequence of paths: List of numpy arrays, each containing node IDs in a linear path
-        - their respective track_id: Track ID for each path
+        - their respective tracklet_id: Tracklet ID for each path
         - length: Length of each path
-        - last_to_track_id: Maps last node in each path to its track_id
-        - first_to_track_id: Maps first node in each path to its track_id
+        - last_to_tracklet_id: Maps last node in each path to its tracklet_id
+        - first_to_tracklet_id: Maps first node in each path to its tracklet_id
     """
     paths = []
-    track_ids = []
+    tracklet_ids = []
     lengths = []
-    last_to_track_id = {}
-    first_to_track_id = {}
+    last_to_tracklet_id = {}
+    first_to_tracklet_id = {}
 
-    track_id = track_id_offset
+    tracklet_id = tracklet_id_offset
 
     for start in starts:
         path = _fast_path_transverse(start, dag)
         paths.append(path)
-        track_ids.append(track_id)
+        tracklet_ids.append(tracklet_id)
         lengths.append(len(path))
-        last_to_track_id[path[-1]] = track_id
-        first_to_track_id[path[0]] = track_id
-        track_id += 1
+        last_to_tracklet_id[path[-1]] = tracklet_id
+        first_to_tracklet_id[path[0]] = tracklet_id
+        tracklet_id += 1
 
     paths = [np.asarray(p) for p in paths]
-    track_ids = np.asarray(track_ids)
+    tracklet_ids = np.asarray(tracklet_ids)
     lengths = np.asarray(lengths)
 
-    return paths, track_ids, lengths, last_to_track_id, first_to_track_id
+    return paths, tracklet_ids, lengths, last_to_tracklet_id, first_to_tracklet_id
 
 
 @njit
@@ -219,15 +219,15 @@ def _rx_graph_to_dict_dag(graph: rx.PyDiGraph) -> tuple[dict[int, int], np.ndarr
 
 
 @njit
-def _track_id_edges_from_long_edges(
+def _tracklet_id_edges_from_long_edges(
     source: np.ndarray,
     target: np.ndarray,
-    first_to_track_id: dict[int, int],
-    last_to_track_id: dict[int, int],
-    track_id_to_rx_node_id: dict[int, int],
+    first_to_tracklet_id: dict[int, int],
+    last_to_tracklet_id: dict[int, int],
+    tracklet_id_to_rx_node_id: dict[int, int],
 ) -> list[tuple[int, int]]:
     """
-    Compute the track_id edges from the long edges.
+    Compute the tracklet_id edges from the long edges.
 
     Parameters
     ----------
@@ -235,46 +235,46 @@ def _track_id_edges_from_long_edges(
         Source nodes.
     target : np.ndarray
         Target nodes.
-    first_to_track_id : dict[int, int]
-        First node -> track_id.
-    last_to_track_id : dict[int, int]
-        Last node -> track_id.
-    track_id_to_rx_node_id : dict[int, int]
-        Maps track_id to node_id of the rx graph of tracklets.
+    first_to_tracklet_id : dict[int, int]
+        First node -> tracklet_id.
+    last_to_tracklet_id : dict[int, int]
+        Last node -> tracklet_id.
+    tracklet_id_to_rx_node_id : dict[int, int]
+        Maps tracklet_id to node_id of the rx graph of tracklets.
 
     Returns
     -------
     list[tuple[int, int]]
-        List of track_id edges.
+        List of tracklet_id edges.
     """
     edges = []
     for i in range(len(source)):
-        child_track_id = track_id_to_rx_node_id[first_to_track_id[target[i]]]
-        parent_track_id = track_id_to_rx_node_id[last_to_track_id[source[i]]]
-        edges.append((parent_track_id, child_track_id))
+        child_tracklet_id = tracklet_id_to_rx_node_id[first_to_tracklet_id[target[i]]]
+        parent_tracklet_id = tracklet_id_to_rx_node_id[last_to_tracklet_id[source[i]]]
+        edges.append((parent_tracklet_id, child_tracklet_id))
     return edges
 
 
-def _assign_track_ids(
+def _assign_tracklet_ids(
     graph: rx.PyDiGraph,
-    track_id_offset: int,
+    tracklet_id_offset: int,
 ) -> tuple[np.ndarray, np.ndarray, rx.PyDiGraph]:
     """
-    Assigns an unique `track_id` to each simple path in the graph and
+    Assigns an unique `tracklet_id` to each simple path in the graph and
     their respective parent -> child relationships.
 
     Parameters
     ----------
     graph : rx.PyDiGraph
         Directed acyclic graph of tracks.
-    track_id_offset : int
+    tracklet_id_offset : int
         The starting track id, useful when assigning track ids to a subgraph.
 
     Returns
     -------
     tuple[np.ndarray, np.ndarray, rx.PyDiGraph]
         - node_ids: Sequence of node ids.
-        - track_ids: The respective track_id for each node.
+        - tracklet_ids: The respective tracklet_id for each node.
         - tracks_graph: Graph indicating the parent -> child relationships.
     """
     if graph.num_nodes() == 0:
@@ -285,30 +285,30 @@ def _assign_track_ids(
     # was it better (faster) when using a numpy array for the digraph as in ultrack?
     linear_dag, starts, long_edges_df = _rx_graph_to_dict_dag(graph)
 
-    paths, track_ids, lengths, last_to_track_id, first_to_track_id = _fast_dag_transverse(
-        starts, linear_dag, track_id_offset
+    paths, tracklet_ids, lengths, last_to_tracklet_id, first_to_tracklet_id = _fast_dag_transverse(
+        starts, linear_dag, tracklet_id_offset
     )
 
-    n_tracks = len(track_ids)
+    n_tracks = len(tracklet_ids)
 
     tracks_graph = rx.PyDiGraph(node_count_hint=n_tracks, edge_count_hint=n_tracks)
 
-    node_ids = tracks_graph.add_nodes_from(track_ids)
-    track_id_to_rx_node_id = _numba_build_dict(
-        np.asarray(track_ids, dtype=np.int64),
+    node_ids = tracks_graph.add_nodes_from(tracklet_ids)
+    tracklet_id_to_rx_node_id = _numba_build_dict(
+        np.asarray(tracklet_ids, dtype=np.int64),
         np.asarray(node_ids, dtype=np.int64),
     )
     if len(long_edges_df) > 0:
-        edges = _track_id_edges_from_long_edges(
+        edges = _tracklet_id_edges_from_long_edges(
             long_edges_df["source"].to_numpy(),
             long_edges_df["target"].to_numpy(),
-            first_to_track_id,
-            last_to_track_id,
-            track_id_to_rx_node_id,
+            first_to_tracklet_id,
+            last_to_tracklet_id,
+            tracklet_id_to_rx_node_id,
         )
         tracks_graph.add_edges_from_no_data(edges)
 
     paths = np.concatenate(paths)
-    nodes_track_ids = np.repeat(track_ids, lengths)
+    nodes_tracklet_ids = np.repeat(tracklet_ids, lengths)
 
-    return paths, nodes_track_ids, tracks_graph
+    return paths, nodes_tracklet_ids, tracks_graph

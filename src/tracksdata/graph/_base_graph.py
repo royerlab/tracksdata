@@ -10,22 +10,32 @@ import numpy as np
 import polars as pl
 import rustworkx as rx
 from geff.core_io import construct_var_len_props, write_arrays
-from geff_spec import Axis, PropMetadata
+from geff_spec import Axis, GeffMetadata, PropMetadata
 from numpy.typing import ArrayLike
+from psygnal import Signal
 from zarr.storage import StoreLike
 
 from tracksdata.attrs import AttrComparison, NodeAttr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
-from tracksdata.utils._dtypes import column_to_numpy, polars_dtype_to_numpy_dtype
+from tracksdata.utils._cache import cache_method
+from tracksdata.utils._dtypes import (
+    column_to_numpy,
+    infer_default_value,
+    polars_dtype_to_numpy_dtype,
+)
 from tracksdata.utils._logging import LOG
 from tracksdata.utils._multiprocessing import multiprocessing_apply
 
 if TYPE_CHECKING:
+    from traccuracy import TrackingGraph
+
     from tracksdata.graph.filters._base_filter import BaseFilter
     from tracksdata.graph.filters._spatial_filter import (
         BBoxSpatialFilter,
         SpatialFilter,
     )
+else:
+    TrackingGraph = Any
 
 
 T = TypeVar("T", bound="BaseGraph")
@@ -35,6 +45,12 @@ class BaseGraph(abc.ABC):
     """
     Base class for a graph backend.
     """
+
+    node_added = Signal(int)
+    node_removed = Signal(int)
+
+    def __init__(self) -> None:
+        self._cache = {}
 
     @property
     def supports_custom_indices(self) -> bool:
@@ -373,50 +389,139 @@ class BaseGraph(abc.ABC):
         """
         return False
 
+    @overload
+    def successors(
+        self,
+        node_ids: int,
+        attr_keys: Sequence[str] | str | None = ...,
+        *,
+        return_attrs: Literal[True],
+    ) -> pl.DataFrame: ...
+
+    @overload
+    def successors(
+        self,
+        node_ids: list[int] | None,
+        attr_keys: Sequence[str] | str | None = ...,
+        *,
+        return_attrs: Literal[True],
+    ) -> dict[int, pl.DataFrame]: ...
+
+    @overload
+    def successors(
+        self,
+        node_ids: int,
+        attr_keys: Sequence[str] | str | None = ...,
+        *,
+        return_attrs: Literal[False] = False,
+    ) -> list[int]: ...
+
+    @overload
+    def successors(
+        self,
+        node_ids: list[int] | None,
+        attr_keys: Sequence[str] | str | None = ...,
+        *,
+        return_attrs: Literal[False] = False,
+    ) -> dict[int, list[int]]: ...
+
     @abc.abstractmethod
     def successors(
         self,
-        node_ids: list[int] | int,
+        node_ids: list[int] | int | None,
         attr_keys: Sequence[str] | str | None = None,
-    ) -> dict[int, pl.DataFrame] | pl.DataFrame:
+        *,
+        return_attrs: bool = False,
+    ) -> dict[int, pl.DataFrame] | pl.DataFrame | dict[int, list[int]] | list[int]:
         """
         Get the sucessors of a list of nodes.
 
         Parameters
         ----------
-        node_ids : list[int] | int
+        node_ids : list[int] | int | None
             The IDs of the nodes to get the sucessors for.
+            If None, all nodes are used.
         attr_keys : Sequence[str] | str | None
-            The attribute keys to get.
-            If None, all attributesare used.
+            The attribute keys to retrieve when ``return_attrs`` is True.
+            If None, all attributes are included.
+        return_attrs : bool, default False
+            Whether to return node attributes in a `polars.DataFrame`. When False only
+            the successor node IDs are returned.
 
         Returns
         -------
-        dict[int, pl.DataFrame] | pl.DataFrame
-            The sucessors of the nodes indexed by node ID if a list of nodes is provided.
+        dict[int, pl.DataFrame] | pl.DataFrame | dict[int, list[int]] | list[int]
+            When ``return_attrs`` is True, returns a DataFrame for a single node or a dictionary
+            mapping each node ID to a DataFrame of neighbor attributes. Otherwise returns a list
+            of neighbor node IDs for a single node or a dictionary mapping each node ID to its
+            neighbor ID list.
         """
+
+    @overload
+    def predecessors(
+        self,
+        node_ids: int,
+        attr_keys: Sequence[str] | str | None = ...,
+        *,
+        return_attrs: Literal[True],
+    ) -> pl.DataFrame: ...
+
+    @overload
+    def predecessors(
+        self,
+        node_ids: list[int] | None,
+        attr_keys: Sequence[str] | str | None = ...,
+        *,
+        return_attrs: Literal[True],
+    ) -> dict[int, pl.DataFrame]: ...
+
+    @overload
+    def predecessors(
+        self,
+        node_ids: int,
+        attr_keys: Sequence[str] | str | None = ...,
+        *,
+        return_attrs: Literal[False] = False,
+    ) -> list[int]: ...
+
+    @overload
+    def predecessors(
+        self,
+        node_ids: list[int] | None,
+        attr_keys: Sequence[str] | str | None = ...,
+        *,
+        return_attrs: Literal[False] = False,
+    ) -> dict[int, list[int]]: ...
 
     @abc.abstractmethod
     def predecessors(
         self,
-        node_ids: list[int] | int,
+        node_ids: list[int] | int | None,
         attr_keys: Sequence[str] | str | None = None,
-    ) -> dict[int, pl.DataFrame] | pl.DataFrame:
+        *,
+        return_attrs: bool = False,
+    ) -> dict[int, pl.DataFrame] | pl.DataFrame | dict[int, list[int]] | list[int]:
         """
         Get the predecessors of a list of nodes.
 
         Parameters
         ----------
-        node_ids : list[int] | int
-            The IDs of the nodes to get the predecessors for.
+        node_ids : list[int] | int | None
+            The IDs of the nodes to get the predecessors for. If None, all nodes are used.
         attr_keys : Sequence[str] | str | None
-            The attribute keys to get.
-            If None, all attributesare used.
+            The attribute keys to retrieve when ``return_attrs`` is True.
+            If None, all attributes are included.
+        return_attrs : bool, default False
+            Whether to return node attributes in a `polars.DataFrame`. When False only
+            the predecessor node IDs are returned.
 
         Returns
         -------
-        dict[int, pl.DataFrame] | pl.DataFrame
-            The predecessors of the nodes indexed by node ID if a list of nodes is provided.
+        dict[int, pl.DataFrame] | pl.DataFrame | dict[int, list[int]] | list[int]
+            When ``return_attrs`` is True, returns a DataFrame for a single node or a dictionary
+            mapping each node ID to a DataFrame of neighbor attributes. Otherwise returns a list
+            of neighbor node IDs for a single node or a dictionary mapping each node ID to its
+            neighbor ID list.
         """
 
     def _validate_subgraph_args(
@@ -642,9 +747,10 @@ class BaseGraph(abc.ABC):
 
     def to_ctc(
         self,
-        shape: tuple[int, ...],
         output_dir: str | Path,
-        track_id_key: str = DEFAULT_ATTR_KEYS.TRACK_ID,
+        *,
+        shape: tuple[int, ...] | None = None,
+        tracklet_id_key: str = DEFAULT_ATTR_KEYS.TRACKLET_ID,
         overwrite: bool = False,
     ) -> None:
         """
@@ -652,11 +758,12 @@ class BaseGraph(abc.ABC):
 
         Parameters
         ----------
-        shape : tuple[int, ...]
-            The shape of the label images (T, (Z), Y, X)
         output_dir : str | Path
             The directory to save the graph to.
-        track_id_key : str
+        shape : tuple[int, ...]
+            The shape of the label images (T, (Z), Y, X).
+            If None, the shape is inferred from the graph metadata `shape` key.
+        tracklet_id_key : str
             The attribute key to use for the track IDs.
         overwrite : bool
             Whether to overwrite the output directory if it exists.
@@ -666,7 +773,7 @@ class BaseGraph(abc.ABC):
         ```python
         # ...
         solution_graph = solver.solve(graph)
-        solution_graph.assign_track_ids()
+        solution_graph.assign_tracklet_ids()
         solution_graph.to_ctc(shape=(10, 100, 100), output_dir="01_RES")
         ```
 
@@ -681,7 +788,7 @@ class BaseGraph(abc.ABC):
             graph=self,
             shape=shape,
             output_dir=output_dir,
-            track_id_key=track_id_key,
+            tracklet_id_key=tracklet_id_key,
             overwrite=overwrite,
         )
 
@@ -689,8 +796,8 @@ class BaseGraph(abc.ABC):
     def from_array(
         cls: type[T],
         positions: ArrayLike,
-        track_ids: ArrayLike | None = None,
-        track_id_graph: dict[int, int] | None = None,
+        tracklet_ids: ArrayLike | None = None,
+        tracklet_id_graph: dict[int, int] | None = None,
         **kwargs,
     ) -> T:
         """
@@ -701,9 +808,9 @@ class BaseGraph(abc.ABC):
         positions : np.ndarray
             (N, 4 or 3) dimensional array of positions.
             Defined by (T, (Z), Y, X) coordinates.
-        track_ids : np.ndarray | None
+        tracklet_ids : np.ndarray | None
             Track ids of the nodes if available.
-        track_id_graph : dict[int, int] | None
+        tracklet_id_graph : dict[int, int] | None
             Mapping of division as child track id (key) to parent track id (value) relationships.
         **kwargs : Any
             Additional arguments to pass to the graph constructor.
@@ -719,8 +826,8 @@ class BaseGraph(abc.ABC):
         from_array(
             positions=np.asarray(positions),
             graph=graph,
-            track_ids=track_ids,
-            track_id_graph=track_id_graph,
+            tracklet_ids=tracklet_ids,
+            tracklet_id_graph=tracklet_id_graph,
         )
         return graph
 
@@ -856,7 +963,8 @@ class BaseGraph(abc.ABC):
 
         for col in node_attrs.columns:
             if col != DEFAULT_ATTR_KEYS.T:
-                graph.add_node_attr_key(col, node_attrs[col].first())
+                first_value = node_attrs[col].first()
+                graph.add_node_attr_key(col, infer_default_value(first_value))
 
         if graph.supports_custom_indices:
             new_node_ids = graph.bulk_add_nodes(
@@ -983,12 +1091,23 @@ class BaseGraph(abc.ABC):
 
         return summary
 
+    def clear_cache(self) -> None:
+        """
+        Clear the cache of the graph.
+
+        NOTE: in the future we might want to allow clearing the cache by function name.
+        """
+        self._cache.clear()
+
+    @cache_method
     def spatial_filter(self, attr_keys: list[str] | None = None) -> "SpatialFilter":
         """
         Create a spatial filter for efficient spatial queries of graph nodes.
 
         This method creates a spatial index of graph nodes based on their spatial coordinates,
         enabling efficient querying of nodes within spatial regions of interest (ROI).
+
+        IMPORTANT: Spatial filters are cached by default, but can be cleared with `graph.clear_cache()`.
 
         Parameters
         ----------
@@ -1034,6 +1153,7 @@ class BaseGraph(abc.ABC):
 
         return SpatialFilter(self, attr_keys=attr_keys)
 
+    @cache_method
     def bbox_spatial_filter(
         self,
         frame_attr_key: str | None = DEFAULT_ATTR_KEYS.T,
@@ -1044,6 +1164,8 @@ class BaseGraph(abc.ABC):
 
         This method creates a spatial index of graph nodes based on their bounding box coordinates,
         enabling efficient querying of nodes intersecting with spatial regions of interest (ROI).
+
+        IMPORTANT: Bounding box spatial filters are cached by default, but can be cleared with `graph.clear_cache()`.
 
         Parameters
         ----------
@@ -1092,14 +1214,34 @@ class BaseGraph(abc.ABC):
 
         return BBoxSpatialFilter(self, frame_attr_key=frame_attr_key, bbox_attr_key=bbox_attr_key)
 
-    @abc.abstractmethod
-    def assign_track_ids(
+    @overload
+    def assign_tracklet_ids(
         self,
-        output_key: str = DEFAULT_ATTR_KEYS.TRACK_ID,
+        output_key: str = DEFAULT_ATTR_KEYS.TRACKLET_ID,
         reset: bool = True,
-        track_id_offset: int | None = None,
+        tracklet_id_offset: int | None = None,
         node_ids: list[int] | None = None,
-    ) -> rx.PyDiGraph:
+        return_id_update: Literal[False] = False,
+    ) -> rx.PyDiGraph: ...
+    @overload
+    def assign_tracklet_ids(
+        self,
+        output_key: str = DEFAULT_ATTR_KEYS.TRACKLET_ID,
+        reset: bool = True,
+        tracklet_id_offset: int | None = None,
+        node_ids: list[int] | None = None,
+        return_id_update: Literal[True] = True,
+    ) -> tuple[rx.PyDiGraph, pl.DataFrame]: ...
+
+    @abc.abstractmethod
+    def assign_tracklet_ids(
+        self,
+        output_key: str = DEFAULT_ATTR_KEYS.TRACKLET_ID,
+        reset: bool = True,
+        tracklet_id_offset: int | None = None,
+        node_ids: list[int] | None = None,
+        return_id_update: bool = False,
+    ) -> rx.PyDiGraph | tuple[rx.PyDiGraph, pl.DataFrame]:
         """
         Compute and assign track ids to nodes.
         Parameters
@@ -1108,18 +1250,24 @@ class BaseGraph(abc.ABC):
             The key of the output track id attribute.
         reset : bool
             Whether to reset the track ids of the graph. If True, the track ids will be reset to -1.
-        track_id_offset : int | None
+        tracklet_id_offset : int | None
             The starting track id, useful when assigning track ids to a subgraph.
             If None, the track ids will start from 1 or from the maximum existing track id + 1
             if the output_key already exists and reset is False.
         node_ids : list[int] | None
             The node ids to assign track ids to. If None, all nodes are used.
+        return_id_update : bool
+            Whether to return a DataFrame with the updated node ids and their previous and assigned track ids.
 
         Returns
         -------
         rx.PyDiGraph
             A compressed graph (parent -> child) with track ids lineage relationships.
             If node_ids is provided, it will only include linages including those nodes.
+        pl.DataFrame
+            A DataFrame with the updated node ids and their previous and assigned track ids.
+            This has columns "node_id", f"{output_key}", and f"{output_key}_new".
+            Only returned if return_id_update is True.
         """
         raise NotImplementedError(f"{self.__class__.__name__} backend does not support track id assignment.")
 
@@ -1153,11 +1301,11 @@ class BaseGraph(abc.ABC):
 
             # Successors: only nodes with exactly one successor
             succ_map = self.successors(node_ids=list(active_ids))
-            successors = [int(df[DEFAULT_ATTR_KEYS.NODE_ID].first()) for df in succ_map.values() if len(df) == 1]
+            successors = [int(nodes[0]) for nodes in succ_map.values() if len(nodes) == 1]
 
             # Predecessors: only nodes with exactly one predecessor and predecessor out_degree == 1
             pred_map = self.predecessors(node_ids=list(active_ids))
-            predecessors = [int(df[DEFAULT_ATTR_KEYS.NODE_ID].first()) for df in pred_map.values() if len(df) == 1]
+            predecessors = [int(nodes[0]) for nodes in pred_map.values() if len(nodes) == 1]
 
             if len(predecessors) > 0:
                 out_degrees = self.out_degree(predecessors)
@@ -1171,8 +1319,8 @@ class BaseGraph(abc.ABC):
 
     def tracklet_graph(
         self,
-        track_id_key: str = DEFAULT_ATTR_KEYS.TRACK_ID,
-        ignore_track_id: int | None = None,
+        tracklet_id_key: str = DEFAULT_ATTR_KEYS.TRACKLET_ID,
+        ignore_tracklet_id: int | None = None,
     ) -> rx.PyDiGraph:
         """
         Create a compressed tracklet graph where each node is a tracklet
@@ -1184,9 +1332,9 @@ class BaseGraph(abc.ABC):
 
         Parameters
         ----------
-        track_id_key : str
+        tracklet_id_key : str
             The key of the track id attribute.
-        ignore_track_id : int | None
+        ignore_tracklet_id : int | None
             The track id to ignore. If None, all track ids are used.
 
         Returns
@@ -1201,47 +1349,59 @@ class BaseGraph(abc.ABC):
         """
         from tracksdata.functional._edges import join_node_attrs_to_edges
 
-        if track_id_key not in self.node_attr_keys:
-            raise ValueError(f"Track id key '{track_id_key}' not found in graph. Expected '{self.node_attr_keys}'")
+        if tracklet_id_key not in self.node_attr_keys:
+            raise ValueError(f"Track id key '{tracklet_id_key}' not found in graph. Expected '{self.node_attr_keys}'")
 
-        nodes_df = self.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, track_id_key])
+        nodes_df = self.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, tracklet_id_key])
         edges_df = self.edge_attrs(attr_keys=[])
 
-        if ignore_track_id is not None:
-            nodes_df = nodes_df.filter(pl.col(track_id_key) != ignore_track_id)
+        if ignore_tracklet_id is not None:
+            nodes_df = nodes_df.filter(pl.col(tracklet_id_key) != ignore_tracklet_id)
 
-        nodes_df = nodes_df.unique(subset=[track_id_key])
+        track_ids = nodes_df[tracklet_id_key].unique().to_list()
+        tracklet_graph = rx.PyDiGraph()
 
-        graph = rx.PyDiGraph()
-        nodes_df = nodes_df.with_columns(
-            pl.Series(
-                np.asarray(graph.add_nodes_from(nodes_df[track_id_key].to_list()), dtype=int),
-            ).alias("rx_id"),
+        rx_ids = np.asarray(tracklet_graph.add_nodes_from(track_ids), dtype=int)
+        track_id_to_rx_id = dict(zip(track_ids, rx_ids, strict=True))
+
+        src_col = f"source_{tracklet_id_key}"
+        tgt_col = f"target_{tracklet_id_key}"
+
+        edges_df = (
+            join_node_attrs_to_edges(
+                nodes_df,
+                edges_df,
+                how="right",
+            )
+            .filter(pl.col(src_col) != pl.col(tgt_col))
+            .with_columns(
+                pl.col(src_col)
+                .map_elements(track_id_to_rx_id.__getitem__, return_dtype=pl.Int64)
+                .alias("source_rx_id"),
+                pl.col(tgt_col)
+                .map_elements(track_id_to_rx_id.__getitem__, return_dtype=pl.Int64)
+                .alias("target_rx_id"),
+            )
         )
 
-        edges_df = join_node_attrs_to_edges(
-            nodes_df,
-            edges_df,
-            how="right",
-        ).filter(~pl.col(DEFAULT_ATTR_KEYS.EDGE_ID).is_null())
-
-        graph.add_edges_from(
+        tracklet_graph.add_edges_from(
             zip(
                 edges_df["source_rx_id"].to_list(),
                 edges_df["target_rx_id"].to_list(),
-                zip(edges_df["source_track_id"].to_list(), edges_df["target_track_id"].to_list(), strict=False),
+                zip(edges_df[src_col].to_list(), edges_df[tgt_col].to_list(), strict=False),
                 strict=True,
             )
         )
 
-        return graph
+        return tracklet_graph
 
     @classmethod
     def from_geff(
         cls: type[T],
         geff_store: StoreLike,
+        geff_read_kwargs: dict[str, Any] | None = None,
         **kwargs,
-    ) -> T:
+    ) -> tuple[T, GeffMetadata]:
         """
         Create a graph from a geff data directory.
 
@@ -1249,6 +1409,8 @@ class BaseGraph(abc.ABC):
         ----------
         geff_store : StoreLike
             The store or path to the geff data directory to read the graph from.
+        geff_read_kwargs : dict[str, Any] | None
+            Additional keyword arguments to pass to the `geff.read` function.
         **kwargs
             Additional keyword arguments to pass to the graph constructor.
 
@@ -1256,19 +1418,27 @@ class BaseGraph(abc.ABC):
         -------
         T
             The loaded graph.
+        geff_metadata : GeffMetadata
+            The geff metadata of the graph.
         """
         from tracksdata.graph import IndexedRXGraph
 
+        if geff_read_kwargs is None:
+            geff_read_kwargs = {}
+
         # this performs a roundtrip with the rustworkx graph
-        rx_graph, _ = geff.read(geff_store, backend="rustworkx")
+        rx_graph, geff_metadata = geff.read(geff_store, backend="rustworkx", **geff_read_kwargs)
 
         if not isinstance(rx_graph, rx.PyDiGraph):
             LOG.warning("The graph is not a directed graph, converting to directed graph.")
             rx_graph = rx_graph.to_directed()
 
+        node_id_map = rx_graph.attrs["to_rx_id_map"]
+        rx_graph.attrs = {"geff": rx_graph.attrs, **rx_graph.attrs["extra"].pop("tracksdata", {})}
+
         indexed_graph = IndexedRXGraph(
             rx_graph=rx_graph,
-            node_id_map=rx_graph.attrs["to_rx_id_map"],
+            node_id_map=node_id_map,
             **kwargs,
         )
 
@@ -1283,9 +1453,9 @@ class BaseGraph(abc.ABC):
                 )
 
         if cls == IndexedRXGraph:
-            return indexed_graph
+            return indexed_graph, geff_metadata
 
-        return cls.from_other(indexed_graph, **kwargs)
+        return cls.from_other(indexed_graph, **kwargs), geff_metadata
 
     def to_geff(
         self,
@@ -1304,7 +1474,7 @@ class BaseGraph(abc.ABC):
             The geff metadata to write to the graph.
             It automatically generates the metadata with:
             - axes: time (t) and spatial axes ((z), y, x)
-            - tracklet node property: track_id
+            - tracklet node property: tracklet_id
         zarr_format : Literal[2, 3]
             The zarr format to write the graph to.
             Defaults to 3.
@@ -1322,9 +1492,9 @@ class BaseGraph(abc.ABC):
             axes = [Axis(name=DEFAULT_ATTR_KEYS.T, type="time")]
             axes.extend([Axis(name=c, type="space") for c in ("z", "y", "x") if c in node_attrs.columns])
 
-            if DEFAULT_ATTR_KEYS.TRACK_ID in node_attrs.columns:
+            if DEFAULT_ATTR_KEYS.TRACKLET_ID in node_attrs.columns:
                 track_node_props = {
-                    "tracklet": DEFAULT_ATTR_KEYS.TRACK_ID,
+                    "tracklet": DEFAULT_ATTR_KEYS.TRACKLET_ID,
                 }
             else:
                 track_node_props = None
@@ -1342,12 +1512,18 @@ class BaseGraph(abc.ABC):
                 for k, v in edge_attrs.to_dict().items()
             }
 
+            td_metadata = self.metadata.copy()
+            td_metadata.pop("geff", None)  # avoid geff being written multiple times
+
             geff_metadata = geff.GeffMetadata(
                 directed=True,
                 axes=axes,
                 node_props_metadata=node_props_metadata,
                 edge_props_metadata=edge_props_metadata,
                 track_node_props=track_node_props,
+                extra={
+                    "tracksdata": td_metadata,
+                },
             )
 
         node_dict = {
@@ -1372,6 +1548,24 @@ class BaseGraph(abc.ABC):
             metadata=geff_metadata,
             zarr_format=zarr_format,
         )
+
+    def to_traccuracy_graph(self, array_view_kwargs: dict[str, Any] | None = None) -> "TrackingGraph":
+        """
+        Convert the graph to a `traccuracy.TrackingGraph`.
+
+        Parameters
+        ----------
+        array_view_kwargs : dict[str, Any] | None
+            Additional keyword arguments to pass to the `GraphArrayView` constructor used to create the segmentation.
+
+        Returns
+        -------
+        TrackingGraph
+            A traccuracy graph.
+        """
+        from tracksdata.metrics._traccuracy import to_traccuracy_graph
+
+        return to_traccuracy_graph(self, array_view_kwargs=array_view_kwargs)
 
     @abc.abstractmethod
     def has_edge(self, source_id: int, target_id: int) -> bool:
@@ -1470,3 +1664,57 @@ class NodeInterface:
             .rows(named=True)[0]
         )
         return data
+
+    @property
+    @abc.abstractmethod
+    def metadata(self) -> dict[str, Any]:
+        """
+        Return the metadata of the graph.
+
+        Returns
+        -------
+        dict[str, Any]
+            The metadata of the graph as a dictionary.
+
+        Examples
+        --------
+        ```python
+        metadata = graph.metadata
+        print(metadata["shape"])
+        ```
+        """
+
+    @abc.abstractmethod
+    def update_metadata(self, **kwargs) -> None:
+        """
+        Set or update metadata for the graph.
+
+        Parameters
+        ----------
+        **kwargs : Any
+            The metadata items to set by key. Values will be stored as JSON.
+
+        Examples
+        --------
+        ```python
+        graph.update_metadata(shape=[1, 25, 25], path="path/to/image.ome.zarr")
+        graph.update_metadata(description="Tracking data from experiment 1")
+        ```
+        """
+
+    @abc.abstractmethod
+    def remove_metadata(self, key: str) -> None:
+        """
+        Remove a metadata key from the graph.
+
+        Parameters
+        ----------
+        key : str
+            The key of the metadata to remove.
+
+        Examples
+        --------
+        ```python
+        graph.remove_metadata("shape")
+        ```
+        """

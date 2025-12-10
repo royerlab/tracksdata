@@ -10,7 +10,7 @@ from tracksdata.graph._rustworkx_graph import (
     RXFilter,
     _create_filter_func,
 )
-from tracksdata.graph.filters._base_filter import cache_method
+from tracksdata.utils._cache import cache_method
 
 if TYPE_CHECKING:
     from tracksdata.graph._graph_view import GraphView

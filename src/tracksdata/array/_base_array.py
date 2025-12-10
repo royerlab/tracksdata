@@ -34,6 +34,11 @@ class BaseReadOnlyArray(abc.ABC):
     def __getitem__(self, index: ArrayIndex) -> ArrayLike:
         """Returns a slice of the array."""
 
+    @property
+    @abc.abstractmethod
+    def size(self) -> int:
+        """Returns the total number of elements in the array."""
+
 
 class BaseWritableArray(BaseReadOnlyArray):
     """
