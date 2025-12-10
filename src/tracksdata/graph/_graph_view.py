@@ -419,13 +419,15 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
     def _get_neighbors(
         self,
         neighbors_func: Callable[[rx.PyDiGraph, int], rx.NodeIndices],
-        node_ids: list[int] | int,
+        node_ids: list[int] | int | None,
         attr_keys: Sequence[str] | str | None = None,
         *,
         return_attrs: bool = False,
     ) -> dict[int, pl.DataFrame] | pl.DataFrame | dict[int, list[int]] | list[int]:
         single_node = False
-        if isinstance(node_ids, int):
+        if node_ids is None:
+            node_ids = self.node_ids()
+        elif isinstance(node_ids, int):
             node_ids = [node_ids]
             single_node = True
 
@@ -456,7 +458,7 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
 
     def successors(
         self,
-        node_ids: list[int] | int,
+        node_ids: list[int] | int | None,
         attr_keys: Sequence[str] | str | None = None,
         *,
         return_attrs: bool = False,
@@ -467,7 +469,7 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
 
     def predecessors(
         self,
-        node_ids: list[int] | int,
+        node_ids: list[int] | int | None,
         attr_keys: Sequence[str] | str | None = None,
         *,
         return_attrs: bool = False,

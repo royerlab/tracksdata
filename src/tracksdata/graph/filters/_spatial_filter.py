@@ -239,7 +239,7 @@ class BBoxSpatialFilter:
         if nodes_df.is_empty():
             self._node_rtree = None
         else:
-            bboxes = nodes_df[bbox_attr_key].to_numpy()
+            bboxes = self._bboxes_to_array(nodes_df[bbox_attr_key])
             if bboxes.shape[1] % 2 != 0:
                 raise ValueError(f"Bounding box coordinates must have even number of dimensions, got {bboxes.shape[1]}")
             num_dims = bboxes.shape[1] // 2
@@ -370,7 +370,7 @@ class BBoxSpatialFilter:
         if self._node_rtree is None:
             if self._graph.num_nodes > 0:
                 nodes_df = self._graph.node_attrs()
-                bboxes = nodes_df[self._bbox_attr_key].to_numpy()
+                bboxes = self._bboxes_to_array(nodes_df[self._bbox_attr_key])
                 num_dims = bboxes.shape[1] // 2
 
                 if self._frame_attr_key is None:
@@ -415,3 +415,19 @@ class BBoxSpatialFilter:
             positions_min,
             positions_max,
         )
+
+    @staticmethod
+    def _bboxes_to_array(bbox_series: pl.Series) -> np.ndarray:
+        """
+        Normalize bbox data to a 2D numpy array regardless of the polars dtype.
+
+        Polars `List` columns produce a 1D object array from `to_numpy()`, which
+        makes downstream shape checks fail. Converting via `to_list()` ensures
+        we always have a dense 2D array of shape (N, 2*dims).
+        """
+        # XXX This is a temporary workaround until metadata stores the correct dtype.
+        dim = len(bbox_series[0]) if len(bbox_series) > 0 else None
+        if dim is None:
+            return np.empty((0, 0))
+        else:
+            return bbox_series.cast(pl.Array(pl.Int64, dim)).to_numpy()

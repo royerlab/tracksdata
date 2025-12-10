@@ -9,44 +9,73 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: 0  # Important for asv to access the git history
-        ref: ${{ github.ref }}
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref }}
 
-    - name: Fetch main branch
-      run: |
-        git fetch origin main
+      - name: Fetch main branch
+        run: git fetch origin main
 
-    - name: Install uv
-      uses: astral-sh/setup-uv@v5
-      with:
-        python-version: "3.12"
-        enable-cache: true
+      - name: Create local main branch for ASV
+        run: |
+          # Create local 'main' if it doesn't exist
+          if ! git show-ref --verify --quiet refs/heads/main; then
+            git branch main origin/main
+          fi
+          # Sanity check
+          git rev-parse main
 
-    - name: Install dependencies
-      run: |
-        uv pip install 'asv<0.6.2' virtualenv
-        uv pip install "."
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-    - name: Run benchmarks
-      id: benchmark_output
-      run: |
-        cd benchmarks
-        uv pip install -r requirements.txt
-        python graph_backends.py
-        echo "benchmark-results<<EOF" >> $GITHUB_OUTPUT
-        cat outputs/graph_backends.md >> $GITHUB_OUTPUT
-        echo "EOF" >> $GITHUB_OUTPUT
+      - name: Install benchmarking tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install asv virtualenv
 
-# Currently not working because PRs comes from forks
-#     - name: Comment PR with benchmark results
-#       uses: peter-evans/create-or-update-comment@v4
-#       with:
-#         issue-number: ${{ github.event.pull_request.number }}
-#         body: |
-#           ### Benchmark Results
-#
-#           ```
-#           ${{ steps.benchmark_output.outputs.benchmark-results }}
-#           ```
+      - name: Cache ASV environments
+        uses: actions/cache@v4
+        with:
+          path: .asv/env
+          key: asv-env-${{ runner.os }}-py312-${{ hashFiles('pyproject.toml', 'asv.conf.json') }}
+          restore-keys: |
+            asv-env-${{ runner.os }}-py312-
+
+      - name: Register ASV machine profile
+        run: |
+          asv machine \
+            --yes \
+            --machine github-actions \
+
+      - name: Run ASV continuous benchmarks
+        id: asv
+        run: |
+          set -o pipefail
+          status=0
+          asv continuous origin/main HEAD \
+            --quick \
+            --machine github-actions \
+            --python 3.12 \
+            --factor 1.5 \
+            --show-stderr || status=$?
+          if [ "$status" -eq 2 ]; then
+              echo "asv: benchmark run failed (exit 2). Failing CI." >&2
+              exit 2
+          fi
+          if [ "$status" -eq 1 ]; then
+              echo "asv: performance regression detected (ignored for CI)." >&2
+          fi
+          asv compare origin/main HEAD > asv-summary.txt
+          {
+            echo 'summary<<EOF'
+            cat asv-summary.txt
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Append benchmark summary
+        run: |
+          echo '### ASV Continuous Results' >> $GITHUB_STEP_SUMMARY
+          cat asv-summary.txt >> $GITHUB_STEP_SUMMARY

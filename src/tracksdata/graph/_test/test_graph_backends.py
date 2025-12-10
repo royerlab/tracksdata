@@ -675,11 +675,27 @@ def test_sucessors_and_degree(graph_backend: BaseGraph) -> None:
     assert successors_dict[node1] == [node2]
     assert successors_dict[node2] == []
 
+    successors_all = graph_backend.successors(None)
+    assert isinstance(successors_all, dict)
+    assert set(successors_all.keys()) == {node0, node1, node2, node3}
+    assert sorted(successors_all[node0]) == sorted([node1, node3])
+    assert successors_all[node1] == [node2]
+    assert successors_all[node2] == []
+    assert successors_all[node3] == []
+
     successors_dict_df = graph_backend.successors([node0, node1, node2], return_attrs=True)
     assert isinstance(successors_dict_df[node0], pl.DataFrame)
     assert set(successors_dict_df[node0][DEFAULT_ATTR_KEYS.NODE_ID].to_list()) == {node1, node3}
     assert set(successors_dict_df[node1][DEFAULT_ATTR_KEYS.NODE_ID].to_list()) == {node2}
     assert len(successors_dict_df[node2]) == 0
+
+    successors_all_df = graph_backend.successors(None, return_attrs=True)
+    assert isinstance(successors_all_df, dict)
+    assert set(successors_all_df.keys()) == {node0, node1, node2, node3}
+    assert set(successors_all_df[node0][DEFAULT_ATTR_KEYS.NODE_ID].to_list()) == {node1, node3}
+    assert set(successors_all_df[node1][DEFAULT_ATTR_KEYS.NODE_ID].to_list()) == {node2}
+    assert successors_all_df[node2].is_empty()
+    assert successors_all_df[node3].is_empty()
 
     # testing query all
     assert graph_backend.out_degree() == [2, 1, 0, 0]
@@ -751,12 +767,28 @@ def test_predecessors_and_degree(graph_backend: BaseGraph) -> None:
     assert predecessors_dict[node2] == [node1]
     assert predecessors_dict[node3] == [node0]
 
+    predecessors_all = graph_backend.predecessors(None)
+    assert isinstance(predecessors_all, dict)
+    assert set(predecessors_all.keys()) == {node0, node1, node2, node3}
+    assert predecessors_all[node0] == []
+    assert predecessors_all[node1] == [node0]
+    assert predecessors_all[node2] == [node1]
+    assert predecessors_all[node3] == [node0]
+
     predecessors_dict_df = graph_backend.predecessors([node0, node1, node2, node3], return_attrs=True)
     assert isinstance(predecessors_dict_df[node1], pl.DataFrame)
     assert predecessors_dict_df[node0].is_empty()
     assert set(predecessors_dict_df[node1][DEFAULT_ATTR_KEYS.NODE_ID].to_list()) == {node0}
     assert set(predecessors_dict_df[node2][DEFAULT_ATTR_KEYS.NODE_ID].to_list()) == {node1}
     assert set(predecessors_dict_df[node3][DEFAULT_ATTR_KEYS.NODE_ID].to_list()) == {node0}
+
+    predecessors_all_df = graph_backend.predecessors(None, return_attrs=True)
+    assert isinstance(predecessors_all_df, dict)
+    assert set(predecessors_all_df.keys()) == {node0, node1, node2, node3}
+    assert predecessors_all_df[node0].is_empty()
+    assert set(predecessors_all_df[node1][DEFAULT_ATTR_KEYS.NODE_ID].to_list()) == {node0}
+    assert set(predecessors_all_df[node2][DEFAULT_ATTR_KEYS.NODE_ID].to_list()) == {node1}
+    assert set(predecessors_all_df[node3][DEFAULT_ATTR_KEYS.NODE_ID].to_list()) == {node0}
     assert graph_backend.in_degree() == [0, 1, 1, 1]
     # testing different ordering
     assert graph_backend.in_degree([node0, node1, node2, node3]) == [0, 1, 1, 1]

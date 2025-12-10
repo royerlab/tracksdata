@@ -17,6 +17,7 @@ from zarr.storage import StoreLike
 
 from tracksdata.attrs import AttrComparison, NodeAttr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
+from tracksdata.utils._cache import cache_method
 from tracksdata.utils._dtypes import (
     column_to_numpy,
     infer_default_value,
@@ -47,6 +48,9 @@ class BaseGraph(abc.ABC):
 
     node_added = Signal(int)
     node_removed = Signal(int)
+
+    def __init__(self) -> None:
+        self._cache = {}
 
     @property
     def supports_custom_indices(self) -> bool:
@@ -397,7 +401,7 @@ class BaseGraph(abc.ABC):
     @overload
     def successors(
         self,
-        node_ids: list[int],
+        node_ids: list[int] | None,
         attr_keys: Sequence[str] | str | None = ...,
         *,
         return_attrs: Literal[True],
@@ -415,7 +419,7 @@ class BaseGraph(abc.ABC):
     @overload
     def successors(
         self,
-        node_ids: list[int],
+        node_ids: list[int] | None,
         attr_keys: Sequence[str] | str | None = ...,
         *,
         return_attrs: Literal[False] = False,
@@ -424,7 +428,7 @@ class BaseGraph(abc.ABC):
     @abc.abstractmethod
     def successors(
         self,
-        node_ids: list[int] | int,
+        node_ids: list[int] | int | None,
         attr_keys: Sequence[str] | str | None = None,
         *,
         return_attrs: bool = False,
@@ -434,8 +438,9 @@ class BaseGraph(abc.ABC):
 
         Parameters
         ----------
-        node_ids : list[int] | int
+        node_ids : list[int] | int | None
             The IDs of the nodes to get the sucessors for.
+            If None, all nodes are used.
         attr_keys : Sequence[str] | str | None
             The attribute keys to retrieve when ``return_attrs`` is True.
             If None, all attributes are included.
@@ -464,7 +469,7 @@ class BaseGraph(abc.ABC):
     @overload
     def predecessors(
         self,
-        node_ids: list[int],
+        node_ids: list[int] | None,
         attr_keys: Sequence[str] | str | None = ...,
         *,
         return_attrs: Literal[True],
@@ -482,7 +487,7 @@ class BaseGraph(abc.ABC):
     @overload
     def predecessors(
         self,
-        node_ids: list[int],
+        node_ids: list[int] | None,
         attr_keys: Sequence[str] | str | None = ...,
         *,
         return_attrs: Literal[False] = False,
@@ -491,7 +496,7 @@ class BaseGraph(abc.ABC):
     @abc.abstractmethod
     def predecessors(
         self,
-        node_ids: list[int] | int,
+        node_ids: list[int] | int | None,
         attr_keys: Sequence[str] | str | None = None,
         *,
         return_attrs: bool = False,
@@ -501,8 +506,8 @@ class BaseGraph(abc.ABC):
 
         Parameters
         ----------
-        node_ids : list[int] | int
-            The IDs of the nodes to get the predecessors for.
+        node_ids : list[int] | int | None
+            The IDs of the nodes to get the predecessors for. If None, all nodes are used.
         attr_keys : Sequence[str] | str | None
             The attribute keys to retrieve when ``return_attrs`` is True.
             If None, all attributes are included.
@@ -1086,12 +1091,23 @@ class BaseGraph(abc.ABC):
 
         return summary
 
+    def clear_cache(self) -> None:
+        """
+        Clear the cache of the graph.
+
+        NOTE: in the future we might want to allow clearing the cache by function name.
+        """
+        self._cache.clear()
+
+    @cache_method
     def spatial_filter(self, attr_keys: list[str] | None = None) -> "SpatialFilter":
         """
         Create a spatial filter for efficient spatial queries of graph nodes.
 
         This method creates a spatial index of graph nodes based on their spatial coordinates,
         enabling efficient querying of nodes within spatial regions of interest (ROI).
+
+        IMPORTANT: Spatial filters are cached by default, but can be cleared with `graph.clear_cache()`.
 
         Parameters
         ----------
@@ -1137,6 +1153,7 @@ class BaseGraph(abc.ABC):
 
         return SpatialFilter(self, attr_keys=attr_keys)
 
+    @cache_method
     def bbox_spatial_filter(
         self,
         frame_attr_key: str | None = DEFAULT_ATTR_KEYS.T,
@@ -1147,6 +1164,8 @@ class BaseGraph(abc.ABC):
 
         This method creates a spatial index of graph nodes based on their bounding box coordinates,
         enabling efficient querying of nodes intersecting with spatial regions of interest (ROI).
+
+        IMPORTANT: Bounding box spatial filters are cached by default, but can be cleared with `graph.clear_cache()`.
 
         Parameters
         ----------
