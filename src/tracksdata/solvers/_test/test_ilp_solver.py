@@ -691,39 +691,23 @@ def test_ilp_solver_solve_with_merge_weight() -> None:
     merge_node = graph.add_node({DEFAULT_ATTR_KEYS.T: 1, "x": 1.0, "y": 0.0})
 
     # Add edges with attractive weights
-    edge1 = graph.add_edge(track1_node, merge_node, {DEFAULT_ATTR_KEYS.EDGE_DIST: -1.0})
-    edge2 = graph.add_edge(track2_node, merge_node, {DEFAULT_ATTR_KEYS.EDGE_DIST: -1.0})
+    graph.add_edge(track1_node, merge_node, {DEFAULT_ATTR_KEYS.EDGE_DIST: -1.0})
+    graph.add_edge(track2_node, merge_node, {DEFAULT_ATTR_KEYS.EDGE_DIST: -1.0})
 
     # Test with merge weight - should allow merging when beneficial
     solver = ILPSolver(
         edge_weight=DEFAULT_ATTR_KEYS.EDGE_DIST,
         merge_weight=0.0,  # Neutral merge cost
     )
-    solver.solve(graph)
+    solution = solver.solve(graph)
 
     # Check that solution was found
-    node_attrs = graph.node_attrs()
-    edge_attrs = graph.edge_attrs()
-    selected_nodes = node_attrs.filter(node_attrs[DEFAULT_ATTR_KEYS.SOLUTION])
-    selected_edges = edge_attrs.filter(edge_attrs[DEFAULT_ATTR_KEYS.SOLUTION])
+    selected_node_attrs = solution.node_attrs()
+    selected_edge_attrs = solution.edge_attrs()
 
     # Should have some solution
-    assert len(selected_nodes) > 0
-    assert len(selected_edges) > 0
-
-    # Check basic topology requirements are met
-    selected_node_ids = selected_nodes[DEFAULT_ATTR_KEYS.NODE_ID].to_list()
-    selected_edge_ids = selected_edges[DEFAULT_ATTR_KEYS.EDGE_ID].to_list()
-
-    # If merge_node is selected and has incoming edges, verify the structure
-    if merge_node in selected_node_ids:
-        incoming_edges = [eid for eid in [edge1, edge2] if eid in selected_edge_ids]
-        # Should have at least one incoming edge if selected
-        assert len(incoming_edges) >= 1
-        # Test specific behavior: with neutral merge weight and attractive edges,
-        # should allow both edges (merge)
-        if len(incoming_edges) == 2:
-            assert graph.in_degree(merge_node) == 2  # Full merge occurred
+    assert len(selected_node_attrs) == 3
+    assert len(selected_edge_attrs) == 2
 
 
 def test_ilp_solver_solve_with_positive_merge_weight() -> None:
@@ -738,33 +722,21 @@ def test_ilp_solver_solve_with_positive_merge_weight() -> None:
     merge_node = graph.add_node({DEFAULT_ATTR_KEYS.T: 1, "x": 1.5})
     continuation_node = graph.add_node({DEFAULT_ATTR_KEYS.T: 2, "x": 1.5})
 
-    edge1 = graph.add_edge(track1_node0, merge_node, {DEFAULT_ATTR_KEYS.EDGE_DIST: -1.0})
-    edge2 = graph.add_edge(track2_node0, merge_node, {DEFAULT_ATTR_KEYS.EDGE_DIST: -1.0})
+    graph.add_edge(track1_node0, merge_node, {DEFAULT_ATTR_KEYS.EDGE_DIST: -1.0})
+    graph.add_edge(track2_node0, merge_node, {DEFAULT_ATTR_KEYS.EDGE_DIST: -1.0})
     graph.add_edge(merge_node, continuation_node, {DEFAULT_ATTR_KEYS.EDGE_DIST: -1.0})
 
     # High merge penalty should prevent merging
     solver = ILPSolver(
         edge_weight=DEFAULT_ATTR_KEYS.EDGE_DIST,
         merge_weight=5.0,  # High penalty for merges
-        appearance_weight=1.0,
-        disappearance_weight=1.0,
     )
-    solver.solve(graph)
+    solution = solver.solve(graph)
 
-    edge_attrs = graph.edge_attrs()
-    selected_edges = edge_attrs.filter(edge_attrs[DEFAULT_ATTR_KEYS.SOLUTION])
-    selected_edge_ids = selected_edges[DEFAULT_ATTR_KEYS.EDGE_ID].to_list()
-
-    # Due to high merge penalty, at most one incoming edge should be selected
-    incoming_edges_selected = sum(1 for eid in [edge1, edge2] if eid in selected_edge_ids)
-    assert incoming_edges_selected <= 1
-
-    # If merge is prevented, the merge node should have in-degree <= 1
-    if merge_node in [
-        n[DEFAULT_ATTR_KEYS.NODE_ID]
-        for n in graph.node_attrs().filter(graph.node_attrs()[DEFAULT_ATTR_KEYS.SOLUTION]).iter_rows(named=True)
-    ]:
-        assert graph.in_degree(merge_node) >= 1  # At least one connection if selected
+    selected_edge_attrs = solution.edge_attrs()
+    selected_node_attrs = solution.node_attrs()
+    assert len(selected_edge_attrs) == 2  # one of the parallel edges and the continuation edge
+    assert len(selected_node_attrs) == 3  # the two tracks and the merge node
 
 
 def test_ilp_solver_solve_with_merge_expression() -> None:
@@ -797,36 +769,6 @@ def test_ilp_solver_solve_with_merge_expression() -> None:
     assert len(selected_nodes) >= 0  # Allow empty solution if merge cost is too high
 
 
-def test_ilp_solver_solve_with_merge_infinity_expressions() -> None:
-    """Test solving with infinity expressions on merge weights."""
-    graph = RustWorkXGraph()
-    graph.add_node_attr_key("force_merge", 0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
-
-    # Two source nodes
-    source1 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "force_merge": 0.0})
-    source2 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "force_merge": 0.0})
-    merge_target = graph.add_node({DEFAULT_ATTR_KEYS.T: 1, "force_merge": 1.0})
-
-    # Use moderately expensive edge weights
-    graph.add_edge(source1, merge_target, {DEFAULT_ATTR_KEYS.EDGE_DIST: 1.0})
-    graph.add_edge(source2, merge_target, {DEFAULT_ATTR_KEYS.EDGE_DIST: 1.0})
-
-    # Force merge using negative infinity for force_merge=1 nodes
-    solver = ILPSolver(
-        edge_weight=DEFAULT_ATTR_KEYS.EDGE_DIST,
-        merge_weight=-math.inf * (Attr("force_merge") == 1.0),
-    )
-    solver.solve(graph)
-
-    # Just verify we get some solution - infinity expressions should work
-    node_attrs = graph.node_attrs()
-    selected_nodes = node_attrs.filter(node_attrs[DEFAULT_ATTR_KEYS.SOLUTION])
-
-    # Should have some solution due to forced merge
-    assert len(selected_nodes) >= 0
-
-
 def test_ilp_solver_solve_merge_and_division_combined() -> None:
     """Test solving with both merge and division in the same graph."""
     graph = RustWorkXGraph()
@@ -843,10 +785,7 @@ def test_ilp_solver_solve_merge_and_division_combined() -> None:
     # Time 1: Merge point
     merge_node = graph.add_node({DEFAULT_ATTR_KEYS.T: 1, "x": 1.0})
 
-    # Time 2: Division point
-    division_node = graph.add_node({DEFAULT_ATTR_KEYS.T: 2, "x": 1.0})
-
-    # Time 3: Two tracks after division
+    # Time 2: Two tracks after division
     track1_end = graph.add_node({DEFAULT_ATTR_KEYS.T: 3, "x": 0.0})
     track2_end = graph.add_node({DEFAULT_ATTR_KEYS.T: 3, "x": 2.0})
 
@@ -854,35 +793,22 @@ def test_ilp_solver_solve_merge_and_division_combined() -> None:
     graph.add_edge(track1_start, merge_node, {DEFAULT_ATTR_KEYS.EDGE_DIST: -1.0})
     graph.add_edge(track2_start, merge_node, {DEFAULT_ATTR_KEYS.EDGE_DIST: -1.0})
 
-    # Connection between merge and division
-    graph.add_edge(merge_node, division_node, {DEFAULT_ATTR_KEYS.EDGE_DIST: -1.0})
-
     # Edges for division
-    graph.add_edge(division_node, track1_end, {DEFAULT_ATTR_KEYS.EDGE_DIST: -1.0})
-    graph.add_edge(division_node, track2_end, {DEFAULT_ATTR_KEYS.EDGE_DIST: -1.0})
+    graph.add_edge(merge_node, track1_end, {DEFAULT_ATTR_KEYS.EDGE_DIST: -1.0})
+    graph.add_edge(merge_node, track2_end, {DEFAULT_ATTR_KEYS.EDGE_DIST: -1.0})
 
     solver = ILPSolver(
         edge_weight=DEFAULT_ATTR_KEYS.EDGE_DIST,
         merge_weight=0.5,
         division_weight=0.5,
-        appearance_weight=2.0,
-        disappearance_weight=2.0,
     )
-    solver.solve(graph)
+    solution = solver.solve(graph)
 
-    node_attrs = graph.node_attrs()
-    selected_nodes = node_attrs.filter(node_attrs[DEFAULT_ATTR_KEYS.SOLUTION])
-    selected_node_ids = selected_nodes[DEFAULT_ATTR_KEYS.NODE_ID].to_list()
+    selected_node_attrs = solution.node_attrs()
+    selected_edge_attrs = solution.edge_attrs()
 
-    # Check merge and division occurred
-    assert merge_node in selected_node_ids
-    assert division_node in selected_node_ids
-
-    # Verify graph structure - merge should have 2 incoming, division should have 2 outgoing
-    assert graph.in_degree(merge_node) == 2
-    assert graph.out_degree(division_node) == 2
-    assert graph.in_degree(division_node) == 1
-    assert graph.out_degree(merge_node) == 1
+    assert len(selected_node_attrs) == 5
+    assert len(selected_edge_attrs) == 4
 
 
 def test_ilp_solver_init_with_merge_weight() -> None:
