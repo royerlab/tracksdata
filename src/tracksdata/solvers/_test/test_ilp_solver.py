@@ -138,8 +138,8 @@ def test_ilp_solver_solve_simple_case() -> None:
     assert len(selected_nodes) > 0
 
     assert solution_graph is not None
-    assert solution_graph.num_nodes == len(selected_nodes)
-    assert solution_graph.num_edges == len(selected_edges)
+    assert solution_graph.num_nodes() == len(selected_nodes)
+    assert solution_graph.num_edges() == len(selected_edges)
 
 
 def test_ilp_solver_solve_with_appearance_weight() -> None:

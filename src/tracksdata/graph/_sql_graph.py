@@ -294,12 +294,12 @@ class SQLFilter(BaseFilter):
         if node_attr_keys is not None:
             node_attr_keys = [DEFAULT_ATTR_KEYS.T, *node_attr_keys]
         else:
-            node_attr_keys = [DEFAULT_ATTR_KEYS.T, *self._graph.node_attr_keys]
+            node_attr_keys = [DEFAULT_ATTR_KEYS.T, *self._graph.node_attr_keys()]
 
         node_attr_keys = list(dict.fromkeys(node_attr_keys))
 
         if edge_attr_keys is None:
-            edge_attr_keys = self._graph.edge_attr_keys.copy()
+            edge_attr_keys = self._graph.edge_attr_keys().copy()
 
         node_query = self._query_from_attr_keys(
             query=self._node_query,
@@ -475,7 +475,6 @@ class SQLGraph(BaseGraph):
         self._max_id_per_time = {}
         self._update_max_id_per_time()
 
-    @property
     def supports_custom_indices(self) -> bool:
         return True
 
@@ -636,7 +635,7 @@ class SQLGraph(BaseGraph):
         ```
         """
         if validate_keys:
-            self._validate_attributes(attrs, self.node_attr_keys, "node")
+            self._validate_attributes(attrs, self.node_attr_keys(), "node")
 
             if "t" not in attrs:
                 raise ValueError(f"Node attributes must have a 't' key. Got {attrs.keys()}")
@@ -814,7 +813,7 @@ class SQLGraph(BaseGraph):
         ```
         """
         if validate_keys:
-            self._validate_attributes(attrs, self.edge_attr_keys, "edge")
+            self._validate_attributes(attrs, self.edge_attr_keys(), "edge")
 
         if hasattr(source_id, "item"):
             source_id = source_id.item()
@@ -1282,12 +1281,10 @@ class SQLGraph(BaseGraph):
 
         return edges_df
 
-    @property
     def node_attr_keys(self) -> list[str]:
         keys = list(self.Node.__table__.columns.keys())
         return keys
 
-    @property
     def edge_attr_keys(self) -> list[str]:
         keys = list(self.Edge.__table__.columns.keys())
         for k in [DEFAULT_ATTR_KEYS.EDGE_ID, DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET]:
@@ -1368,23 +1365,21 @@ class SQLGraph(BaseGraph):
         table_class.__table__.append_column(sa_column)
 
     def add_node_attr_key(self, key: str, default_value: Any) -> None:
-        if key in self.node_attr_keys:
+        if key in self.node_attr_keys():
             raise ValueError(f"Node attribute key {key} already exists")
 
         self._add_new_column(self.Node, key, default_value)
 
     def add_edge_attr_key(self, key: str, default_value: Any) -> None:
-        if key in self.edge_attr_keys:
+        if key in self.edge_attr_keys():
             raise ValueError(f"Edge attribute key {key} already exists")
 
         self._add_new_column(self.Edge, key, default_value)
 
-    @property
     def num_edges(self) -> int:
         with Session(self._engine) as session:
             return int(session.query(self.Edge).count())
 
-    @property
     def num_nodes(self) -> int:
         with Session(self._engine) as session:
             return int(session.query(self.Node).count())
@@ -1500,7 +1495,7 @@ class SQLGraph(BaseGraph):
             track_node_ids = list(set(self.tracklet_nodes(node_ids)))
         else:
             track_node_ids = None
-        if output_key in self.node_attr_keys:
+        if output_key in self.node_attr_keys():
             node_attr_keys = [output_key]
         else:
             node_attr_keys = []
@@ -1592,8 +1587,8 @@ class SQLGraph(BaseGraph):
             A compressed tracklet graph.
         """
 
-        if tracklet_id_key not in self.node_attr_keys:
-            raise ValueError(f"Track id key '{tracklet_id_key}' not found in graph. Expected '{self.node_attr_keys}'")
+        if tracklet_id_key not in self.node_attr_keys():
+            raise ValueError(f"Track id key '{tracklet_id_key}' not found in graph. Expected '{self.node_attr_keys()}'")
 
         with Session(self._engine) as session:
             node_query = sa.select(getattr(self.Node, tracklet_id_key)).distinct()
@@ -1708,7 +1703,6 @@ class SQLGraph(BaseGraph):
                     raise ValueError(f"Edge {edge_id} does not exist in the graph.")
             session.commit()
 
-    @property
     def metadata(self) -> dict[str, Any]:
         with Session(self._engine) as session:
             result = session.query(self.Metadata).all()

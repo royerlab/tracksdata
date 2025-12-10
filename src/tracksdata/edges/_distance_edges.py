@@ -108,7 +108,7 @@ class DistanceEdges(BaseEdgesOperator):
         """
         Initialize the edge attributes for the graph.
         """
-        if self.output_key not in graph.edge_attr_keys:
+        if self.output_key not in graph.edge_attr_keys():
             graph.add_edge_attr_key(self.output_key, default_value=-99999.0)
 
     def _add_edges_per_time(
@@ -134,7 +134,7 @@ class DistanceEdges(BaseEdgesOperator):
             time t-1 to nodes at time t.
         """
         if self.attr_keys is None:
-            if "z" in graph.node_attr_keys:
+            if "z" in graph.node_attr_keys():
                 attr_keys = ["z", "y", "x"]
             else:
                 attr_keys = ["y", "x"]

@@ -135,7 +135,7 @@ def visualize_matches(
     if viewer is None:
         viewer = napari.Viewer()
 
-    if "z" in input_graph.node_attr_keys:
+    if "z" in input_graph.node_attr_keys():
         pos = ["t", "z", "y", "x"]
     else:
         pos = ["t", "y", "x"]

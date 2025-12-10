@@ -126,18 +126,18 @@ class RegionPropsNodes(BaseNodesOperator):
         """
         Initialize the node attributes for the graph.
         """
-        if DEFAULT_ATTR_KEYS.MASK not in graph.node_attr_keys:
+        if DEFAULT_ATTR_KEYS.MASK not in graph.node_attr_keys():
             graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
 
-        if DEFAULT_ATTR_KEYS.BBOX not in graph.node_attr_keys:
+        if DEFAULT_ATTR_KEYS.BBOX not in graph.node_attr_keys():
             graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, np.zeros(2 * (ndims - 1), dtype=int))
 
-        if "label" in self.attr_keys() and "label" not in graph.node_attr_keys:
+        if "label" in self.attr_keys() and "label" not in graph.node_attr_keys():
             graph.add_node_attr_key("label", 0)
 
         # initialize the remaining attribute keys
         for attr_key in axis_names + self.attr_keys():
-            if attr_key not in graph.node_attr_keys:
+            if attr_key not in graph.node_attr_keys():
                 graph.add_node_attr_key(attr_key, -1.0)
 
     def attr_keys(self) -> list[str]:
@@ -228,7 +228,7 @@ class RegionPropsNodes(BaseNodesOperator):
         axis_names = self._axis_names(labels)
         self._init_node_attrs(graph, axis_names, ndims=labels.ndim)
 
-        if "shape" not in graph.metadata:
+        if "shape" not in graph.metadata():
             graph.update_metadata(shape=labels.shape)
 
         if t is None:

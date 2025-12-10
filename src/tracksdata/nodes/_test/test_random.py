@@ -47,7 +47,7 @@ def test_random_nodes_add_nodes_single_time_point_2d() -> None:
     operator.add_nodes(graph, t=0)
 
     # Check that nodes were added
-    assert graph.num_nodes == 5  # Should be exactly 5 nodes
+    assert graph.num_nodes() == 5  # Should be exactly 5 nodes
 
     # Check node attributes
     nodes_df = graph.node_attrs()
@@ -80,7 +80,7 @@ def test_random_nodes_add_nodes_single_time_point_3d() -> None:
     operator.add_nodes(graph, t=1)
 
     # Check that nodes were added
-    assert graph.num_nodes == 3  # Should be exactly 3 nodes
+    assert graph.num_nodes() == 3  # Should be exactly 3 nodes
 
     # Check node attributes
     nodes_df = graph.node_attrs()
@@ -232,17 +232,17 @@ def test_random_nodes_attr_keys_registration() -> None:
     )
 
     # Initially, spatial keys should not be registered
-    assert "x" not in graph.node_attr_keys
-    assert "y" not in graph.node_attr_keys
-    assert "z" not in graph.node_attr_keys
+    assert "x" not in graph.node_attr_keys()
+    assert "y" not in graph.node_attr_keys()
+    assert "z" not in graph.node_attr_keys()
 
     # Add nodes
     operator.add_nodes(graph)
 
     # Now spatial keys should be registered
-    assert "x" in graph.node_attr_keys
-    assert "y" in graph.node_attr_keys
-    assert "z" in graph.node_attr_keys
+    assert "x" in graph.node_attr_keys()
+    assert "y" in graph.node_attr_keys()
+    assert "z" in graph.node_attr_keys()
 
 
 def test_random_nodes_empty_time_points() -> None:
@@ -255,7 +255,7 @@ def test_random_nodes_empty_time_points() -> None:
     operator.add_nodes(graph)
 
     # Graph should remain empty
-    assert graph.num_nodes == 0
+    assert graph.num_nodes() == 0
 
 
 def test_random_nodes_multiprocessing_isolation() -> None:

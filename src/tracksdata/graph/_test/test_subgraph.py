@@ -280,7 +280,7 @@ def test_update_edge_attrs_with_data(graph_backend: BaseGraph, use_subgraph: boo
 def test_num_edges_with_data(graph_backend: BaseGraph, use_subgraph: bool) -> None:
     """Test counting edges on both original graphs and subgraphs."""
     graph_with_data = create_test_graph(graph_backend, use_subgraph)
-    num_edges = graph_with_data.num_edges
+    num_edges = graph_with_data.num_edges()
     assert num_edges == len(graph_with_data._test_edges)  # type: ignore
 
 
@@ -288,7 +288,7 @@ def test_num_edges_with_data(graph_backend: BaseGraph, use_subgraph: bool) -> No
 def test_num_nodes_with_data(graph_backend: BaseGraph, use_subgraph: bool) -> None:
     """Test counting nodes on both original graphs and subgraphs."""
     graph_with_data = create_test_graph(graph_backend, use_subgraph)
-    num_nodes = graph_with_data.num_nodes
+    num_nodes = graph_with_data.num_nodes()
     assert num_nodes == len(graph_with_data._test_nodes)  # type: ignore
 
 
@@ -303,7 +303,7 @@ def test_subgraph_creation(graph_backend: BaseGraph) -> None:
     subgraph = graph_with_data.filter(node_ids=subgraph_nodes_unsorted).subgraph()
 
     # Test that subgraph has correct number of nodes
-    assert subgraph.num_nodes == len(subgraph_nodes_unsorted)
+    assert subgraph.num_nodes() == len(subgraph_nodes_unsorted)
 
     # Test that subgraph node IDs match expected (regardless of input order)
     subgraph_node_ids = subgraph.node_ids()
@@ -452,14 +452,14 @@ def test_subgraph_add_node(graph_backend: BaseGraph) -> None:
     subgraph_nodes = [original_nodes[1], original_nodes[3]]
     subgraph = graph_with_data.filter(node_ids=subgraph_nodes).subgraph()
 
-    initial_counts = (subgraph.num_nodes, graph_with_data.num_nodes)
+    initial_counts = (subgraph.num_nodes(), graph_with_data.num_nodes())
 
     # Add a new node to the subgraph
     new_node_id = subgraph.add_node({"t": 10, "x": 10.0, "y": 10.0, "label": "NEW"})
 
     # Verify node was added to both subgraph and original graph
-    assert subgraph.num_nodes == initial_counts[0] + 1
-    assert graph_with_data.num_nodes == initial_counts[1] + 1
+    assert subgraph.num_nodes() == initial_counts[0] + 1
+    assert graph_with_data.num_nodes() == initial_counts[1] + 1
     assert new_node_id in subgraph.node_ids()
     assert new_node_id in graph_with_data.node_ids()
 
@@ -479,15 +479,15 @@ def test_subgraph_add_edge(graph_backend: BaseGraph) -> None:
     subgraph_nodes = original_nodes[:3]
     subgraph = graph_with_data.filter(node_ids=subgraph_nodes).subgraph()
 
-    initial_counts = (subgraph.num_edges, graph_with_data.num_edges)
+    initial_counts = (subgraph.num_edges(), graph_with_data.num_edges())
     node_a, node_b = subgraph_nodes[0], subgraph_nodes[2]
 
     # Add a new edge between existing nodes
     subgraph.add_edge(node_a, node_b, attrs={"weight": 1.5, "new_attribute": 10.0})
 
     # Verify edge was added to both subgraph and original graph
-    assert subgraph.num_edges == initial_counts[0] + 1
-    assert graph_with_data.num_edges == initial_counts[1] + 1
+    assert subgraph.num_edges() == initial_counts[0] + 1
+    assert graph_with_data.num_edges() == initial_counts[1] + 1
 
     # Test both the subgraph and the original graph
     for edge_df in [subgraph.edge_attrs(), graph_with_data.edge_attrs()]:
@@ -544,7 +544,7 @@ def test_nested_subgraph_creation(graph_backend: BaseGraph) -> None:
     second_subgraph = first_subgraph.filter(node_ids=original_nodes[:2]).subgraph()
 
     # Verify nested subgraph properties
-    assert second_subgraph.num_nodes == 2
+    assert second_subgraph.num_nodes() == 2
     assert set(second_subgraph.node_ids()) == set(original_nodes[:2])
 
     # Verify node attributesare preserved through all levels
@@ -586,7 +586,7 @@ def test_nested_subgraph_modifications(graph_backend: BaseGraph) -> None:
     first_subgraph = graph_with_data.filter(node_ids=original_nodes[:3]).subgraph()
     nested_subgraph = first_subgraph.filter(node_ids=original_nodes[:2]).subgraph()
 
-    initial_counts = (nested_subgraph.num_nodes, graph_with_data.num_nodes)
+    initial_counts = (nested_subgraph.num_nodes(), graph_with_data.num_nodes())
 
     # Add node and edge to nested subgraph
     new_node_id = nested_subgraph.add_node({"t": 30, "x": 30.0, "y": 30.0, "label": "NESTED"})
@@ -598,7 +598,7 @@ def test_nested_subgraph_modifications(graph_backend: BaseGraph) -> None:
     expected_counts = [c + 1 for c in initial_counts]
 
     for i, graph in enumerate(graphs):
-        assert graph.num_nodes == expected_counts[i]
+        assert graph.num_nodes() == expected_counts[i]
         assert new_node_id in graph.node_ids()
 
         # Verify edge exists in all graphs
@@ -622,7 +622,7 @@ def test_subgraph_node_attr_filter(graph_backend: BaseGraph) -> None:
     # Should contain nodes with t=2 (nodes 2 and 3 from create_test_graph)
     expected_nodes = graph_with_data.filter(NodeAttr("t") == 2).node_ids()
     assert set(subgraph_t2.node_ids()) == set(expected_nodes)
-    assert subgraph_t2.num_nodes == len(expected_nodes)
+    assert subgraph_t2.num_nodes() == len(expected_nodes)
 
     # Verify node attributes are preserved
     for node_id in expected_nodes:
@@ -714,18 +714,18 @@ def test_subgraph_attr_filter_empty_results(graph_backend: BaseGraph) -> None:
 
     # Test node filter with non-existent value
     empty_subgraph_node = graph_with_data.filter(NodeAttr("t") == 999).subgraph()
-    assert empty_subgraph_node.num_nodes == 0
-    assert empty_subgraph_node.num_edges == 0
+    assert empty_subgraph_node.num_nodes() == 0
+    assert empty_subgraph_node.num_edges() == 0
 
     # Test edge filter with non-existent value
     empty_subgraph_edge = graph_with_data.filter(EdgeAttr("weight") == 999.0).subgraph()
-    assert empty_subgraph_edge.num_nodes == 0
-    assert empty_subgraph_edge.num_edges == 0
+    assert empty_subgraph_edge.num_nodes() == 0
+    assert empty_subgraph_edge.num_edges() == 0
 
     # Test node filter with impossible combination
     empty_subgraph_multi = graph_with_data.filter(NodeAttr("t") == 0, NodeAttr("label") == "NONEXISTENT").subgraph()
-    assert empty_subgraph_multi.num_nodes == 0
-    assert empty_subgraph_multi.num_edges == 0
+    assert empty_subgraph_multi.num_nodes() == 0
+    assert empty_subgraph_multi.num_edges() == 0
 
 
 def test_homemorphism(graph_backend: BaseGraph) -> None:
@@ -868,7 +868,7 @@ def test_bulk_add_nodes_returned_ids(graph_backend: BaseGraph, use_subgraph: boo
         {"t": 12, "x": 12.0, "y": 12.0, "z": 3.0, "label": "bulk3"},
     ]
 
-    initial_node_count = graph_with_data.num_nodes
+    initial_node_count = graph_with_data.num_nodes()
     returned_ids = graph_with_data.bulk_add_nodes(nodes_to_add)
 
     # Test return type and length
@@ -880,7 +880,7 @@ def test_bulk_add_nodes_returned_ids(graph_backend: BaseGraph, use_subgraph: boo
     assert len(set(returned_ids)) == len(returned_ids)
 
     # Test that node count increased correctly
-    assert graph_with_data.num_nodes == initial_node_count + len(nodes_to_add)
+    assert graph_with_data.num_nodes() == initial_node_count + len(nodes_to_add)
 
     # Test that all returned IDs correspond to actual nodes in the graph
     actual_node_ids = set(graph_with_data.node_ids())
@@ -901,7 +901,7 @@ def test_bulk_add_nodes_returned_ids(graph_backend: BaseGraph, use_subgraph: boo
     # Test empty input
     empty_result = graph_with_data.bulk_add_nodes([])
     assert empty_result == []
-    assert graph_with_data.num_nodes == initial_node_count + len(nodes_to_add)  # No change
+    assert graph_with_data.num_nodes() == initial_node_count + len(nodes_to_add)  # No change
 
 
 @parametrize_subgraph_tests
@@ -933,7 +933,7 @@ def test_bulk_add_edges_returned_ids(graph_backend: BaseGraph, use_subgraph: boo
         },
     ]
 
-    initial_edge_count = graph_with_data.num_edges
+    initial_edge_count = graph_with_data.num_edges()
     returned_ids = graph_with_data.bulk_add_edges(deepcopy(edges_to_add), return_ids=True)
 
     # Test return type and length
@@ -945,7 +945,7 @@ def test_bulk_add_edges_returned_ids(graph_backend: BaseGraph, use_subgraph: boo
     assert len(set(returned_ids)) == len(returned_ids)
 
     # Test that edge count increased correctly
-    assert graph_with_data.num_edges == initial_edge_count + len(edges_to_add)
+    assert graph_with_data.num_edges() == initial_edge_count + len(edges_to_add)
 
     edge_attrs = graph_with_data.edge_attrs()
     edge_attr_0 = edge_attrs.filter(pl.col(DEFAULT_ATTR_KEYS.EDGE_ID) == returned_ids[0]).rows(named=True)[0]
@@ -964,14 +964,14 @@ def test_bulk_add_edges_returned_ids(graph_backend: BaseGraph, use_subgraph: boo
     # Test empty input
     empty_result = graph_with_data.bulk_add_edges([], return_ids=True)
     assert empty_result == []
-    assert graph_with_data.num_edges == initial_edge_count + len(edges_to_add)  # No change
+    assert graph_with_data.num_edges() == initial_edge_count + len(edges_to_add)  # No change
 
 
 @parametrize_subgraph_tests
 def test_custom_indices_subgraph(graph_backend: BaseGraph, use_subgraph: bool) -> None:
     """Test custom node indices functionality in subgraphs."""
 
-    if not graph_backend.supports_custom_indices:
+    if not graph_backend.supports_custom_indices():
         pytest.skip("Graph does not support custom indices")
 
     graph_with_data = create_test_graph(graph_backend, use_subgraph)
@@ -1004,14 +1004,14 @@ def test_remove_node_basic(graph_backend: BaseGraph, use_subgraph: bool) -> None
     graph_with_data = create_test_graph(graph_backend, use_subgraph)
 
     initial_nodes = graph_with_data._test_nodes.copy()  # type: ignore
-    initial_node_count = graph_with_data.num_nodes
+    initial_node_count = graph_with_data.num_nodes()
 
     # Remove a node that has edges
     node_to_remove = initial_nodes[1]
     graph_with_data.remove_node(node_to_remove)
 
     # Check node count decreased
-    assert graph_with_data.num_nodes == initial_node_count - 1
+    assert graph_with_data.num_nodes() == initial_node_count - 1
 
     # Check that the node is no longer in the graph
     current_nodes = graph_with_data.node_ids()
@@ -1218,7 +1218,7 @@ def test_graph_copy(graph_backend: BaseGraph, use_subgraph: bool) -> None:
 
     else:
         copied_graph = graph_with_data.copy(**kwargs)
-        assert copied_graph.num_nodes == graph_with_data.num_nodes
-        assert copied_graph.num_edges == graph_with_data.num_edges
+        assert copied_graph.num_nodes() == graph_with_data.num_nodes()
+        assert copied_graph.num_edges() == graph_with_data.num_edges()
         assert copied_graph.node_ids() == graph_with_data.node_ids()
         assert copied_graph.edge_ids() == graph_with_data.edge_ids()

@@ -23,7 +23,7 @@ def _validate_shape(
     """Helper function to validate the shape argument."""
     if shape is None:
         try:
-            shape = graph.metadata["shape"]
+            shape = graph.metadata()["shape"]
         except KeyError as e:
             raise KeyError(
                 f"`shape` is required to `{func_name}`. "
@@ -153,8 +153,8 @@ class GraphArrayView(BaseReadOnlyArray):
         buffer_cache_size: int | None = None,
         dtype: np.dtype | None = None,
     ):
-        if attr_key not in graph.node_attr_keys:
-            raise ValueError(f"Attribute key '{attr_key}' not found in graph. Expected '{graph.node_attr_keys}'")
+        if attr_key not in graph.node_attr_keys():
+            raise ValueError(f"Attribute key '{attr_key}' not found in graph. Expected '{graph.node_attr_keys()}'")
 
         self.graph = graph
         self._attr_key = attr_key

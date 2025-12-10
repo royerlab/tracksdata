@@ -174,12 +174,12 @@ def test_generic_edges_creates_output_key() -> None:
     operator = GenericFuncEdgeAttrs(func=_scalar_distance_func, attr_keys="x", output_key="new_distance_key")
 
     # Verify the key doesn't exist initially
-    assert "new_distance_key" not in graph.edge_attr_keys
+    assert "new_distance_key" not in graph.edge_attr_keys()
 
     operator.add_edge_attrs(graph)
 
     # Verify the key was created
-    assert "new_distance_key" in graph.edge_attr_keys
+    assert "new_distance_key" in graph.edge_attr_keys()
 
     # Verify the weights were added
     edges_df = graph.edge_attrs()
@@ -227,5 +227,5 @@ def test_generic_edges_empty_graph() -> None:
     operator.add_edge_attrs(graph, t=0)
 
     # Verify graph is still empty
-    assert graph.num_nodes == 0
-    assert graph.num_edges == 0
+    assert graph.num_nodes() == 0
+    assert graph.num_edges() == 0

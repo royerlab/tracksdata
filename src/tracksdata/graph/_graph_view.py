@@ -116,9 +116,8 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
         # use parent graph overlaps
         self._overlaps = None
 
-    @property
     def supports_custom_indices(self) -> bool:
-        return self._root.supports_custom_indices
+        return self._root.supports_custom_indices()
 
     @property
     def sync(self) -> bool:
@@ -222,13 +221,11 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
             include_sources=include_sources,
         )
 
-    @property
     def node_attr_keys(self) -> list[str]:
-        return self._root.node_attr_keys if self._node_attr_keys is None else self._node_attr_keys
+        return self._root.node_attr_keys() if self._node_attr_keys is None else self._node_attr_keys
 
-    @property
     def edge_attr_keys(self) -> list[str]:
-        return self._root.edge_attr_keys if self._edge_attr_keys is None else self._edge_attr_keys
+        return self._root.edge_attr_keys() if self._edge_attr_keys is None else self._edge_attr_keys
 
     def add_node_attr_key(self, key: str, default_value: Any) -> None:
         self._root.add_node_attr_key(key, default_value)
@@ -745,9 +742,8 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
             "Use `detach` to create a new reference-less graph with the same nodes and edges."
         )
 
-    @property
     def metadata(self) -> dict[str, Any]:
-        return self._root.metadata
+        return self._root.metadata()
 
     def update_metadata(self, **kwargs) -> None:
         self._root.update_metadata(**kwargs)

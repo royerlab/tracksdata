@@ -122,7 +122,7 @@ class RandomNodes(BaseNodesOperator):
         """
         # Register each spatial column individually
         for col in self.spatial_cols:
-            if col not in graph.node_attr_keys:
+            if col not in graph.node_attr_keys():
                 graph.add_node_attr_key(col, -999999.0)
 
         if t is None:

@@ -76,8 +76,8 @@ def test_export_from_ctc_roundtrip(tmp_path: Path, metadata_shape: bool) -> None
 
     out_graph = RustWorkXGraph.from_ctc(tmp_path)
 
-    assert out_graph.num_nodes == in_graph.num_nodes
-    assert out_graph.num_edges == in_graph.num_edges
+    assert out_graph.num_nodes() == in_graph.num_nodes()
+    assert out_graph.num_edges() == in_graph.num_edges()
 
     in_attrs = in_graph.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.T, DEFAULT_ATTR_KEYS.TRACKLET_ID])
     out_attrs = out_graph.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.T, DEFAULT_ATTR_KEYS.TRACKLET_ID])

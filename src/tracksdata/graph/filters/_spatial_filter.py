@@ -146,7 +146,7 @@ class SpatialFilter:
     ) -> None:
         if attr_keys is None:
             attr_keys = ["t", "z", "y", "x"]
-            valid_keys = set(graph.node_attr_keys)
+            valid_keys = set(graph.node_attr_keys())
             attr_keys = list(filter(lambda x: x in valid_keys, attr_keys))
 
         self._graph = graph
@@ -368,7 +368,7 @@ class BBoxSpatialFilter:
         from spatial_graph import PointRTree
 
         if self._node_rtree is None:
-            if self._graph.num_nodes > 0:
+            if self._graph.num_nodes() > 0:
                 nodes_df = self._graph.node_attrs()
                 bboxes = self._bboxes_to_array(nodes_df[self._bbox_attr_key])
                 num_dims = bboxes.shape[1] // 2

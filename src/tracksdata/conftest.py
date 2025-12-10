@@ -56,7 +56,7 @@ def graph_backend(request) -> BaseGraph:
         ) -> list[int]:
             if indices is None:
                 # Generate random indices
-                current_max = max(self.node_ids()) + 1 if self.num_nodes > 0 else 0
+                current_max = max(self.node_ids()) + 1 if self.num_nodes() > 0 else 0
                 indices = (rng.integers(current_max, max_index) + np.arange(len(nodes))).tolist()
             return orig_bulk_add_nodes(self, nodes, indices)
 

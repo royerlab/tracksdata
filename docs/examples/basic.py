@@ -70,7 +70,7 @@ def basic_tracking_example(show_napari_viewer: bool = True) -> None:
     # This creates one node per object per timeframe
     nodes_operator = td.nodes.RegionPropsNodes()
     nodes_operator.add_nodes(graph, labels=labels)
-    print(f"✓ Extracted {graph.num_nodes} nodes from {labels.shape[0]} timeframes")
+    print(f"✓ Extracted {graph.num_nodes()} nodes from {labels.shape[0]} timeframes")
 
     # Step 3: Create temporal edges between consecutive frames
 
@@ -81,7 +81,7 @@ def basic_tracking_example(show_napari_viewer: bool = True) -> None:
         n_neighbors=5,
     )
     dist_operator.add_edges(graph)
-    print(f"✓ Created {graph.num_edges} potential temporal connections")
+    print(f"✓ Created {graph.num_edges()} potential temporal connections")
 
     # Step 4: Add IoU (Intersection over Union) attributes to edges
 

@@ -99,7 +99,7 @@ def ancestral_connected_edges(
     match : bool, optional
         Whether to match the input graph with the reference graph.
     """
-    if DEFAULT_ATTR_KEYS.TRACKLET_ID not in reference_graph.node_attr_keys:
+    if DEFAULT_ATTR_KEYS.TRACKLET_ID not in reference_graph.node_attr_keys():
         tracklet_graph = reference_graph.assign_tracklet_ids()
     else:
         tracklet_graph = reference_graph.tracklet_graph()
@@ -107,7 +107,7 @@ def ancestral_connected_edges(
     if match:
         input_graph.match(reference_graph)
 
-    elif DEFAULT_ATTR_KEYS.MATCHED_NODE_ID not in input_graph.node_attr_keys:
+    elif DEFAULT_ATTR_KEYS.MATCHED_NODE_ID not in input_graph.node_attr_keys():
         raise ValueError(
             "`ancestral_connected_edges` requires the input graph to previously matched "
             f"and have a `{DEFAULT_ATTR_KEYS.MATCHED_NODE_ID}` column when `match=False`"

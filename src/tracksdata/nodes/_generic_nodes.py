@@ -108,7 +108,7 @@ class GenericFuncNodeAttrs(BaseNodeAttrsOperator):
         """
         Initialize the node attributes for the graph.
         """
-        if self.output_key not in graph.node_attr_keys:
+        if self.output_key not in graph.node_attr_keys():
             graph.add_node_attr_key(self.output_key, default_value=self.default_value)
 
     def add_node_attrs(

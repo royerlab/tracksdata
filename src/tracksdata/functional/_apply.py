@@ -152,7 +152,7 @@ def _yield_apply_tiled(
     if tiling_scheme.attrs is None:
         # default attrs
         attr_keys = [DEFAULT_ATTR_KEYS.T, "z", "y", "x"]
-        attr_keys = [a for a in attr_keys if a in graph.node_attr_keys]
+        attr_keys = [a for a in attr_keys if a in graph.node_attr_keys()]
     else:
         attr_keys = tiling_scheme.attrs
 

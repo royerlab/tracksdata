@@ -252,7 +252,7 @@ def test_bbox_spatial_filter_querying(sample_bbox_graph: RustWorkXGraph) -> None
     result = spatial_filter[0:1, 0:2, 10:20, 20:30]
     node_attrs = result.node_attrs()
     assert len(node_attrs) >= 1
-    assert len(node_attrs) < sample_bbox_graph.num_nodes
+    assert len(node_attrs) < sample_bbox_graph.num_nodes()
 
     # Test bounds that exclude all nodes
     result = spatial_filter[10:20, 10:20, 200:300, 200:300]
@@ -302,7 +302,7 @@ def test_add_and_remove_node(graph_backend: BaseGraph) -> None:
 
     # testing it twice, once in the original and then in a trivial graph view
     for graph in [graph_backend, graph_backend.filter().subgraph()]:
-        assert graph.num_nodes == 2
+        assert graph.num_nodes() == 2
 
         spatial_filter = BBoxSpatialFilter(graph, frame_attr_key="t", bbox_attr_key="bbox")
 
@@ -324,11 +324,11 @@ def test_add_and_remove_node(graph_backend: BaseGraph) -> None:
         assert len(result) == 1
         assert result["t"].item() == 0
 
-        size = graph.num_nodes
+        size = graph.num_nodes()
 
         graph.remove_node(new_node_id)
 
-        assert graph.num_nodes == size - 1
+        assert graph.num_nodes() == size - 1
 
         empty_region = spatial_filter[0:3, 6:9, 6:9].node_attrs()
         assert empty_region.is_empty()
@@ -337,7 +337,7 @@ def test_add_and_remove_node(graph_backend: BaseGraph) -> None:
         for node_id in bulk_node_ids:
             graph.remove_node(node_id)
 
-        assert graph.num_nodes == 2
+        assert graph.num_nodes() == 2
 
 
 def test_bbox_spatial_filter_handles_list_dtype(graph_backend: BaseGraph) -> None:
