@@ -51,7 +51,7 @@ class ILPSolver(BaseSolver):
     division_weight : str | ExprInput, default 0.0
         Cost for track divisions (one track splitting into two).
     merge_weight : None | str | ExprInput
-        Disable when None, otherwise it's the cost for track merges (one track merging into another).
+        Disable when None, otherwise it's the cost for tracks merging (two tracklet becomes one).
     output_key : str, default DEFAULT_ATTR_KEYS.SOLUTION
         Attribute key to store the solution (True/False for selected items).
     num_threads : int, default 1
