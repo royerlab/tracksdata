@@ -299,9 +299,8 @@ class ILPSolver(BaseSolver):
             unseen_in_nodes.remove(target_id)
 
         for node_id in unseen_in_nodes:
-            self._constraints.add(
-                self._appear_vars[node_id] == self._node_vars[node_id] + self._merge_vars.get(node_id, 0.0)
-            )
+            # it doesn't make sense to have an merge variable here because it's the beginning of a new tracklet
+            self._constraints.add(self._appear_vars[node_id] == self._node_vars[node_id])
 
         # outgoing flow
         for (source_id,), group in edges_df.group_by(DEFAULT_ATTR_KEYS.EDGE_SOURCE):
@@ -313,13 +312,17 @@ class ILPSolver(BaseSolver):
             unseen_out_nodes.remove(source_id)
 
         for node_id in unseen_out_nodes:
-            self._constraints.add(
-                self._disappear_vars[node_id] == self._node_vars[node_id] + self._division_vars[node_id]
-            )
+            # it doesn't make sense to have an division variable here because it's the end of a tracklet
+            self._constraints.add(self._disappear_vars[node_id] == self._node_vars[node_id])
 
-        # existing division from nodes
+        # node must be selected before there's a division
         for node_id, node_var in self._node_vars.items():
             self._constraints.add(node_var >= self._division_vars[node_id])
+
+        # node must be selected before there's a division
+        if self.merge_weight_expr is not None:
+            for node_id, node_var in self._node_vars.items():
+                self._constraints.add(node_var >= self._merge_vars[node_id])
 
     def _add_overlap_constraints(
         self,
