@@ -230,6 +230,8 @@ class RegionPropsNodes(BaseNodesOperator):
 
         if "shape" not in graph.metadata:
             graph.update_metadata(shape=labels.shape)
+        elif graph.metadata["shape"] != labels.shape:
+            raise ValueError("Stored shape is different from the provided labels shape.")
 
         if t is None:
             time_points = range(labels.shape[0])
