@@ -1,3 +1,4 @@
+import pickle
 import re
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -8,7 +9,7 @@ import pytest
 
 from tracksdata.attrs import EdgeAttr, NodeAttr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
-from tracksdata.graph import BaseGraph, GraphView, SQLGraph
+from tracksdata.graph import BaseGraph, GraphView, IndexedRXGraph, SQLGraph
 from tracksdata.utils._logging import LOG
 
 
@@ -1222,3 +1223,25 @@ def test_graph_copy(graph_backend: BaseGraph, use_subgraph: bool) -> None:
         assert copied_graph.num_edges() == graph_with_data.num_edges()
         assert copied_graph.node_ids() == graph_with_data.node_ids()
         assert copied_graph.edge_ids() == graph_with_data.edge_ids()
+
+
+@parametrize_subgraph_tests
+def test_pickling_graph(graph_backend: BaseGraph, use_subgraph: bool) -> None:
+    """Test pickling functionality on both original graphs and subgraphs."""
+
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+
+    # Skip pickling test for IndexedRXGraph since it has dynamically added methods from conftest
+    if isinstance(graph_with_data, GraphView) and not isinstance(graph_backend, IndexedRXGraph):
+        pickled_graph = pickle.dumps(graph_with_data)
+        unpickled_graph = pickle.loads(pickled_graph)
+
+        # test if pointed of the coupled bidict maps are the same
+        assert id(unpickled_graph._edge_map_from_root._invm) == id(unpickled_graph._edge_map_to_root._fwdm)
+        assert id(unpickled_graph._edge_map_from_root._fwdm) == id(unpickled_graph._edge_map_to_root._invm)
+
+        # test if popping from one map updates the other accordingly
+        original_length = len(unpickled_graph._edge_map_from_root)
+        first_key = next(iter(unpickled_graph._edge_map_to_root.keys()))
+        del unpickled_graph._edge_map_to_root[first_key]
+        assert len(unpickled_graph._edge_map_from_root) == original_length - 1

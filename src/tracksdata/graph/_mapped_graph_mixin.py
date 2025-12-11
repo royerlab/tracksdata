@@ -6,7 +6,7 @@ internal/local node IDs and external/world node IDs, such as IndexedRXGraph and 
 """
 
 from collections.abc import Sequence
-from typing import overload
+from typing import Any, overload
 
 import bidict
 import numpy as np
@@ -46,6 +46,15 @@ class MappedGraphMixin:
             self._local_to_external = bidict.bidict(id_map)
         else:
             raise ValueError(f"Invalid type for id_map: {type(id_map)}")
+        self._external_to_local = self._local_to_external.inverse
+
+    def __getstate__(self) -> dict[str, Any]:
+        data = self.__dict__.copy()
+        del data["_external_to_local"]
+        return data
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        self.__dict__.update(state)
         self._external_to_local = self._local_to_external.inverse
 
     @overload

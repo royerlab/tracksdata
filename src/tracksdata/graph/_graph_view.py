@@ -119,6 +119,15 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
     def supports_custom_indices(self) -> bool:
         return self._root.supports_custom_indices()
 
+    def __getstate__(self) -> dict[str, Any]:
+        data = MappedGraphMixin.__getstate__(self)
+        del data["_edge_map_from_root"]
+        return data
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        MappedGraphMixin.__setstate__(self, state)
+        self._edge_map_from_root = self._edge_map_to_root.inverse
+
     @property
     def sync(self) -> bool:
         return self._sync
