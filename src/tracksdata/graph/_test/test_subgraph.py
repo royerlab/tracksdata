@@ -1,15 +1,17 @@
-import pickle
 import re
 from collections.abc import Callable
 from contextlib import contextmanager
 from copy import deepcopy
 
+import bidict
+import cloudpickle
 import polars as pl
 import pytest
 
 from tracksdata.attrs import EdgeAttr, NodeAttr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
-from tracksdata.graph import BaseGraph, GraphView, IndexedRXGraph, SQLGraph
+from tracksdata.graph import BaseGraph, GraphView, SQLGraph
+from tracksdata.graph._mapped_graph_mixin import MappedGraphMixin
 from tracksdata.utils._logging import LOG
 
 
@@ -1225,23 +1227,31 @@ def test_graph_copy(graph_backend: BaseGraph, use_subgraph: bool) -> None:
         assert copied_graph.edge_ids() == graph_with_data.edge_ids()
 
 
+def _evaluate_bidict_maps(forward_map: bidict.bidict, inverse_map: bidict.bidict) -> None:
+    # test if pointed of the coupled bidict maps are the same
+    assert id(forward_map._invm) == id(inverse_map._fwdm)
+    assert id(forward_map._fwdm) == id(inverse_map._invm)
+
+    # test if popping from one map updates the other accordingly
+    original_length = len(forward_map)
+    first_key = next(iter(inverse_map.keys()))
+    del inverse_map[first_key]
+    assert len(forward_map) == original_length - 1
+    assert len(inverse_map) == len(forward_map)
+
+
 @parametrize_subgraph_tests
-def test_pickling_graph(graph_backend: BaseGraph, use_subgraph: bool) -> None:
+def test_picking_graph_mappings(graph_backend: BaseGraph, use_subgraph: bool) -> None:
     """Test pickling functionality on both original graphs and subgraphs."""
 
     graph_with_data = create_test_graph(graph_backend, use_subgraph)
 
     # Skip pickling test for IndexedRXGraph since it has dynamically added methods from conftest
-    if isinstance(graph_with_data, GraphView) and not isinstance(graph_backend, IndexedRXGraph):
-        pickled_graph = pickle.dumps(graph_with_data)
-        unpickled_graph = pickle.loads(pickled_graph)
+    pickled_graph = cloudpickle.dumps(graph_with_data)
+    unpickled_graph = cloudpickle.loads(pickled_graph)
 
-        # test if pointed of the coupled bidict maps are the same
-        assert id(unpickled_graph._edge_map_from_root._invm) == id(unpickled_graph._edge_map_to_root._fwdm)
-        assert id(unpickled_graph._edge_map_from_root._fwdm) == id(unpickled_graph._edge_map_to_root._invm)
+    if isinstance(unpickled_graph, GraphView):
+        _evaluate_bidict_maps(unpickled_graph._edge_map_from_root, unpickled_graph._edge_map_to_root)
 
-        # test if popping from one map updates the other accordingly
-        original_length = len(unpickled_graph._edge_map_from_root)
-        first_key = next(iter(unpickled_graph._edge_map_to_root.keys()))
-        del unpickled_graph._edge_map_to_root[first_key]
-        assert len(unpickled_graph._edge_map_from_root) == original_length - 1
+    if isinstance(unpickled_graph, MappedGraphMixin):
+        _evaluate_bidict_maps(unpickled_graph._local_to_external, unpickled_graph._external_to_local)
