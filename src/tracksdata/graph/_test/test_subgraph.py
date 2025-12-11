@@ -1246,7 +1246,6 @@ def test_picking_graph_mappings(graph_backend: BaseGraph, use_subgraph: bool) ->
 
     graph_with_data = create_test_graph(graph_backend, use_subgraph)
 
-    # Skip pickling test for IndexedRXGraph since it has dynamically added methods from conftest
     pickled_graph = cloudpickle.dumps(graph_with_data)
     unpickled_graph = cloudpickle.loads(pickled_graph)
 
