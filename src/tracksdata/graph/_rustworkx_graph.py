@@ -1393,7 +1393,7 @@ class RustWorkXGraph(BaseGraph):
         self._graph.attrs.pop(key, None)
 
 
-class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
+class IndexedRXGraph(MappedGraphMixin, RustWorkXGraph):
     """
     A graph with arbitrary node indices.
 
@@ -1859,18 +1859,6 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
             include_targets=include_targets,
             include_sources=include_sources,
         )
-
-    def has_node(self, node_id: int) -> bool:
-        """
-        Check if the graph has a node with the given id.
-        """
-        return MappedGraphMixin.has_node(self, node_id)
-
-    def has_edge(self, source_id: int, target_id: int) -> bool:
-        """
-        Check if the graph has an edge between two nodes.
-        """
-        return MappedGraphMixin.has_edge(self, source_id, target_id)
 
     def edge_id(self, source_id: int, target_id: int) -> int:
         """

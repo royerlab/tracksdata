@@ -14,7 +14,7 @@ from tracksdata.graph.filters._indexed_filter import IndexRXFilter
 from tracksdata.utils._signal import is_signal_on
 
 
-class GraphView(RustWorkXGraph, MappedGraphMixin):
+class GraphView(MappedGraphMixin, RustWorkXGraph):
     """
     A filtered view of a graph that maintains bidirectional mapping to the root graph.
 
@@ -732,18 +732,6 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
         rx_graph, node_map = super()._rx_subgraph_with_nodemap(node_ids)
         node_map = {k: self._map_to_external(v) for k, v in node_map.items()}
         return rx_graph, node_map
-
-    def has_node(self, node_id: int) -> bool:
-        """
-        Check if the graph has a node with the given id.
-        """
-        return MappedGraphMixin.has_node(self, node_id)
-
-    def has_edge(self, source_id: int, target_id: int) -> bool:
-        """
-        Check if the graph has an edge between two nodes.
-        """
-        return MappedGraphMixin.has_edge(self, source_id, target_id)
 
     def edge_id(self, source_id: int, target_id: int) -> int:
         """
