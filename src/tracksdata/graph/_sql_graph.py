@@ -637,10 +637,10 @@ class SQLGraph(BaseGraph):
         if validate_keys:
             self._validate_attributes(attrs, self.node_attr_keys(), "node")
 
-            if "t" not in attrs:
-                raise ValueError(f"Node attributes must have a 't' key. Got {attrs.keys()}")
+            if DEFAULT_ATTR_KEYS.T not in attrs:
+                raise ValueError(f"Node attributes must have a '{DEFAULT_ATTR_KEYS.T}' key. Got {attrs.keys()}")
 
-        time = attrs["t"]
+        time = attrs[DEFAULT_ATTR_KEYS.T]
 
         if index is None:
             default_node_id = (time * self.node_id_time_multiplier) - 1
@@ -712,7 +712,7 @@ class SQLGraph(BaseGraph):
 
         node_ids = []
         for i, node in enumerate(nodes):
-            time = node["t"]
+            time = node[DEFAULT_ATTR_KEYS.T]
 
             if indices is None:
                 default_node_id = (time * self.node_id_time_multiplier) - 1
@@ -1500,8 +1500,8 @@ class SQLGraph(BaseGraph):
         attrs: dict[str, Any],
         node_ids: Sequence[int] | None = None,
     ) -> None:
-        if "t" in attrs:
-            raise ValueError("Node attribute 't' cannot be updated.")
+        if DEFAULT_ATTR_KEYS.T in attrs:
+            raise ValueError(f"Node attribute '{DEFAULT_ATTR_KEYS.T}' cannot be updated.")
 
         self._update_table(self.Node, node_ids, DEFAULT_ATTR_KEYS.NODE_ID, attrs)
 

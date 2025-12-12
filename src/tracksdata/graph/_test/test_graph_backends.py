@@ -1641,6 +1641,13 @@ def test_summary(graph_backend: BaseGraph) -> None:
     assert "Number of edges" in summary
 
 
+def test_changing_default_attr_keys(graph_backend: BaseGraph) -> None:
+    DEFAULT_ATTR_KEYS.T = "frame"
+    graph_backend.add_node({"frame": 0})
+    node_attrs = graph_backend.node_attrs()
+    assert "frame" in node_attrs.columns
+
+
 def test_spatial_filter_basic(graph_backend: BaseGraph) -> None:
     graph_backend.add_node_attr_key("x", 0.0)
     graph_backend.add_node_attr_key("y", 0.0)

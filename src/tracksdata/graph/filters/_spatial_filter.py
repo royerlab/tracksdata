@@ -145,7 +145,7 @@ class SpatialFilter:
         attr_keys: list[str] | None = None,
     ) -> None:
         if attr_keys is None:
-            attr_keys = ["t", "z", "y", "x"]
+            attr_keys = [DEFAULT_ATTR_KEYS.T, "z", "y", "x"]
             valid_keys = set(graph.node_attr_keys())
             attr_keys = list(filter(lambda x: x in valid_keys, attr_keys))
 

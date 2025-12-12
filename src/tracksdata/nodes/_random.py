@@ -3,6 +3,7 @@ from typing import Any, Literal
 
 import numpy as np
 
+from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.nodes._base_nodes import BaseNodesOperator
 from tracksdata.utils._multiprocessing import multiprocessing_apply
@@ -169,4 +170,4 @@ class RandomNodes(BaseNodesOperator):
             size=(n_nodes_at_t, len(self.spatial_cols)),
         ).tolist()
 
-        return [{"t": t, **dict(zip(self.spatial_cols, c, strict=True)), **kwargs} for c in coords]
+        return [{DEFAULT_ATTR_KEYS.T: t, **dict(zip(self.spatial_cols, c, strict=True)), **kwargs} for c in coords]
