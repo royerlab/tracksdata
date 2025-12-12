@@ -6,6 +6,7 @@ import numpy as np
 import polars as pl
 import pytest
 import rustworkx as rx
+import sqlalchemy as sa
 from zarr.storage import MemoryStore
 
 from tracksdata.attrs import EdgeAttr, NodeAttr
@@ -2059,6 +2060,40 @@ def test_custom_indices(graph_backend: BaseGraph) -> None:
     # Test bulk_add_nodes with mismatched indices length
     with pytest.raises(ValueError, match=r"Length of indices .* must match length of nodes"):
         graph_backend.bulk_add_nodes([{"t": 3, "x": 1.0, "y": 1.0}], indices=[1, 2, 3])
+
+
+def test_sqlgraph_node_attr_index_creation(graph_backend: BaseGraph) -> None:
+    if not isinstance(graph_backend, SQLGraph):
+        pytest.skip("Only SQLGraph supports explicit SQL indexes")
+
+    graph_backend.add_node_attr_key("label", "")
+    index_name = graph_backend.ensure_node_attr_index(["t", "label"], unique=False)
+
+    inspector = sa.inspect(graph_backend._engine)
+    indexes = inspector.get_indexes(graph_backend.Node.__tablename__)
+    assert len(indexes) == 1
+    assert any(idx["name"] == index_name and idx["column_names"] == ["t", "label"] for idx in indexes)
+
+
+def test_sqlgraph_edge_attr_index_creation(graph_backend: BaseGraph) -> None:
+    if not isinstance(graph_backend, SQLGraph):
+        pytest.skip("Only SQLGraph supports explicit SQL indexes")
+
+    graph_backend.add_edge_attr_key("score", 0.0)
+    index_name = graph_backend.ensure_edge_attr_index("score", unique=True)
+
+    inspector = sa.inspect(graph_backend._engine)
+    indexes = inspector.get_indexes(graph_backend.Edge.__tablename__)
+    assert len(indexes) == 3  # including source_id and target_id indexes
+    assert any(idx["name"] == index_name and idx.get("unique") for idx in indexes)
+
+
+def test_sqlgraph_index_missing_column(graph_backend: BaseGraph) -> None:
+    if not isinstance(graph_backend, SQLGraph):
+        pytest.skip("Only SQLGraph supports explicit SQL indexes")
+
+    with pytest.raises(ValueError, match=r"Columns .* do not exist"):
+        graph_backend.ensure_node_attr_index("does_not_exist")
 
 
 def test_remove_node(graph_backend: BaseGraph) -> None:
