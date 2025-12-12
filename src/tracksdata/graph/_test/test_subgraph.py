@@ -1144,6 +1144,15 @@ def test_graph_view_remove_edge(graph_backend: BaseGraph) -> None:
 
 
 @parametrize_subgraph_tests
+def test_has_node(graph_backend: BaseGraph, use_subgraph: bool) -> None:
+    """Test has_node functionality on both original graphs and subgraphs."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+    for n in graph_with_data._test_nodes:
+        assert graph_with_data.has_node(n)
+    assert not graph_with_data.has_node(555_000_000)
+
+
+@parametrize_subgraph_tests
 def test_has_edge(graph_backend: BaseGraph, use_subgraph: bool) -> None:
     """Test has_edge functionality on both original graphs and subgraphs."""
 
