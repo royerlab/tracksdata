@@ -1254,3 +1254,20 @@ def test_picking_graph_mappings(graph_backend: BaseGraph, use_subgraph: bool) ->
 
     if isinstance(unpickled_graph, MappedGraphMixin):
         _evaluate_bidict_maps(unpickled_graph._local_to_external, unpickled_graph._external_to_local)
+
+
+@parametrize_subgraph_tests
+def test_edge_list(graph_backend: BaseGraph, use_subgraph: bool) -> None:
+    """Test edge_list functionality on both original graphs and subgraphs."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+    edge_list = set(map(tuple, graph_with_data.edge_list()))
+    expected_edge_list = set(
+        map(
+            tuple,
+            graph_with_data.edge_attrs()
+            .select([DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET])
+            .to_numpy()
+            .tolist(),
+        )
+    )
+    assert edge_list == expected_edge_list

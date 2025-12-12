@@ -1734,3 +1734,9 @@ class NodeInterface:
         graph.remove_metadata("shape")
         ```
         """
+
+    @abc.abstractmethod
+    def edge_list(self) -> list[list[int, int]]:
+        """
+        Get the edge list of the graph.
+        """

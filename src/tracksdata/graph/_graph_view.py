@@ -15,7 +15,7 @@ from tracksdata.utils._logging import LOG
 from tracksdata.utils._signal import is_signal_on
 
 
-class GraphView(RustWorkXGraph, MappedGraphMixin):
+class GraphView(MappedGraphMixin, RustWorkXGraph):
     """
     A filtered view of a graph that maintains bidirectional mapping to the root graph.
 

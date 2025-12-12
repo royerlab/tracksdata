@@ -245,3 +245,9 @@ class MappedGraphMixin:
             List of all local node IDs
         """
         return list(self._local_to_external.keys())
+
+    def edge_list(self) -> list[list[int, int]]:
+        """
+        Get the edge list of the graph.
+        """
+        return self._vectorized_map_to_external(self.rx_graph.edge_list()).tolist()

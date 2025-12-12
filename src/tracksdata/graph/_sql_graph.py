@@ -1749,3 +1749,13 @@ class SQLGraph(BaseGraph):
         with Session(self._engine) as session:
             session.query(self.Metadata).filter(self.Metadata.key == key).delete()
             session.commit()
+
+    def edge_list(self) -> list[list[int, int]]:
+        """
+        Get the edge list of the graph.
+        """
+        with Session(self._engine) as session:
+            return [
+                [source_id, target_id]
+                for source_id, target_id in session.query(self.Edge.source_id, self.Edge.target_id).all()
+            ]
