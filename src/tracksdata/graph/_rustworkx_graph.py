@@ -1392,6 +1392,12 @@ class RustWorkXGraph(BaseGraph):
     def remove_metadata(self, key: str) -> None:
         self._graph.attrs.pop(key, None)
 
+    def edge_list(self) -> list[list[int, int]]:
+        """
+        Get the edge list of the graph.
+        """
+        return self.rx_graph.edge_list()
+
 
 class IndexedRXGraph(MappedGraphMixin, RustWorkXGraph):
     """

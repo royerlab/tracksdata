@@ -271,3 +271,9 @@ class MappedGraphMixin:
             return False
 
         return self.rx_graph.has_edge(source_id, target_id)
+
+    def edge_list(self) -> list[list[int, int]]:
+        """
+        Get the edge list of the graph.
+        """
+        return self._vectorized_map_to_external(self.rx_graph.edge_list()).tolist()
