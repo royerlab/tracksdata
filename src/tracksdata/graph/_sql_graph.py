@@ -1291,6 +1291,99 @@ class SQLGraph(BaseGraph):
             keys.remove(k)
         return keys
 
+    def _ensure_attr_index(
+        self,
+        table_class: type[DeclarativeBase],
+        attr_keys: Sequence[str] | str,
+        *,
+        unique: bool = False,
+        name: str | None = None,
+    ) -> str:
+        if isinstance(attr_keys, str):
+            attr_keys = [attr_keys]
+
+        if len(attr_keys) == 0:
+            raise ValueError("attr_keys must contain at least one column name")
+
+        missing = [key for key in attr_keys if key not in table_class.__table__.columns]
+        if missing:
+            raise ValueError(f"Columns {missing} do not exist on table {table_class.__tablename__}")
+
+        resolved_columns = [getattr(table_class, key) for key in attr_keys]
+
+        if name is None:
+            cols_fragment = "_".join(attr_keys)
+            name = f"ix_{table_class.__tablename__.lower()}_{cols_fragment}"
+
+        index = sa.Index(name, *resolved_columns, unique=unique)
+        LOG.info(
+            "Ensuring index '%s' on table %s (columns=%s, unique=%s)",
+            name,
+            table_class.__tablename__,
+            attr_keys,
+            unique,
+        )
+        index.create(bind=self._engine, checkfirst=True)
+        return index.name
+
+    def ensure_node_attr_index(
+        self,
+        attr_keys: Sequence[str] | str,
+        *,
+        unique: bool = False,
+        name: str | None = None,
+    ) -> str:
+        """Ensure an index exists for the given node attribute columns.
+
+        Parameters
+        ----------
+        attr_keys : Sequence[str] | str
+            Column names to include in the index. Can be a single column name
+            or a list of multiple columns for a composite index.
+        unique : bool, default False
+            Whether the index should enforce uniqueness.
+        name : str | None, default None
+            Optional custom index name. If omitted a deterministic name is
+            generated using the table and column names.
+
+        Returns
+        -------
+        str
+            The name of the index (either the provided `name` or the generated
+            one).
+        """
+
+        return self._ensure_attr_index(self.Node, attr_keys, unique=unique, name=name)
+
+    def ensure_edge_attr_index(
+        self,
+        attr_keys: Sequence[str] | str,
+        *,
+        unique: bool = False,
+        name: str | None = None,
+    ) -> str:
+        """Ensure an index exists for the given edge attribute columns.
+
+        Parameters
+        ----------
+        attr_keys : Sequence[str] | str
+            Column names to include in the index. Can be a single column name
+            or a list of multiple columns for a composite index.
+        unique : bool, default False
+            Whether the index should enforce uniqueness.
+        name : str | None, default None
+            Optional custom index name. If omitted a deterministic name is
+            generated using the table and column names.
+
+        Returns
+        -------
+        str
+            The name of the index (either the provided `name` or the generated
+            one).
+        """
+
+        return self._ensure_attr_index(self.Edge, attr_keys, unique=unique, name=name)
+
     def _sqlalchemy_type_inference(self, default_value: Any) -> TypeEngine:
         if np.isscalar(default_value) and hasattr(default_value, "item"):
             default_value = default_value.item()
