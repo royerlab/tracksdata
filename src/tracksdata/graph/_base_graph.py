@@ -1130,11 +1130,13 @@ class BaseGraph(abc.ABC):
         ----------
         attr_keys : list[str] | None, optional
             List of attribute keys to use as spatial coordinates. If None, defaults to
-            ["t", "z", "y", "x"] filtered to only include keys present in the graph.
+            [DEFAULT_ATTR_KEYS.T, DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
+            filtered to only include keys present in the graph.
             Common combinations include:
-            - 2D: ["y", "x"]
-            - 3D: ["z", "y", "x"] or ["t", "y", "x"]
-            - 4D: ["t", "z", "y", "x"]
+            - 2D: [DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
+            - 3D: [DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X] or
+                  [DEFAULT_ATTR_KEYS.T, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
+            - 4D: [DEFAULT_ATTR_KEYS.T, DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
 
         Returns
         -------
@@ -1507,7 +1509,13 @@ class BaseGraph(abc.ABC):
 
         if geff_metadata is None:
             axes = [Axis(name=DEFAULT_ATTR_KEYS.T, type="time")]
-            axes.extend([Axis(name=c, type="space") for c in ("z", "y", "x") if c in node_attrs.columns])
+            axes.extend(
+                [
+                    Axis(name=c, type="space")
+                    for c in (DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X)
+                    if c in node_attrs.columns
+                ]
+            )
 
             if DEFAULT_ATTR_KEYS.TRACKLET_ID in node_attrs.columns:
                 track_node_props = {
