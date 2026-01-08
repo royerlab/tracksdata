@@ -882,6 +882,9 @@ class BaseGraph(abc.ABC):
         matched_node_id_key: str = DEFAULT_ATTR_KEYS.MATCHED_NODE_ID,
         match_score_key: str = DEFAULT_ATTR_KEYS.MATCH_SCORE,
         matched_edge_mask_key: str = DEFAULT_ATTR_KEYS.MATCHED_EDGE_MASK,
+        matching_mode: str = "mask",
+        scale: tuple[float, ...] | None = None,
+        max_distance: float | None = None,
     ) -> None:
         """
         Match the nodes of the graph to the nodes of another graph.
@@ -896,6 +899,15 @@ class BaseGraph(abc.ABC):
             The key of the output value of the match score between matched nodes
         matched_edge_mask_key : str
             The key of the output as a boolean value indicating if a corresponding edge exists in the other graph.
+        matching_mode : str
+            The mode to use for matching. Either "mask" (default) for mask-based matching
+            or "distance" for centroid distance-based matching.
+        scale : tuple[float, ...] | None
+            Physical scale for each spatial dimension (e.g., (z, y, x)) to account for anisotropy.
+            Only used when matching_mode is "distance". If None, assumes isotropic data.
+        max_distance : float | None
+            Maximum distance between centroids to be considered as a match.
+            Only used when matching_mode is "distance". If None, all pairs are considered.
         """
         from tracksdata.metrics._ctc_metrics import _matching_data
 
@@ -905,6 +917,9 @@ class BaseGraph(abc.ABC):
             input_graph_key=DEFAULT_ATTR_KEYS.NODE_ID,
             reference_graph_key=DEFAULT_ATTR_KEYS.NODE_ID,
             optimal_matching=True,
+            matching_mode=matching_mode,
+            scale=scale,
+            max_distance=max_distance,
         )
 
         if matched_node_id_key not in self.node_attr_keys():
