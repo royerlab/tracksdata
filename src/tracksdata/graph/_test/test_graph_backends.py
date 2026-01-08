@@ -2222,9 +2222,7 @@ def test_remove_all_nodes_in_time_point(graph_backend: BaseGraph) -> None:
     assert time_points_after_two == {0, 2}  # t=1 should be gone
 
 
-def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
-    """Test geff roundtrip."""
-
+def _fill_mock_geff_graph(graph_backend: BaseGraph) -> None:
     graph_backend.add_node_attr_key("x", 0.0)
     graph_backend.add_node_attr_key("y", 0.0)
     graph_backend.add_node_attr_key("z", 0.0)
@@ -2284,6 +2282,12 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
     graph_backend.add_edge(node1, node2, {"weight": 0.8})
     graph_backend.add_edge(node2, node3, {"weight": 0.9})
 
+
+def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
+    """Test geff roundtrip."""
+
+    _fill_mock_geff_graph(graph_backend)
+
     output_store = MemoryStore()
 
     graph_backend.to_geff(geff_store=output_store)
@@ -2306,6 +2310,44 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
 
     for node_id in geff_graph.node_ids():
         assert geff_graph[node_id].to_dict() == graph_backend[node_id].to_dict()
+
+    assert rx.is_isomorphic(
+        rx_graph,
+        geff_graph.rx_graph,
+    )
+
+
+def test_geff_with_keymapping(graph_backend: BaseGraph) -> None:
+    """Test geff roundtrip."""
+
+    _fill_mock_geff_graph(graph_backend)
+
+    output_store = MemoryStore()
+
+    graph_backend.to_geff(geff_store=output_store)
+
+    geff_graph, _ = IndexedRXGraph.from_geff(
+        output_store,
+        node_attr_key_map={"x": "x_new", "y": "y_new"},
+        edge_attr_key_map={"weight": "weight_new"},
+    )
+
+    assert "geff" in geff_graph.metadata()
+
+    # geff metadata was not stored in original graph
+    geff_graph.metadata().pop("geff")
+    assert geff_graph.metadata() == graph_backend.metadata()
+
+    assert geff_graph.num_nodes() == 3
+    assert geff_graph.num_edges() == 2
+
+    assert set(graph_backend.node_attr_keys()) - set(geff_graph.node_attr_keys()) == {"x", "y"}
+    assert set(graph_backend.edge_attr_keys()) - set(geff_graph.edge_attr_keys()) == {"weight"}
+
+    assert set(geff_graph.node_attr_keys()) - set(graph_backend.node_attr_keys()) == {"x_new", "y_new"}
+    assert set(geff_graph.edge_attr_keys()) - set(graph_backend.edge_attr_keys()) == {"weight_new"}
+
+    rx_graph = graph_backend.filter().subgraph().rx_graph
 
     assert rx.is_isomorphic(
         rx_graph,
