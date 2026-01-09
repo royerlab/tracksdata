@@ -13,7 +13,7 @@ def test_random_nodes_init_2d() -> None:
 
     assert operator.n_time_points == 5
     assert operator.n_nodes == (10, 20)
-    assert operator.spatial_cols == ["x", "y"]
+    assert operator.spatial_cols == ["y", "x"]
     assert operator.rng is not None
 
 
@@ -23,7 +23,7 @@ def test_random_nodes_init_3d() -> None:
 
     assert operator.n_time_points == 3
     assert operator.n_nodes == (5, 15)
-    assert operator.spatial_cols == ["x", "y", "z"]
+    assert operator.spatial_cols == ["z", "y", "x"]
 
 
 def test_random_nodes_init_invalid_dimension() -> None:
