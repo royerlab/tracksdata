@@ -1698,6 +1698,13 @@ class SQLGraph(BaseGraph):
 
         return graph
 
+    def has_node(self, node_id: int) -> bool:
+        """
+        Check if the graph has a node with the given id.
+        """
+        with Session(self._engine) as session:
+            return session.scalar(sa.sql.expression.exists().where(self.Node.node_id == node_id).select())
+
     def has_edge(self, source_id: int, target_id: int) -> bool:
         """
         Check if the graph has an edge between two nodes.
@@ -1767,3 +1774,13 @@ class SQLGraph(BaseGraph):
         with Session(self._engine) as session:
             session.query(self.Metadata).filter(self.Metadata.key == key).delete()
             session.commit()
+
+    def edge_list(self) -> list[list[int, int]]:
+        """
+        Get the edge list of the graph.
+        """
+        with Session(self._engine) as session:
+            return [
+                [source_id, target_id]
+                for source_id, target_id in session.query(self.Edge.source_id, self.Edge.target_id).all()
+            ]

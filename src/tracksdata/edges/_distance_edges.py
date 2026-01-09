@@ -37,7 +37,8 @@ class DistanceEdges(BaseEdgesOperator):
         The attribute key to store the distance values in the edges.
     attr_keys : Sequence[str] | None, optional
         The node attribute keys to use for distance calculation. If None,
-        defaults to ["z", "y", "x"] if "z" exists, otherwise ["y", "x"].
+        defaults to [DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
+        if DEFAULT_ATTR_KEYS.Z exists, otherwise [DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X].
 
     Attributes
     ----------
@@ -52,7 +53,7 @@ class DistanceEdges(BaseEdgesOperator):
         The key used to store distance values in edges.
     attr_keys : Sequence[str] | None
         The attribute keys to use for the distance calculation.
-        When None, "z", "y", "x" are used.
+        When None, DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X are used.
     show_progress : bool
         Whether to print progress of the edges addition.
 
@@ -134,10 +135,10 @@ class DistanceEdges(BaseEdgesOperator):
             time t-1 to nodes at time t.
         """
         if self.attr_keys is None:
-            if "z" in graph.node_attr_keys():
-                attr_keys = ["z", "y", "x"]
+            if DEFAULT_ATTR_KEYS.Z in graph.node_attr_keys():
+                attr_keys = [DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
             else:
-                attr_keys = ["y", "x"]
+                attr_keys = [DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
         else:
             attr_keys = self.attr_keys
 

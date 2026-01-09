@@ -476,7 +476,7 @@ class MaskDiskAttrs(GenericFuncNodeAttrs):
         The shape of the image, must match the number of  of the attr_keys.
     attr_keys : Sequence[str] | None
         The attributes for the center of the mask.
-        If not provided, "z", "y", "x" will be used.
+        If not provided, DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X will be used.
     output_key : str
         The key of the attribute to store the mask.
     """
@@ -489,7 +489,7 @@ class MaskDiskAttrs(GenericFuncNodeAttrs):
         output_key: str = DEFAULT_ATTR_KEYS.MASK,
     ):
         if attr_keys is None:
-            default_columns = ["z", "y", "x"]
+            default_columns = [DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
             attr_keys = default_columns[-len(image_shape) :]
 
         if len(attr_keys) != len(image_shape):

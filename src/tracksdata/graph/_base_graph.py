@@ -1130,11 +1130,13 @@ class BaseGraph(abc.ABC):
         ----------
         attr_keys : list[str] | None, optional
             List of attribute keys to use as spatial coordinates. If None, defaults to
-            ["t", "z", "y", "x"] filtered to only include keys present in the graph.
+            [DEFAULT_ATTR_KEYS.T, DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
+            filtered to only include keys present in the graph.
             Common combinations include:
-            - 2D: ["y", "x"]
-            - 3D: ["z", "y", "x"] or ["t", "y", "x"]
-            - 4D: ["t", "z", "y", "x"]
+            - 2D: [DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
+            - 3D: [DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X] or
+                  [DEFAULT_ATTR_KEYS.T, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
+            - 4D: [DEFAULT_ATTR_KEYS.T, DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
 
         Returns
         -------
@@ -1417,6 +1419,8 @@ class BaseGraph(abc.ABC):
         cls: type[T],
         geff_store: StoreLike,
         geff_read_kwargs: dict[str, Any] | None = None,
+        node_attr_key_map: dict[str, str] | None = None,
+        edge_attr_key_map: dict[str, str] | None = None,
         **kwargs,
     ) -> tuple[T, GeffMetadata]:
         """
@@ -1428,6 +1432,12 @@ class BaseGraph(abc.ABC):
             The store or path to the geff data directory to read the graph from.
         geff_read_kwargs : dict[str, Any] | None
             Additional keyword arguments to pass to the `geff.read` function.
+        node_attr_key_map : dict[str, str] | None
+            A mapping to rename node attribute keys.
+            If a key is not in the mapping, it is not renamed.
+        edge_attr_key_map : dict[str, str] | None
+            A mapping to rename edge attribute keys.
+            If a key is not in the mapping, it is not renamed.
         **kwargs
             Additional keyword arguments to pass to the graph constructor.
 
@@ -1453,13 +1463,28 @@ class BaseGraph(abc.ABC):
         node_id_map = rx_graph.attrs["to_rx_id_map"]
         rx_graph.attrs = {"geff": rx_graph.attrs, **rx_graph.attrs["extra"].pop("tracksdata", {})}
 
+        if node_attr_key_map is not None:
+            LOG.info("Mapping node attributes: %s", node_attr_key_map)
+            for src_k, dst_k in node_attr_key_map.items():
+                geff_metadata.node_props_metadata[dst_k] = geff_metadata.node_props_metadata.pop(src_k)
+                for node_attr in rx_graph.nodes():
+                    node_attr[dst_k] = node_attr.pop(src_k)
+
+        if edge_attr_key_map is not None:
+            LOG.info("Mapping edge attributes: %s", edge_attr_key_map)
+            for src_k, dst_k in edge_attr_key_map.items():
+                geff_metadata.edge_props_metadata[dst_k] = geff_metadata.edge_props_metadata.pop(src_k)
+                for edge_attr in rx_graph.edges():
+                    edge_attr[dst_k] = edge_attr.pop(src_k)
+
         indexed_graph = IndexedRXGraph(
             rx_graph=rx_graph,
             node_id_map=node_id_map,
             **kwargs,
         )
 
-        if DEFAULT_ATTR_KEYS.MASK in indexed_graph.node_attr_keys():
+        node_attr_key = indexed_graph.node_attr_keys()
+        if DEFAULT_ATTR_KEYS.MASK in node_attr_key and DEFAULT_ATTR_KEYS.BBOX in node_attr_key:
             from tracksdata.nodes._mask import Mask
 
             # unsafe operation, changing graph content inplace
@@ -1507,7 +1532,13 @@ class BaseGraph(abc.ABC):
 
         if geff_metadata is None:
             axes = [Axis(name=DEFAULT_ATTR_KEYS.T, type="time")]
-            axes.extend([Axis(name=c, type="space") for c in ("z", "y", "x") if c in node_attrs.columns])
+            axes.extend(
+                [
+                    Axis(name=c, type="space")
+                    for c in (DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X)
+                    if c in node_attrs.columns
+                ]
+            )
 
             if DEFAULT_ATTR_KEYS.TRACKLET_ID in node_attrs.columns:
                 track_node_props = {
@@ -1583,6 +1614,12 @@ class BaseGraph(abc.ABC):
         from tracksdata.metrics._traccuracy import to_traccuracy_graph
 
         return to_traccuracy_graph(self, array_view_kwargs=array_view_kwargs)
+
+    @abc.abstractmethod
+    def has_node(self, node_id: int) -> bool:
+        """
+        Check if the graph has a node with the given id.
+        """
 
     @abc.abstractmethod
     def has_edge(self, source_id: int, target_id: int) -> bool:
@@ -1733,4 +1770,10 @@ class NodeInterface:
         ```python
         graph.remove_metadata("shape")
         ```
+        """
+
+    @abc.abstractmethod
+    def edge_list(self) -> list[list[int, int]]:
+        """
+        Get the edge list of the graph.
         """

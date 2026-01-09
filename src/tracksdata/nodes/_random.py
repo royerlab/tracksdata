@@ -100,9 +100,9 @@ class RandomNodes(BaseNodesOperator):
         self.n_nodes = n_nodes_per_tp
 
         if n_dim == 2:
-            self.spatial_cols = ["x", "y"]
+            self.spatial_cols = [DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
         elif n_dim == 3:
-            self.spatial_cols = ["x", "y", "z"]
+            self.spatial_cols = [DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
         else:
             raise ValueError(f"Invalid number of dimensions: {n_dim}")
 
