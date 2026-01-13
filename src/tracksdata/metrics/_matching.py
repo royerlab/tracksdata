@@ -70,9 +70,14 @@ class Matching(abc.ABC):
         """
 
     @abc.abstractmethod
-    def get_required_attrs(self) -> list[str]:
+    def get_required_attrs(self, attr_keys: list[str]) -> list[str]:
         """
         Get the list of required node attributes for this matching strategy.
+
+        Parameters
+        ----------
+        attr_keys : list[str]
+            List of attribute keys to consider.
 
         Returns
         -------
@@ -173,7 +178,7 @@ class MaskMatching(Matching):
 
         return mapped_ref, mapped_comp, rows, cols, weights
 
-    def get_required_attrs(self) -> list[str]:
+    def get_required_attrs(self, attr_keys: list[str]) -> list[str]:
         """
         Get required attributes for mask matching.
 
@@ -182,6 +187,8 @@ class MaskMatching(Matching):
         list[str]
             List containing the mask attribute key.
         """
+        if DEFAULT_ATTR_KEYS.MASK not in attr_keys:
+            raise ValueError(f"Mask attribute key '{DEFAULT_ATTR_KEYS.MASK}' is required for mask matching")
         return [DEFAULT_ATTR_KEYS.MASK]
 
 
@@ -290,7 +297,7 @@ class DistanceMatching(Matching):
 
         return mapped_ref, mapped_comp, rows, cols, weights
 
-    def get_required_attrs(self) -> list[str]:
+    def get_required_attrs(self, attr_keys: list[str]) -> list[str]:
         """
         Get required attributes for distance matching.
 
@@ -299,7 +306,10 @@ class DistanceMatching(Matching):
         list[str]
             List of centroid coordinate keys.
         """
-        if self.attr_keys is not None:
+        if self.attr_keys is None:
+            if DEFAULT_ATTR_KEYS.Z in attr_keys:
+                return [DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
+            else:
+                return [DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
+        else:
             return list(self.attr_keys)
-        # Return default attrs - will be determined at runtime
-        return [DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]

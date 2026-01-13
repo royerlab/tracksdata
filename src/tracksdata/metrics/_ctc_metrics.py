@@ -152,7 +152,7 @@ def _matching_data(
     n_workers = get_options().n_workers
 
     # Get required attributes from the matching strategy
-    required_attrs = matching.get_required_attrs()
+    required_attrs = matching.get_required_attrs(attr_keys=reference_graph.node_attr_keys())
 
     # Check if we need to serialize masks for multiprocessing
     use_mask_serialization = n_workers > 1 and DEFAULT_ATTR_KEYS.MASK in required_attrs
