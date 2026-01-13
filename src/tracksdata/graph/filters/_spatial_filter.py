@@ -121,7 +121,8 @@ class SpatialFilter:
         The graph containing nodes with spatial coordinates.
     attr_keys : list[str] | None, optional
         List of attribute keys to use as spatial coordinates. If None, defaults to
-        ["t", "z", "y", "x"] filtered to only include keys present in the graph.
+        [DEFAULT_ATTR_KEYS.T, DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
+        filtered to only include keys present in the graph.
 
     Examples
     --------
@@ -145,7 +146,7 @@ class SpatialFilter:
         attr_keys: list[str] | None = None,
     ) -> None:
         if attr_keys is None:
-            attr_keys = ["t", "z", "y", "x"]
+            attr_keys = [DEFAULT_ATTR_KEYS.T, DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
             valid_keys = set(graph.node_attr_keys())
             attr_keys = list(filter(lambda x: x in valid_keys, attr_keys))
 
@@ -183,10 +184,11 @@ class SpatialFilter:
         Examples
         --------
         ```python
-        # For 2D spatial filter with ["y", "x"] coordinates
+        # For 2D spatial filter with [DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X] coordinates
         filter = spatial_filter[10:50, 20:60]
 
-        # For 4D spatial filter with ["t", "z", "y", "x"] coordinates
+        # For 4D spatial filter with:
+        # [DEFAULT_ATTR_KEYS.T, DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X] coordinates
         subgraph = spatial_filter[0:10, 0:5, 10:50, 20:60].subgraph()
         ```
         """

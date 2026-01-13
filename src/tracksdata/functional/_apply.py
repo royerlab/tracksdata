@@ -57,7 +57,8 @@ class TilingScheme:
         The overlap between tiles PER SIDE.
     attrs : list[str] | None, optional
         The attributes to include in the tile. If None, all attributes will be included.
-        By default "t", "z", "y", "x" are included. If some columns are not present, they will be ignored.
+        By default DEFAULT_ATTR_KEYS.T, DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X are included.
+        If some columns are not present, they will be ignored.
     """
 
     tile_shape: tuple[S, ...]
@@ -151,7 +152,7 @@ def _yield_apply_tiled(
     # if agg_func is provided, we need to reduce the results
     if tiling_scheme.attrs is None:
         # default attrs
-        attr_keys = [DEFAULT_ATTR_KEYS.T, "z", "y", "x"]
+        attr_keys = [DEFAULT_ATTR_KEYS.T, DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
         attr_keys = [a for a in attr_keys if a in graph.node_attr_keys()]
     else:
         attr_keys = tiling_scheme.attrs
