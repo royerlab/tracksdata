@@ -116,9 +116,9 @@ class RegionPropsNodes(BaseNodesOperator):
             The names of the axes of the labels.
         """
         if labels.ndim == 3:
-            return ["y", "x"]
+            return [DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
         elif labels.ndim == 4:
-            return ["z", "y", "x"]
+            return [DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
         else:
             raise ValueError(f"`labels` must be 't + 2D' or 't + 3D', got '{labels.ndim}' dimensions.")
 

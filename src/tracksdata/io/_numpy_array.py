@@ -93,10 +93,10 @@ def from_array(
 
     if positions.shape[1] == 3:
         ndim = 2
-        spatial_cols = ["x", "y"]
+        spatial_cols = [DEFAULT_ATTR_KEYS.X, DEFAULT_ATTR_KEYS.Y]
     elif positions.shape[1] == 4:
         ndim = 3
-        spatial_cols = ["x", "y", "z"]
+        spatial_cols = [DEFAULT_ATTR_KEYS.X, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.Z]
     else:
         raise ValueError(f"Expected 4 or 5 dimensions, got {positions.shape[1]}.")
 
@@ -127,12 +127,12 @@ def from_array(
     ):
         attr = {
             DEFAULT_ATTR_KEYS.T: position[0],
-            "x": position[-1],
-            "y": position[-2],
+            DEFAULT_ATTR_KEYS.X: position[-1],
+            DEFAULT_ATTR_KEYS.Y: position[-2],
         }
 
         if ndim == 3:
-            attr["z"] = position[1]
+            attr[DEFAULT_ATTR_KEYS.Z] = position[1]
 
         if tracklet_ids is not None:
             attr[DEFAULT_ATTR_KEYS.TRACKLET_ID] = tracklet_ids[i]

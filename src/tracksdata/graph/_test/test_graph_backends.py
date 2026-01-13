@@ -6,6 +6,7 @@ import numpy as np
 import polars as pl
 import pytest
 import rustworkx as rx
+import sqlalchemy as sa
 from zarr.storage import MemoryStore
 
 from tracksdata.attrs import EdgeAttr, NodeAttr
@@ -2061,6 +2062,57 @@ def test_custom_indices(graph_backend: BaseGraph) -> None:
         graph_backend.bulk_add_nodes([{"t": 3, "x": 1.0, "y": 1.0}], indices=[1, 2, 3])
 
 
+def test_sqlgraph_node_attr_index_create_and_drop(graph_backend: BaseGraph) -> None:
+    if not isinstance(graph_backend, SQLGraph):
+        pytest.skip("Only SQLGraph supports explicit SQL indexes")
+
+    graph_backend.add_node_attr_key("label", "")
+    index_name = f"ix_{graph_backend.Node.__tablename__.lower()}_t_label"
+
+    graph_backend.create_node_attr_index(["t", "label"], unique=False)
+
+    inspector = sa.inspect(graph_backend._engine)
+    indexes = inspector.get_indexes(graph_backend.Node.__tablename__)
+    assert len(indexes) == 1
+    assert any(idx["name"] == index_name and idx["column_names"] == ["t", "label"] for idx in indexes)
+
+    dropped_name = graph_backend.drop_node_attr_index(["t", "label"])
+    assert dropped_name == index_name
+
+    indexes_after = sa.inspect(graph_backend._engine).get_indexes(graph_backend.Node.__tablename__)
+    assert all(idx["name"] != index_name for idx in indexes_after)
+
+
+def test_sqlgraph_edge_attr_index_create_and_drop(graph_backend: BaseGraph) -> None:
+    if not isinstance(graph_backend, SQLGraph):
+        pytest.skip("Only SQLGraph supports explicit SQL indexes")
+
+    graph_backend.add_edge_attr_key("score", 0.0)
+    index_name = f"ix_{graph_backend.Edge.__tablename__.lower()}_score"
+
+    graph_backend.create_edge_attr_index("score", unique=True)
+
+    inspector = sa.inspect(graph_backend._engine)
+    indexes = inspector.get_indexes(graph_backend.Edge.__tablename__)
+    assert len(indexes) == 3  # including source_id and target_id indexes
+    assert any(idx["name"] == index_name and idx.get("unique") for idx in indexes)
+
+    dropped_name = graph_backend.drop_edge_attr_index("score")
+    assert dropped_name == index_name
+
+    indexes_after = sa.inspect(graph_backend._engine).get_indexes(graph_backend.Edge.__tablename__)
+    assert len(indexes_after) == 2  # only source_id and target_id indexes remain
+    assert all(idx["name"] != index_name for idx in indexes_after)
+
+
+def test_sqlgraph_index_missing_column(graph_backend: BaseGraph) -> None:
+    if not isinstance(graph_backend, SQLGraph):
+        pytest.skip("Only SQLGraph supports explicit SQL indexes")
+
+    with pytest.raises(ValueError, match=r"Columns .* do not exist"):
+        graph_backend.create_node_attr_index("does_not_exist")
+
+
 def test_remove_node(graph_backend: BaseGraph) -> None:
     """Test removing nodes from the graph."""
     # Add attribute keys
@@ -2222,9 +2274,7 @@ def test_remove_all_nodes_in_time_point(graph_backend: BaseGraph) -> None:
     assert time_points_after_two == {0, 2}  # t=1 should be gone
 
 
-def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
-    """Test geff roundtrip."""
-
+def _fill_mock_geff_graph(graph_backend: BaseGraph) -> None:
     graph_backend.add_node_attr_key("x", 0.0)
     graph_backend.add_node_attr_key("y", 0.0)
     graph_backend.add_node_attr_key("z", 0.0)
@@ -2284,6 +2334,12 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
     graph_backend.add_edge(node1, node2, {"weight": 0.8})
     graph_backend.add_edge(node2, node3, {"weight": 0.9})
 
+
+def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
+    """Test geff roundtrip."""
+
+    _fill_mock_geff_graph(graph_backend)
+
     output_store = MemoryStore()
 
     graph_backend.to_geff(geff_store=output_store)
@@ -2306,6 +2362,44 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
 
     for node_id in geff_graph.node_ids():
         assert geff_graph[node_id].to_dict() == graph_backend[node_id].to_dict()
+
+    assert rx.is_isomorphic(
+        rx_graph,
+        geff_graph.rx_graph,
+    )
+
+
+def test_geff_with_keymapping(graph_backend: BaseGraph) -> None:
+    """Test geff roundtrip."""
+
+    _fill_mock_geff_graph(graph_backend)
+
+    output_store = MemoryStore()
+
+    graph_backend.to_geff(geff_store=output_store)
+
+    geff_graph, _ = IndexedRXGraph.from_geff(
+        output_store,
+        node_attr_key_map={"x": "x_new", "y": "y_new"},
+        edge_attr_key_map={"weight": "weight_new"},
+    )
+
+    assert "geff" in geff_graph.metadata()
+
+    # geff metadata was not stored in original graph
+    geff_graph.metadata().pop("geff")
+    assert geff_graph.metadata() == graph_backend.metadata()
+
+    assert geff_graph.num_nodes() == 3
+    assert geff_graph.num_edges() == 2
+
+    assert set(graph_backend.node_attr_keys()) - set(geff_graph.node_attr_keys()) == {"x", "y"}
+    assert set(graph_backend.edge_attr_keys()) - set(geff_graph.edge_attr_keys()) == {"weight"}
+
+    assert set(geff_graph.node_attr_keys()) - set(graph_backend.node_attr_keys()) == {"x_new", "y_new"}
+    assert set(geff_graph.edge_attr_keys()) - set(graph_backend.edge_attr_keys()) == {"weight_new"}
+
+    rx_graph = graph_backend.filter().subgraph().rx_graph
 
     assert rx.is_isomorphic(
         rx_graph,

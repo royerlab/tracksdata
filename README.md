@@ -13,6 +13,7 @@ A common data structure and basic tools for multi-object tracking.
 - Graph-based representation of tracking problems
 - In-memory (RustWorkX) and database-backed (SQL) graph backends
 - Nodes and edges can take arbitrary attributes
+- SQLGraph backend can index frequently queried attributes for faster filtering
 - Standardize API for node operators (e.g. defining objects and their attributes)
 - Standardize API for edge operators (e.g. creating edges between nodes)
 - Basic tracking solvers: nearest neighbors and integer linear programming

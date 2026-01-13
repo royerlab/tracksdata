@@ -11,7 +11,6 @@ from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.graph._mapped_graph_mixin import MappedGraphMixin
 from tracksdata.graph._rustworkx_graph import IndexedRXGraph, RustWorkXGraph, RXFilter
 from tracksdata.graph.filters._indexed_filter import IndexRXFilter
-from tracksdata.utils._logging import LOG
 from tracksdata.utils._signal import is_signal_on
 
 
@@ -733,25 +732,6 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         rx_graph, node_map = super()._rx_subgraph_with_nodemap(node_ids)
         node_map = {k: self._map_to_external(v) for k, v in node_map.items()}
         return rx_graph, node_map
-
-    def has_edge(self, source_id: int, target_id: int) -> bool:
-        """
-        Check if the graph has an edge between two nodes.
-        """
-
-        try:
-            source_id = self._map_to_local(source_id)
-        except KeyError:
-            LOG.warning(f"`source_id` {source_id} not found in index map.")
-            return False
-
-        try:
-            target_id = self._map_to_local(target_id)
-        except KeyError:
-            LOG.warning(f"`target_id` {target_id} not found in index map.")
-            return False
-
-        return self.rx_graph.has_edge(source_id, target_id)
 
     def edge_id(self, source_id: int, target_id: int) -> int:
         """

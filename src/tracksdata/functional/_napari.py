@@ -109,7 +109,7 @@ def to_napari_format(
     tracks_graph = solution_graph.assign_tracklet_ids(output_tracklet_id_key)
     dict_graph = {tracks_graph[child]: tracks_graph[parent] for parent, child in tracks_graph.edge_list()}
 
-    spatial_cols = ["z", "y", "x"][-len(shape) + 1 :]
+    spatial_cols = [DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X][-len(shape) + 1 :]
 
     tracks_data = solution_graph.node_attrs(
         attr_keys=[output_tracklet_id_key, DEFAULT_ATTR_KEYS.T, *spatial_cols],
