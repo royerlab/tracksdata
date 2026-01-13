@@ -189,7 +189,7 @@ class TestDistanceMatching:
         ref_group = graph1.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, "z", "y", "x"])
         comp_group = graph2.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, "z", "y", "x"])
 
-        matching = DistanceMatching(max_distance=3.0, attr_keys=("z", "y", "x"))
+        matching = DistanceMatching(max_distance=3.0)
         mapped_ref, mapped_comp, rows, cols, weights = matching.compute_weights(
             ref_group, comp_group, DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.NODE_ID
         )
