@@ -34,6 +34,7 @@ if TYPE_CHECKING:
         BBoxSpatialFilter,
         SpatialFilter,
     )
+    from tracksdata.metrics._matching import Matching
 else:
     TrackingGraph = Any
 
@@ -879,12 +880,10 @@ class BaseGraph(abc.ABC):
     def match(
         self,
         other: "BaseGraph",
+        matching: "Matching | None" = None,
         matched_node_id_key: str = DEFAULT_ATTR_KEYS.MATCHED_NODE_ID,
         match_score_key: str = DEFAULT_ATTR_KEYS.MATCH_SCORE,
         matched_edge_mask_key: str = DEFAULT_ATTR_KEYS.MATCHED_EDGE_MASK,
-        matching_mode: str = "mask",
-        scale: tuple[float, ...] | None = None,
-        max_distance: float | None = None,
     ) -> None:
         """
         Match the nodes of the graph to the nodes of another graph.
@@ -893,33 +892,55 @@ class BaseGraph(abc.ABC):
         ----------
         other : BaseGraph
             The other graph to match to.
+        matching : Matching | None
+            The matching strategy to use. If None, defaults to MaskMatching with optimal=True.
+            See [MaskMatching][tracksdata.metrics.MaskMatching] and
+            [DistanceMatching][tracksdata.metrics.DistanceMatching] for available strategies.
         matched_node_id_key : str
             The key of the output value of the corresponding node ID in the other graph.
         match_score_key : str
-            The key of the output value of the match score between matched nodes
+            The key of the output value of the match score between matched nodes.
         matched_edge_mask_key : str
             The key of the output as a boolean value indicating if a corresponding edge exists in the other graph.
-        matching_mode : str
-            The mode to use for matching. Either "mask" (default) for mask-based matching
-            or "distance" for centroid distance-based matching.
-        scale : tuple[float, ...] | None
-            Physical scale for each spatial dimension (e.g., (z, y, x)) to account for anisotropy.
-            Only used when matching_mode is "distance". If None, assumes isotropic data.
-        max_distance : float | None
-            Maximum distance between centroids to be considered as a match.
-            Only used when matching_mode is "distance". If None, all pairs are considered.
+
+        Examples
+        --------
+        Match using default mask-based matching:
+
+        ```python
+        graph1.match(graph2)
+        ```
+
+        Match using distance-based matching:
+
+        ```python
+        from tracksdata.metrics import DistanceMatching
+
+        matching = DistanceMatching(optimal=True, max_distance=10.0, centroid_keys=("y", "x"))
+        graph1.match(graph2, matching=matching)
+        ```
+
+        Match with custom mask matching threshold:
+
+        ```python
+        from tracksdata.metrics import MaskMatching
+
+        matching = MaskMatching(optimal=True, min_reference_intersection=0.7)
+        graph1.match(graph2, matching=matching)
+        ```
         """
         from tracksdata.metrics._ctc_metrics import _matching_data
+        from tracksdata.metrics._matching import MaskMatching
+
+        if matching is None:
+            matching = MaskMatching(optimal=True)
 
         matching_data = _matching_data(
             self,
             other,
             input_graph_key=DEFAULT_ATTR_KEYS.NODE_ID,
             reference_graph_key=DEFAULT_ATTR_KEYS.NODE_ID,
-            optimal_matching=True,
-            matching_mode=matching_mode,
-            scale=scale,
-            max_distance=max_distance,
+            matching=matching,
         )
 
         if matched_node_id_key not in self.node_attr_keys():
@@ -933,7 +954,7 @@ class BaseGraph(abc.ABC):
 
         node_ids = functools.reduce(operator.iadd, matching_data["mapped_comp"])
         other_ids = functools.reduce(operator.iadd, matching_data["mapped_ref"])
-        ious = functools.reduce(operator.iadd, matching_data["ious"])
+        scores = functools.reduce(operator.iadd, matching_data["scores"])
 
         if len(node_ids) == 0:
             LOG.warning("No matching nodes found.")
@@ -941,7 +962,7 @@ class BaseGraph(abc.ABC):
 
         self.update_node_attrs(
             node_ids=node_ids,
-            attrs={matched_node_id_key: other_ids, match_score_key: ious},
+            attrs={matched_node_id_key: other_ids, match_score_key: scores},
         )
 
         other_to_node_ids = dict(zip(other_ids, node_ids, strict=True))
