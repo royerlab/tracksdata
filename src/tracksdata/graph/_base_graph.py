@@ -893,7 +893,8 @@ class BaseGraph(abc.ABC):
         other : BaseGraph
             The other graph to match to.
         matching : Matching | None
-            The matching strategy to use. If None, defaults to MaskMatching with optimal=True.
+            The matching strategy to use. If None, defaults to
+            MaskMatching with optimal=True and min_reference_intersection=0.5.
             See [MaskMatching][tracksdata.metrics.MaskMatching] and
             [DistanceMatching][tracksdata.metrics.DistanceMatching] for available strategies.
         matched_node_id_key : str
@@ -933,7 +934,7 @@ class BaseGraph(abc.ABC):
         from tracksdata.metrics._matching import MaskMatching
 
         if matching is None:
-            matching = MaskMatching(optimal=True)
+            matching = MaskMatching(optimal=True, min_reference_intersection=0.5)
 
         matching_data = _matching_data(
             self,

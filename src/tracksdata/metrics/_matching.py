@@ -6,15 +6,12 @@ used for metrics computation and graph comparison operations.
 """
 
 import abc
-from typing import TYPE_CHECKING
 
 import numpy as np
 import polars as pl
+from scipy.spatial.distance import cdist
 
 from tracksdata.constants import DEFAULT_ATTR_KEYS
-
-if TYPE_CHECKING:
-    pass
 
 
 class Matching(abc.ABC):
@@ -69,7 +66,7 @@ class Matching(abc.ABC):
             - mapped_comp: List of comparison node IDs
             - rows: Row indices for sparse matrix
             - cols: Column indices for sparse matrix
-            - weights: Matching weights (higher is better)
+            - scores: Matching scores (higher is better)
         """
 
     @abc.abstractmethod
@@ -249,17 +246,18 @@ class DistanceMatching(Matching):
         tuple[list[int], list[int], list[int], list[int], list[float]]
             Matching data: mapped_ref, mapped_comp, rows, cols, weights (1/(1+distance)).
         """
-        from scipy.spatial.distance import cdist
 
         if self.attr_keys is None:
             if DEFAULT_ATTR_KEYS.Z in ref_group.columns:
-                attr_keys = (DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X)
+                attr_keys = [DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
             else:
-                attr_keys = (DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X)
+                attr_keys = [DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
+        else:
+            attr_keys = list(self.attr_keys)
 
         # Extract centroids as numpy arrays (N x D and M x D)
-        ref_centroids = ref_group.select(list(attr_keys)).to_numpy()
-        comp_centroids = comp_group.select(list(attr_keys)).to_numpy()
+        ref_centroids = ref_group.select(attr_keys).to_numpy()
+        comp_centroids = comp_group.select(attr_keys).to_numpy()
 
         # Apply scale for anisotropic data
         if self.scale is not None:
@@ -301,4 +299,7 @@ class DistanceMatching(Matching):
         list[str]
             List of centroid coordinate keys.
         """
-        return list(self.centroid_keys)
+        if self.attr_keys is not None:
+            return list(self.attr_keys)
+        # Return default attrs - will be determined at runtime
+        return [DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]

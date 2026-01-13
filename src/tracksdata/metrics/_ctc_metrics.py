@@ -153,7 +153,6 @@ def _matching_data(
 
     # Get required attributes from the matching strategy
     required_attrs = matching.get_required_attrs()
-    attr_keys = [DEFAULT_ATTR_KEYS.T, None, *required_attrs]  # None placeholder for tracklet_id_key
 
     # Check if we need to serialize masks for multiprocessing
     use_mask_serialization = n_workers > 1 and DEFAULT_ATTR_KEYS.MASK in required_attrs
@@ -163,9 +162,8 @@ def _matching_data(
         ("ref", reference_graph, reference_graph_key),
         ("comp", input_graph, input_graph_key),
     ]:
-        # Replace placeholder with actual tracklet_id_key
-        fetch_keys = [tracklet_id_key if k is None else k for k in attr_keys]
-        nodes_df = graph.node_attrs(attr_keys=fetch_keys)
+        attr_keys = [DEFAULT_ATTR_KEYS.T, tracklet_id_key, *required_attrs]
+        nodes_df = graph.node_attrs(attr_keys=attr_keys)
         if use_mask_serialization:
             # required by multiprocessing
             nodes_df = column_to_bytes(nodes_df, DEFAULT_ATTR_KEYS.MASK)
