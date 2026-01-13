@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import polars as pl
 import scipy.sparse as sp
+from scipy.optimize import linear_sum_assignment
 
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.io._ctc import compressed_tracks_table
@@ -17,17 +18,17 @@ if TYPE_CHECKING:
     from tracksdata.graph._base_graph import BaseGraph
 
 
-def _fill_empty(weights: sp.csr_array, eps: float = 1e-10) -> None:
+def _fill_empty(weights: sp.csr_array, fill_value: float) -> None:
     """
     Fill empty rows and columns of a sparse matrix with a small value.
     """
     empty_rows = weights.sum(axis=1) == 0
     if empty_rows.any():
-        weights[empty_rows, :] = eps
+        weights[empty_rows, :] = fill_value
 
     empty_cols = weights.sum(axis=0) == 0
     if empty_cols.any():
-        weights[:, empty_cols] = eps
+        weights[:, empty_cols] = fill_value
 
 
 def _match_single_frame(
@@ -107,8 +108,24 @@ def _match_single_frame(
         try:
             rows_id, cols_id = sp.csgraph.min_weight_full_bipartite_matching(weights, maximize=True)
         except ValueError:
-            _fill_empty(weights)
-            rows_id, cols_id = sp.csgraph.min_weight_full_bipartite_matching(weights, maximize=True)
+            # this is a workaround when there are disconnected components in the graph
+            fill_value = -1.0
+            _fill_empty(weights, fill_value=fill_value)
+            try:
+                rows_id, cols_id = sp.csgraph.min_weight_full_bipartite_matching(weights, maximize=True)
+            except ValueError:
+                # this is a workaround when then a node degree is low and does not allow a full match
+                # with this it falls back into the dense case which is slower but does not require a full match
+                coo_weights = weights.tocoo()
+                dense_weights = np.full(weights.shape, fill_value, dtype=np.float32)
+                dense_weights[coo_weights.row, coo_weights.col] = coo_weights.data
+                rows_id, cols_id = linear_sum_assignment(dense_weights, maximize=True)
+
+            # removing matching from filled values
+            values = weights[rows_id, cols_id]
+            is_filled = np.isclose(values, fill_value)
+            rows_id = rows_id[~is_filled]
+            cols_id = cols_id[~is_filled]
 
         # loading original group ids and filtering by the matches
         _mapped_ref = ref_group[reference_graph_key][rows_id].to_list()
