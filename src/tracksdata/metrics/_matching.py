@@ -26,14 +26,14 @@ class Matching(abc.ABC):
         When False, allows multiple matches per node.
     """
 
-    def __init__(self, optimal: bool = False):
+    def __init__(self, optimal: bool):
         """
         Initialize the matching strategy.
 
         Parameters
         ----------
-        optimal : bool, optional
-            Whether to perform optimal matching. Default is False.
+        optimal : bool
+            Whether to perform optimal matching.
         """
         self.optimal = optimal
 
@@ -102,14 +102,14 @@ class MaskMatching(Matching):
         Range: [0, 1]. Default is 0.5.
     """
 
-    def __init__(self, min_reference_intersection: float = 0.5, optimal: bool = False):
+    def __init__(self, min_reference_intersection: float = 0.5, optimal: bool = True):
         """
         Initialize mask-based matching.
 
         Parameters
         ----------
-        optimal : bool, optional
-            Whether to perform optimal matching. Default is False.
+        optimal : bool
+            Whether to perform optimal matching.
         min_reference_intersection : float, optional
             Minimum intersection over reference mask area. Default is 0.5.
         """
@@ -203,7 +203,7 @@ class DistanceMatching(Matching):
     def __init__(
         self,
         max_distance: float,
-        optimal: bool = False,
+        optimal: bool = True,
         attr_keys: tuple[str, ...] | None = None,
         scale: tuple[float, ...] | None = None,
     ):
@@ -212,8 +212,8 @@ class DistanceMatching(Matching):
 
         Parameters
         ----------
-        optimal : bool, optional
-            Whether to perform optimal matching. Default is False.
+        optimal : bool
+            Whether to perform optimal matching.
         max_distance : float
             Maximum distance for a match.
         attr_keys : tuple[str, ...], optional
