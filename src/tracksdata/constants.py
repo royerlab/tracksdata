@@ -58,7 +58,6 @@ class DefaultAttrKeys:
     X = "x"
     MASK = "mask"
     BBOX = "bbox"
-    CENTROID = ("z", "y", "x")
     SOLUTION = "solution"
     TRACKLET_ID = "tracklet_id"
 
