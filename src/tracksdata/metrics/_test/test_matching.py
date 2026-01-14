@@ -34,11 +34,11 @@ class TestMaskMatching:
         # Valid initialization
         matching = MaskMatching()
         assert matching.min_reference_intersection == 0.5
-        assert matching.optimal is False
-
-        matching = MaskMatching(min_reference_intersection=0.7, optimal=True)
-        assert matching.min_reference_intersection == 0.7
         assert matching.optimal is True
+
+        matching = MaskMatching(min_reference_intersection=0.7, optimal=False)
+        assert matching.min_reference_intersection == 0.7
+        assert matching.optimal is False
 
         # Invalid threshold
         with pytest.raises(ValueError, match="min_reference_intersection must be between 0 and 1"):
@@ -120,11 +120,11 @@ class TestDistanceMatching:
         """Test initialization with various parameters."""
         matching = DistanceMatching(max_distance=10.0)
         assert matching.max_distance == 10.0
-        assert matching.optimal is False
-
-        matching = DistanceMatching(max_distance=5.0, optimal=True, attr_keys=("y", "x"), scale=(2.0, 1.0))
-        assert matching.max_distance == 5.0
         assert matching.optimal is True
+
+        matching = DistanceMatching(max_distance=5.0, optimal=False, attr_keys=("y", "x"), scale=(2.0, 1.0))
+        assert matching.max_distance == 5.0
+        assert matching.optimal is False
         assert matching.attr_keys == ("y", "x")
         assert matching.scale == (2.0, 1.0)
 
