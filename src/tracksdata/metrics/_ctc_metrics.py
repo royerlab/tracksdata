@@ -9,13 +9,14 @@ from scipy.optimize import linear_sum_assignment
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.io._ctc import compressed_tracks_table
 from tracksdata.options import get_options
-from tracksdata.utils._dtypes import column_from_bytes, column_to_bytes
+from tracksdata.utils._dtypes import column_to_bytes
 from tracksdata.utils._logging import LOG
 from tracksdata.utils._multiprocessing import multiprocessing_apply
 
 if TYPE_CHECKING:
     from tracksdata.graph import RustWorkXGraph
     from tracksdata.graph._base_graph import BaseGraph
+    from tracksdata.metrics._matching import Matching
 
 
 def _fill_empty(weights: sp.csr_array, fill_value: float) -> None:
@@ -37,12 +38,7 @@ def _match_single_frame(
     groups_by_time: dict[str, dict[int, pl.DataFrame]],
     reference_graph_key: str,
     input_graph_key: str,
-    optimal_matching: bool = False,
-    min_reference_intersection: float = 0.5,
-    matching_mode: str = "mask",
-    max_distance: float | None = None,
-    centroid_keys: tuple[str, ...] = ("y", "x"),
-    scale: tuple[float, ...] | None = None,
+    matching: "Matching",
 ) -> tuple[list[int], list[int], list[float]]:
     """
     Match the groups of the reference and input graphs for a single time point.
@@ -57,20 +53,8 @@ def _match_single_frame(
         The key to obtain the track id from the reference graph.
     input_graph_key : str
         The key to obtain the track id from the input graph.
-    optimal_matching : bool, optional
-        Whether to solve the optimal matching.
-    min_reference_intersection : float, optional
-        The minimum intersection between the reference and input masks to be considered as a match.
-        Only used when matching_mode is "mask".
-    matching_mode : str, optional
-        The mode to use for matching. Either "mask" (default) for mask-based matching
-        or "distance" for centroid distance-based matching.
-    max_distance : float | None, optional
-        The maximum distance between centroids to be considered as a match.
-        Only used when matching_mode is "distance". If None, all pairs are considered.
-    centroid_keys : tuple[str, ...], optional
-        The keys to obtain the centroid coordinates from the dataframe.
-        Default is ("z", "y", "x") for 3D data.
+    matching : Matching
+        The matching strategy to use.
 
     Returns
     -------
@@ -85,64 +69,12 @@ def _match_single_frame(
     except KeyError:
         return [], [], []
 
-    _mapped_ref = []
-    _mapped_comp = []
-    _ious = []
-    _rows = []
-    _cols = []
+    # Use the matching strategy to compute weights
+    _mapped_ref, _mapped_comp, _rows, _cols, _ious = matching.compute_weights(
+        ref_group, comp_group, reference_graph_key, input_graph_key
+    )
 
-    if matching_mode == "distance":
-        # Distance-based matching using centroid coordinates
-        ref_centroids = ref_group.select(list(centroid_keys)).to_numpy()
-        comp_centroids = comp_group.select(list(centroid_keys)).to_numpy()
-
-        # Apply scale for anisotropic data
-        if scale is not None:
-            scale_arr = np.array(scale)
-            ref_centroids = ref_centroids * scale_arr
-            comp_centroids = comp_centroids * scale_arr
-
-        for i, (ref_id, ref_centroid) in enumerate(
-            zip(ref_group[reference_graph_key], ref_centroids, strict=True)
-        ):
-            for j, (comp_id, comp_centroid) in enumerate(
-                zip(comp_group[input_graph_key], comp_centroids, strict=True)
-            ):
-                dist = np.linalg.norm(ref_centroid - comp_centroid)
-                if max_distance is None or dist <= max_distance:
-                    _mapped_ref.append(ref_id)
-                    _mapped_comp.append(comp_id)
-                    _rows.append(i)
-                    _cols.append(j)
-                    # Use 1/(1+dist) so larger = better for bipartite matching
-                    _ious.append(1.0 / (1.0 + dist))
-    else:
-        # Mask-based matching (default)
-        if ref_group[DEFAULT_ATTR_KEYS.MASK].dtype == pl.Binary:
-            ref_group = column_from_bytes(ref_group, DEFAULT_ATTR_KEYS.MASK)
-            comp_group = column_from_bytes(comp_group, DEFAULT_ATTR_KEYS.MASK)
-
-        for i, (ref_id, ref_mask) in enumerate(
-            zip(ref_group[reference_graph_key], ref_group[DEFAULT_ATTR_KEYS.MASK], strict=True)
-        ):
-            for j, (comp_id, comp_mask) in enumerate(
-                zip(comp_group[input_graph_key], comp_group[DEFAULT_ATTR_KEYS.MASK], strict=True)
-            ):
-                # intersection over reference is used to select the matches
-                inter = ref_mask.intersection(comp_mask)
-                ctc_score = inter / ref_mask.size
-                if ctc_score > min_reference_intersection:
-                    _mapped_ref.append(ref_id)
-                    _mapped_comp.append(comp_id)
-                    _rows.append(i)
-                    _cols.append(j)
-
-                    # NOTE: there was something weird with IoU, the length when compared with `ctc_metrics`
-                    #       sometimes it had an extra element
-                    iou = inter / (ref_mask.size + comp_mask.size - inter)
-                    _ious.append(iou.item())
-
-    if optimal_matching and len(_rows) > 0:
+    if matching.optimal and len(_rows) > 0:
         LOG.info("Solving optimal matching ...")
 
         weights = sp.csr_array((_ious, (_rows, _cols)), dtype=np.float32)
@@ -184,12 +116,7 @@ def _matching_data(
     reference_graph: "BaseGraph",
     input_graph_key: str,
     reference_graph_key: str,
-    optimal_matching: bool = False,
-    min_reference_intersection: float = 0.5,
-    matching_mode: str = "mask",
-    max_distance: float | None = None,
-    centroid_keys: tuple[str, ...] | None = None,
-    scale: tuple[float, ...] | None = None,
+    matching: "Matching",
 ) -> dict[str, list[list]]:
     """
     Compute matching data for CTC metrics.
@@ -207,20 +134,8 @@ def _matching_data(
         Key to obtain the track id from the input graph.
     reference_graph_key : str
         Key to obtain the track id from the reference graph.
-    optimal_matching : bool, optional
-        Whether to solve the optimal matching.
-    min_reference_intersection : float, optional
-        Minimum coverage of a reference mask to be considered as a possible match.
-        Only used when matching_mode is "mask".
-    matching_mode : str, optional
-        The mode to use for matching. Either "mask" (default) for mask-based matching
-        or "distance" for centroid distance-based matching.
-    max_distance : float | None, optional
-        The maximum distance between centroids to be considered as a match.
-        Only used when matching_mode is "distance". If None, all pairs are considered.
-    centroid_keys : tuple[str, ...] | None, optional
-        The keys to obtain the centroid coordinates from the node attributes.
-        If None, defaults to DEFAULT_ATTR_KEYS.CENTROID (("z", "y", "x")).
+    matching : Matching
+        The matching strategy to use.
 
     Returns
     -------
@@ -236,25 +151,20 @@ def _matching_data(
 
     n_workers = get_options().n_workers
 
-    # Set default centroid keys
-    if centroid_keys is None:
-        centroid_keys = DEFAULT_ATTR_KEYS.CENTROID
+    # Get required attributes from the matching strategy
+    required_attrs = matching.get_required_attrs(attr_keys=reference_graph.node_attr_keys())
 
-    # Determine which attributes to fetch based on matching mode
-    if matching_mode == "distance":
-        attr_keys = [DEFAULT_ATTR_KEYS.T, None, *centroid_keys]  # None placeholder for tracklet_id_key
-    else:
-        attr_keys = [DEFAULT_ATTR_KEYS.T, None, DEFAULT_ATTR_KEYS.MASK]
+    # Check if we need to serialize masks for multiprocessing
+    use_mask_serialization = n_workers > 1 and DEFAULT_ATTR_KEYS.MASK in required_attrs
 
     # computing unique labels for each graph
     for name, graph, tracklet_id_key in [
         ("ref", reference_graph, reference_graph_key),
         ("comp", input_graph, input_graph_key),
     ]:
-        # Replace placeholder with actual tracklet_id_key
-        fetch_keys = [tracklet_id_key if k is None else k for k in attr_keys]
-        nodes_df = graph.node_attrs(attr_keys=fetch_keys)
-        if n_workers > 1 and matching_mode == "mask":
+        attr_keys = [DEFAULT_ATTR_KEYS.T, tracklet_id_key, *required_attrs]
+        nodes_df = graph.node_attrs(attr_keys=attr_keys)
+        if use_mask_serialization:
             # required by multiprocessing
             nodes_df = column_to_bytes(nodes_df, DEFAULT_ATTR_KEYS.MASK)
         labels = {}
@@ -282,22 +192,17 @@ def _matching_data(
 
     mapped_ref = []
     mapped_comp = []
-    ious = []
+    scores = []
 
     match_func = partial(
         _match_single_frame,
         groups_by_time=groups_by_time,
         reference_graph_key=reference_graph_key,
         input_graph_key=input_graph_key,
-        optimal_matching=optimal_matching,
-        min_reference_intersection=min_reference_intersection,
-        matching_mode=matching_mode,
-        max_distance=max_distance,
-        centroid_keys=centroid_keys,
-        scale=scale,
+        matching=matching,
     )
 
-    for _mapped_ref, _mapped_comp, _ious in multiprocessing_apply(
+    for _mapped_ref, _mapped_comp, _weights in multiprocessing_apply(
         func=match_func,
         sequence=range(n_time_points),
         desc="Matching nodes between graphs",
@@ -305,11 +210,11 @@ def _matching_data(
     ):
         mapped_ref.append(_mapped_ref)
         mapped_comp.append(_mapped_comp)
-        ious.append(_ious)
+        scores.append(_weights)
 
     result["mapped_ref"] = mapped_ref
     result["mapped_comp"] = mapped_comp
-    result["ious"] = ious
+    result["scores"] = scores
 
     return result
 
@@ -351,10 +256,17 @@ def compute_ctc_metrics_data(
             - ious: A list of lists containing the intersection over union values
                     between mapped reference and computed masks.
     """
+    from tracksdata.metrics._matching import MaskMatching
+
     input_tracks = compressed_tracks_table(input_graph)
     reference_tracks = compressed_tracks_table(reference_graph)
 
-    matching_data = _matching_data(input_graph, reference_graph, input_tracklet_id_key, reference_tracklet_id_key)
+    # Use default mask matching for CTC metrics
+    matching = MaskMatching(optimal=False)
+    matching_data = _matching_data(
+        input_graph, reference_graph, input_tracklet_id_key, reference_tracklet_id_key, matching
+    )
+    matching_data["ious"] = matching_data.pop("scores")
 
     return input_tracks, reference_tracks, matching_data
 
