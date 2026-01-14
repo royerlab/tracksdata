@@ -62,7 +62,7 @@ class TestMaskMatching:
         comp_group = graph2.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.MASK])
 
         matching = MaskMatching(min_reference_intersection=0.5)
-        mapped_ref, mapped_comp, rows, cols, weights = matching.compute_weights(
+        mapped_ref, _, _, _, weights = matching.compute_weights(
             ref_group, comp_group, DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.NODE_ID
         )
 
@@ -84,7 +84,7 @@ class TestMaskMatching:
         ref_group = graph1.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.MASK])
         comp_group = graph2.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.MASK])
 
-        mapped_ref, mapped_comp, rows, cols, weights = matching.compute_weights(
+        mapped_ref, _, _, _, weights = matching.compute_weights(
             ref_group, comp_group, DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.NODE_ID
         )
 
@@ -106,7 +106,7 @@ class TestMaskMatching:
         ref_group = graph1.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.MASK])
         comp_group = graph2.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.MASK])
 
-        mapped_ref, mapped_comp, rows, cols, weights = matching.compute_weights(
+        mapped_ref, _, _, _, _ = matching.compute_weights(
             ref_group, comp_group, DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.NODE_ID
         )
 
@@ -147,7 +147,7 @@ class TestDistanceMatching:
         comp_group = graph2.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, "y", "x"])
 
         matching = DistanceMatching(max_distance=3.0, attr_keys=("y", "x"))
-        mapped_ref, mapped_comp, rows, cols, weights = matching.compute_weights(
+        mapped_ref, _, _, _, weights = matching.compute_weights(
             ref_group, comp_group, DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.NODE_ID
         )
 
@@ -169,7 +169,7 @@ class TestDistanceMatching:
         comp_group = graph2.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, "y", "x"])
 
         matching = DistanceMatching(max_distance=10.0, attr_keys=("y", "x"))
-        mapped_ref, mapped_comp, rows, cols, weights = matching.compute_weights(
+        mapped_ref, _, _, _, _ = matching.compute_weights(
             ref_group, comp_group, DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.NODE_ID
         )
 
@@ -190,7 +190,7 @@ class TestDistanceMatching:
         comp_group = graph2.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, "z", "y", "x"])
 
         matching = DistanceMatching(max_distance=3.0)
-        mapped_ref, mapped_comp, rows, cols, weights = matching.compute_weights(
+        mapped_ref, _, _, _, weights = matching.compute_weights(
             ref_group, comp_group, DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.NODE_ID
         )
 
@@ -271,7 +271,7 @@ class TestDistanceMatching:
 
         matching = DistanceMatching(max_distance=3.0, attr_keys=("y", "x"), scale=(1.0, 2.0, 3.0))
 
-        with pytest.raises(ValueError, match="Scale length .* must match attr_keys length"):
+        with pytest.raises(ValueError, match=r"Scale length .* must match attr_keys length"):
             matching.compute_weights(ref_group, comp_group, DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.NODE_ID)
 
 
