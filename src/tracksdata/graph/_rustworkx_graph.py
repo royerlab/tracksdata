@@ -14,6 +14,7 @@ from tracksdata.graph._mapped_graph_mixin import MappedGraphMixin
 from tracksdata.graph.filters._base_filter import BaseFilter
 from tracksdata.utils._cache import cache_method
 from tracksdata.utils._dataframe import unpack_array_attrs
+from tracksdata.utils._dtypes import AttrSchema, process_attr_key_args
 from tracksdata.utils._logging import LOG
 from tracksdata.utils._signal import is_signal_on
 
@@ -317,15 +318,22 @@ class RustWorkXGraph(BaseGraph):
         super().__init__()
 
         self._time_to_nodes: dict[int, list[int]] = {}
-        self._node_attr_keys: list[str] = []
-        self._edge_attr_keys: list[str] = []
+        self._node_attr_schemas: dict[str, AttrSchema] = {}
+        self._edge_attr_schemas: dict[str, AttrSchema] = {}
         self._overlaps: list[list[int, 2]] = []
+
+        # Add default node attributes with inferred schemas
+        self._node_attr_schemas[DEFAULT_ATTR_KEYS.NODE_ID] = AttrSchema(
+            key=DEFAULT_ATTR_KEYS.NODE_ID,
+            dtype=pl.Int64,
+        )
+        self._node_attr_schemas[DEFAULT_ATTR_KEYS.T] = AttrSchema(
+            key=DEFAULT_ATTR_KEYS.T,
+            dtype=pl.Int64,
+        )
 
         if rx_graph is None:
             self._graph = rx.PyDiGraph(attrs={})
-            self._node_attr_keys.append(DEFAULT_ATTR_KEYS.NODE_ID)
-            self._node_attr_keys.append(DEFAULT_ATTR_KEYS.T)
-
         else:
             self._graph = rx_graph
 
@@ -341,9 +349,8 @@ class RustWorkXGraph(BaseGraph):
                     "old_attrs": self._graph.attrs,
                 }
 
-            unique_node_attr_keys = set()
-            unique_edge_attr_keys = set()
-
+            # Process nodes: build time index and infer schemas
+            first_node_attrs = None
             for node_id in self._graph.node_indices():
                 node_attrs = self._graph[node_id]
                 try:
@@ -355,15 +362,35 @@ class RustWorkXGraph(BaseGraph):
 
                 self._time_to_nodes.setdefault(int(t), []).append(node_id)
 
-                unique_node_attr_keys.update(node_attrs.keys())
+                # Store first node's attrs to infer schemas
+                if first_node_attrs is None:
+                    first_node_attrs = node_attrs
 
+            # Infer node schemas from first node
+            if first_node_attrs is not None:
+                for key, value in first_node_attrs.items():
+                    if key == DEFAULT_ATTR_KEYS.NODE_ID:
+                        continue
+                    dtype = pl.Series([value]).dtype
+                    self._node_attr_schemas[key] = AttrSchema(key=key, dtype=dtype)
+
+            # Process edges: set edge IDs and infer schemas
             edge_idx_map = self._graph.edge_index_map()
+            first_edge_attrs = None
             for edge_idx, (_, _, attr) in edge_idx_map.items():
-                unique_edge_attr_keys.update(attr.keys())
                 attr[DEFAULT_ATTR_KEYS.EDGE_ID] = edge_idx
+                # Store first edge's attrs to infer schemas
+                if first_edge_attrs is None:
+                    first_edge_attrs = attr
 
-            self._node_attr_keys = [DEFAULT_ATTR_KEYS.NODE_ID, *unique_node_attr_keys]
-            self._edge_attr_keys = list(unique_edge_attr_keys)
+            # Infer edge schemas from first edge
+            if first_edge_attrs is not None:
+                for key, value in first_edge_attrs.items():
+                    # TODO: check if EDGE_SOURCE and EDGE_TARGET should be also ignored or in the schema
+                    if key == DEFAULT_ATTR_KEYS.EDGE_ID:
+                        continue
+                    dtype = pl.Series([value]).dtype
+                    self._edge_attr_schemas[key] = AttrSchema(key=key, dtype=dtype)
 
     @property
     def rx_graph(self) -> rx.PyDiGraph:
@@ -864,33 +891,44 @@ class RustWorkXGraph(BaseGraph):
         """
         Get the keys of the attributes of the nodes.
         """
-        return self._node_attr_keys.copy()
+        return list(self._node_attr_schemas.keys())
 
     def edge_attr_keys(self) -> list[str]:
         """
         Get the keys of the attributes of the edges.
         """
-        return self._edge_attr_keys.copy()
+        return list(self._edge_attr_schemas.keys())
 
-    def add_node_attr_key(self, key: str, default_value: Any) -> None:
+    def add_node_attr_key(
+        self,
+        key_or_schema: str | AttrSchema,
+        dtype: pl.DataType | None = None,
+        default_value: Any = None,
+    ) -> None:
         """
         Add a new attribute key to the graph.
         All existing nodes will have the default value for the new attribute key.
 
         Parameters
         ----------
-        key : str
-            The key of the new attribute.
-        default_value : Any
+        key_or_schema : str | AttrSchema
+            Either the key name (str) or an AttrSchema object containing key, dtype, and default_value.
+        dtype : pl.DataType | None
+            The polars data type for this attribute. Required when key_or_schema is a string.
+        default_value : Any, optional
             The default value for existing nodes for the new attribute key.
+            If None, will be inferred from dtype.
         """
-        if key in self.node_attr_keys():
-            raise ValueError(f"Attribute key {key} already exists")
+        # Process arguments and create validated schema
+        schema = process_attr_key_args(key_or_schema, dtype, default_value, self._node_attr_schemas)
 
-        self._node_attr_keys.append(key)
+        # Store schema
+        self._node_attr_schemas[schema.key] = schema
+
+        # Add to all existing nodes
         rx_graph = self.rx_graph
         for node_id in rx_graph.node_indices():
-            rx_graph[node_id][key] = default_value
+            rx_graph[node_id][schema.key] = schema.default_value
 
     def remove_node_attr_key(self, key: str) -> None:
         """
@@ -902,28 +940,39 @@ class RustWorkXGraph(BaseGraph):
         if key in (DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.T):
             raise ValueError(f"Cannot remove required node attribute key {key}")
 
-        self._node_attr_keys.remove(key)
+        del self._node_attr_schemas[key]
         for node_attr in self.rx_graph.nodes():
             node_attr.pop(key, None)
 
-    def add_edge_attr_key(self, key: str, default_value: Any) -> None:
+    def add_edge_attr_key(
+        self,
+        key_or_schema: str | AttrSchema,
+        dtype: pl.DataType | None = None,
+        default_value: Any = None,
+    ) -> None:
         """
         Add a new attribute key to the graph.
         All existing edges will have the default value for the new attribute key.
 
         Parameters
         ----------
-        key : str
-            The key of the new attribute.
-        default_value : Any
+        key_or_schema : str | AttrSchema
+            Either the key name (str) or an AttrSchema object containing key, dtype, and default_value.
+        dtype : pl.DataType | None
+            The polars data type for this attribute. Required when key_or_schema is a string.
+        default_value : Any, optional
             The default value for existing edges for the new attribute key.
+            If None, will be inferred from dtype.
         """
-        if key in self.edge_attr_keys():
-            raise ValueError(f"Attribute key {key} already exists")
+        # Process arguments and create validated schema
+        schema = process_attr_key_args(key_or_schema, dtype, default_value, self._edge_attr_schemas)
 
-        self._edge_attr_keys.append(key)
+        # Store schema
+        self._edge_attr_schemas[schema.key] = schema
+
+        # Add to all existing edges
         for edge_attr in self.rx_graph.edges():
-            edge_attr[key] = default_value
+            edge_attr[schema.key] = schema.default_value
 
     def remove_edge_attr_key(self, key: str) -> None:
         """
@@ -932,7 +981,7 @@ class RustWorkXGraph(BaseGraph):
         if key not in self.edge_attr_keys():
             raise ValueError(f"Edge attribute key {key} does not exist")
 
-        self._edge_attr_keys.remove(key)
+        del self._edge_attr_schemas[key]
         for edge_attr in self.rx_graph.edges():
             edge_attr.pop(key, None)
 

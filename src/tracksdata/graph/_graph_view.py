@@ -11,6 +11,7 @@ from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.graph._mapped_graph_mixin import MappedGraphMixin
 from tracksdata.graph._rustworkx_graph import IndexedRXGraph, RustWorkXGraph, RXFilter
 from tracksdata.graph.filters._indexed_filter import IndexRXFilter
+from tracksdata.utils._dtypes import AttrSchema
 from tracksdata.utils._signal import is_signal_on
 
 
@@ -235,16 +236,33 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
     def edge_attr_keys(self) -> list[str]:
         return self._root.edge_attr_keys() if self._edge_attr_keys is None else self._edge_attr_keys
 
-    def add_node_attr_key(self, key: str, default_value: Any) -> None:
-        self._root.add_node_attr_key(key, default_value)
+    def add_node_attr_key(
+        self,
+        key_or_schema: str | AttrSchema,
+        dtype: pl.DataType | None = None,
+        default_value: Any = None,
+    ) -> None:
+        # Delegate to root with all parameters (root handles overloading)
+        self._root.add_node_attr_key(key_or_schema, dtype, default_value)
+
+        # Extract key for local tracking
+        if isinstance(key_or_schema, AttrSchema):
+            key = key_or_schema.key
+        else:
+            key = key_or_schema
+
         if self._node_attr_keys is not None:
             self._node_attr_keys.append(key)
-        # because attributes are passed by reference, we need don't need if both are rustworkx graphs
+
+        # Sync logic
         if not self._is_root_rx_graph:
             if self.sync:
+                # Get the schema from root to get the actual default value used
+                schema = self._root._node_attr_schemas[key]
+                # Apply to local rx_graph
                 rx_graph = self.rx_graph
                 for node_id in rx_graph.node_indices():
-                    rx_graph[node_id][key] = default_value
+                    rx_graph[node_id][key] = schema.default_value
             else:
                 self._out_of_sync = True
 
@@ -260,15 +278,32 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
             else:
                 self._out_of_sync = True
 
-    def add_edge_attr_key(self, key: str, default_value: Any) -> None:
-        self._root.add_edge_attr_key(key, default_value)
+    def add_edge_attr_key(
+        self,
+        key_or_schema: str | AttrSchema,
+        dtype: pl.DataType | None = None,
+        default_value: Any = None,
+    ) -> None:
+        # Delegate to root with all parameters (root handles overloading)
+        self._root.add_edge_attr_key(key_or_schema, dtype, default_value)
+
+        # Extract key for local tracking
+        if isinstance(key_or_schema, AttrSchema):
+            key = key_or_schema.key
+        else:
+            key = key_or_schema
+
         if self._edge_attr_keys is not None:
             self._edge_attr_keys.append(key)
-        # because attributes are passed by reference, we need don't need if both are rustworkx graphs
+
+        # Sync logic
         if not self._is_root_rx_graph:
             if self.sync:
+                # Get the schema from root to get the actual default value used
+                schema = self._root._edge_attr_schemas[key]
+                # Apply to local rx_graph
                 for _, _, edge_attr in self.rx_graph.weighted_edge_list():
-                    edge_attr[key] = default_value
+                    edge_attr[key] = schema.default_value
             else:
                 self._out_of_sync = True
 
