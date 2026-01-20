@@ -1352,6 +1352,8 @@ def test_from_other_with_edges(
 ) -> None:
     """Ensure from_other preserves structure across backend conversions."""
     # Create source graph with nodes, edges, and attributes
+    graph_backend.update_metadata(special_key="special_value")
+
     graph_backend.add_node_attr_key("x", 0.0)
     graph_backend.add_edge_attr_key("weight", 0.0)
     graph_backend.add_edge_attr_key("type", "forward")
@@ -1376,6 +1378,8 @@ def test_from_other_with_edges(
     # Verify node and edge attribute keys are copied
     assert set(new_graph.node_attr_keys()) == set(graph_backend.node_attr_keys())
     assert set(new_graph.edge_attr_keys()) == set(graph_backend.edge_attr_keys())
+
+    assert new_graph.metadata() == graph_backend.metadata()
 
     # Verify edge attributes are copied correctly
     source_edges = graph_backend.edge_attrs(attr_keys=["weight", "type"])

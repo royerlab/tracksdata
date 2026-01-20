@@ -996,6 +996,9 @@ class BaseGraph(abc.ABC):
         """
         Create a graph from another graph.
 
+        Important:
+        Metadata is copied by reference, so if the content is modified in one graph, it will be modified in the other.
+
         Parameters
         ----------
         other : BaseGraph
@@ -1014,6 +1017,7 @@ class BaseGraph(abc.ABC):
         node_attrs = node_attrs.drop(DEFAULT_ATTR_KEYS.NODE_ID)
 
         graph = cls(**kwargs)
+        graph.update_metadata(**other.metadata())
 
         for col in node_attrs.columns:
             if col != DEFAULT_ATTR_KEYS.T:
@@ -1514,11 +1518,18 @@ class BaseGraph(abc.ABC):
                 for edge_attr in rx_graph.edges():
                     edge_attr[dst_k] = edge_attr.pop(src_k)
 
-        indexed_graph = IndexedRXGraph(
-            rx_graph=rx_graph,
-            node_id_map=node_id_map,
-            **kwargs,
-        )
+        if cls == IndexedRXGraph:
+            indexed_graph = IndexedRXGraph(
+                rx_graph=rx_graph,
+                node_id_map=node_id_map,
+                **kwargs,
+            )
+        else:
+            # kwargs is used in the final call to cls.from_other
+            indexed_graph = IndexedRXGraph(
+                rx_graph=rx_graph,
+                node_id_map=node_id_map,
+            )
 
         node_attr_key = indexed_graph.node_attr_keys()
         if DEFAULT_ATTR_KEYS.MASK in node_attr_key and DEFAULT_ATTR_KEYS.BBOX in node_attr_key:
@@ -1633,6 +1644,59 @@ class BaseGraph(abc.ABC):
             metadata=geff_metadata,
             zarr_format=zarr_format,
         )
+
+    @abc.abstractmethod
+    def metadata(self) -> dict[str, Any]:
+        """
+        Return the metadata of the graph.
+
+        Returns
+        -------
+        dict[str, Any]
+            The metadata of the graph as a dictionary.
+
+        Examples
+        --------
+        ```python
+        metadata = graph.metadata()
+        print(metadata["shape"])
+        ```
+        """
+
+    @abc.abstractmethod
+    def update_metadata(self, **kwargs) -> None:
+        """
+        Set or update metadata for the graph.
+
+        Parameters
+        ----------
+        **kwargs : Any
+            The metadata items to set by key. Values will be stored as JSON.
+
+        Examples
+        --------
+        ```python
+        graph.update_metadata(shape=[1, 25, 25], path="path/to/image.ome.zarr")
+        graph.update_metadata(description="Tracking data from experiment 1")
+        ```
+        """
+
+    @abc.abstractmethod
+    def remove_metadata(self, key: str) -> None:
+        """
+        Remove a metadata key from the graph.
+
+        Parameters
+        ----------
+        key : str
+            The key of the metadata to remove.
+
+        Examples
+        --------
+        ```python
+        graph.remove_metadata("shape")
+        ```
+        """
 
     def to_traccuracy_graph(self, array_view_kwargs: dict[str, Any] | None = None) -> "TrackingGraph":
         """
@@ -1755,59 +1819,6 @@ class NodeInterface:
             .rows(named=True)[0]
         )
         return data
-
-    @abc.abstractmethod
-    def metadata(self) -> dict[str, Any]:
-        """
-        Return the metadata of the graph.
-
-        Returns
-        -------
-        dict[str, Any]
-            The metadata of the graph as a dictionary.
-
-        Examples
-        --------
-        ```python
-        metadata = graph.metadata()
-        print(metadata["shape"])
-        ```
-        """
-
-    @abc.abstractmethod
-    def update_metadata(self, **kwargs) -> None:
-        """
-        Set or update metadata for the graph.
-
-        Parameters
-        ----------
-        **kwargs : Any
-            The metadata items to set by key. Values will be stored as JSON.
-
-        Examples
-        --------
-        ```python
-        graph.update_metadata(shape=[1, 25, 25], path="path/to/image.ome.zarr")
-        graph.update_metadata(description="Tracking data from experiment 1")
-        ```
-        """
-
-    @abc.abstractmethod
-    def remove_metadata(self, key: str) -> None:
-        """
-        Remove a metadata key from the graph.
-
-        Parameters
-        ----------
-        key : str
-            The key of the metadata to remove.
-
-        Examples
-        --------
-        ```python
-        graph.remove_metadata("shape")
-        ```
-        """
 
     @abc.abstractmethod
     def edge_list(self) -> list[list[int, int]]:
