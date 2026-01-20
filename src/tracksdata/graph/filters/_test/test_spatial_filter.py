@@ -35,7 +35,7 @@ def sample_graph() -> RustWorkXGraph:
 def sample_bbox_graph() -> RustWorkXGraph:
     """Create a sample graph with nodes for bounding box testing."""
     graph = RustWorkXGraph()
-    graph.add_node_attr_key("bbox", dtype=pl.List(pl.Int64), default_value=[0, 0, 0, 0, 0, 0])
+    graph.add_node_attr_key("bbox", dtype=pl.Array(pl.Int64, 6))
 
     # Add some nodes with bounding box coordinates
     nodes = [
@@ -191,7 +191,7 @@ def test_spatial_filter_with_edges() -> None:
 def test_bbox_spatial_filter_overlaps() -> None:
     """Test BoundingBoxSpatialFilter overlaps with existing nodes."""
     graph = RustWorkXGraph()
-    graph.add_node_attr_key("bbox", dtype=pl.List(pl.Int64), default_value=[0, 0, 0, 0])
+    graph.add_node_attr_key("bbox", dtype=pl.Array(pl.Int64, 4))
     # Add nodes with bounding boxes
     bboxes = [
         [0, 20, 10, 30],  # Node 1
@@ -214,7 +214,7 @@ def test_bbox_spatial_filter_overlaps() -> None:
 def test_bbox_spatial_filter_with_edges() -> None:
     """Test SpatialFilter preserves edges in subgraphs."""
     graph = RustWorkXGraph()
-    graph.add_node_attr_key("bbox", dtype=pl.List(pl.Int64), default_value=[0, 0, 0, 0])
+    graph.add_node_attr_key("bbox", dtype=pl.Array(pl.Int64, 4))
     graph.add_edge_attr_key("weight", dtype=pl.Float64)
 
     # Add nodes and edge
@@ -263,7 +263,7 @@ def test_bbox_spatial_filter_querying(sample_bbox_graph: RustWorkXGraph) -> None
 def test_bbox_spatial_filter_dimensions() -> None:
     """Test BoundingBoxSpatialFilter with different coordinate dimensions."""
     graph = RustWorkXGraph()
-    graph.add_node_attr_key("bbox", dtype=pl.List(pl.Int64), default_value=[0, 0, 0, 0, 0, 0])
+    graph.add_node_attr_key("bbox", dtype=pl.Array(pl.Int64, 6))
     graph.add_node({"t": 0, "bbox": [0, 10, 20, 1, 15, 25]})
 
     # Test 3D coordinates
@@ -284,7 +284,7 @@ def test_bbox_spatial_filter_dimensions() -> None:
 def test_bbox_spatial_filter_error_handling() -> None:
     """Test error handling for mismatched min/max attribute lengths."""
     graph = RustWorkXGraph()
-    graph.add_node_attr_key("bbox", dtype=pl.List(pl.Int64), default_value=[0, 0, 0, 0])
+    graph.add_node_attr_key("bbox", dtype=pl.Array(pl.Int64, 4))
     graph.add_node({"t": 0, "bbox": [10, 20, 15, 25, 14]})
     # Test mismatched min/max attributes length
     with pytest.raises(ValueError, match="Bounding box coordinates must have even number of dimensions"):
