@@ -370,18 +370,24 @@ class Mask:
         if image_shape is not None:
             self._crop_overhang(image_shape)
 
-    def regionprops(self) -> "RegionProperties":
+    def regionprops(self, spacing: tuple[float, ...] | None = None) -> "RegionProperties":
         """
         Compute scikit-image regionprops for this mask.
 
         The computation is aware of the mask bounding box, so coordinate-based
         properties (e.g. centroid, coords) are returned in absolute
         image coordinates.
+
+        Parameters
+        ----------
+        spacing : tuple[float, ...] | None
+            The spacing of the image in each dimension (scale).
         """
         props = regionprops(
             self._mask.astype(np.uint16),
             cache=True,
             offset=tuple(self._bbox[: self._mask.ndim]),
+            spacing=spacing,
         )
 
         if len(props) != 1:
