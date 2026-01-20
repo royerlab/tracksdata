@@ -57,6 +57,19 @@ class TestRustWorkXGraphDtype:
         assert default.dtype == np.float64
         np.testing.assert_array_equal(default, np.zeros(4, dtype=np.float64))
 
+    def test_add_node_attr_key_with_nd_array_dtype(self):
+        """Test adding node attribute with ndarray dtype."""
+        graph = RustWorkXGraph()
+        graph.add_node_attr_key("something", pl.Array(pl.Float64, (5, 3, 2)))
+
+        assert graph._node_attr_schemas["something"].dtype == pl.Array(pl.Float64, (5, 3, 2))
+        default = graph._node_attr_schemas["something"].default_value
+
+        assert isinstance(default, np.ndarray)
+        assert default.shape == (5, 3, 2)
+        assert default.dtype == np.float64
+        np.testing.assert_array_equal(default, np.zeros((5, 3, 2), dtype=np.float64))
+
     def test_add_node_attr_key_with_schema_object(self):
         """Test adding node attribute using AttrSchema object."""
         graph = RustWorkXGraph()
@@ -96,15 +109,15 @@ class TestRustWorkXGraphDtype:
         graph = RustWorkXGraph()
 
         # Add a node
-        node_id = graph.add_node({"t": 0})
+        graph.add_node({"t": 0})
 
         # Add new attribute
         graph.add_node_attr_key("score", pl.Float64)
 
         # Verify the default was applied
-        node_attrs = graph.rx_graph[node_id]
-        assert "score" in node_attrs
-        assert node_attrs["score"] == -1.0
+        node_attrs = graph.node_attrs()
+        assert "score" in node_attrs.columns
+        assert node_attrs["score"].item() == -1.0
 
     def test_add_edge_attr_key_with_dtype_only(self):
         """Test adding edge attribute with dtype only."""
@@ -139,9 +152,9 @@ class TestRustWorkXGraphDtype:
         graph.add_edge_attr_key("weight", pl.Float64, default_value=1.0)
 
         # Verify the default was applied
-        edge_attrs = graph.rx_graph.get_edge_data(n1, n2)
-        assert "weight" in edge_attrs
-        assert edge_attrs["weight"] == 1.0
+        edge_attrs = graph.edge_attrs()
+        assert "weight" in edge_attrs.columns
+        assert edge_attrs["weight"].item() == 1.0
 
     def test_node_attr_keys_returns_keys(self):
         """Test that node_attr_keys returns the correct keys."""
