@@ -3,6 +3,7 @@ from functools import partial
 from typing import Any
 
 import numpy as np
+import polars as pl
 from numpy.typing import NDArray
 from skimage.measure._regionprops import RegionProperties, regionprops
 from typing_extensions import override
@@ -127,18 +128,21 @@ class RegionPropsNodes(BaseNodesOperator):
         Initialize the node attributes for the graph.
         """
         if DEFAULT_ATTR_KEYS.MASK not in graph.node_attr_keys():
-            graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
+            graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object, None)
 
         if DEFAULT_ATTR_KEYS.BBOX not in graph.node_attr_keys():
-            graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, np.zeros(2 * (ndims - 1), dtype=int))
+            bbox_size = 2 * (ndims - 1)
+            graph.add_node_attr_key(
+                DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, bbox_size), np.zeros(bbox_size, dtype=int)
+            )
 
         if "label" in self.attr_keys() and "label" not in graph.node_attr_keys():
-            graph.add_node_attr_key("label", 0)
+            graph.add_node_attr_key("label", pl.Int64, 0)
 
         # initialize the remaining attribute keys
         for attr_key in axis_names + self.attr_keys():
             if attr_key not in graph.node_attr_keys():
-                graph.add_node_attr_key(attr_key, -1.0)
+                graph.add_node_attr_key(attr_key, pl.Float64, -1.0)
 
     def attr_keys(self) -> list[str]:
         """

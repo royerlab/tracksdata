@@ -439,6 +439,10 @@ def validate_default_value_dtype_compatibility(default_value: Any, dtype: pl.Dat
     >>> validate_default_value_dtype_compatibility("string", pl.Int64)
     ValueError: default_value 'string' (type: str) is incompatible with dtype Int64...
     """
+    # Skip validation for Object and Binary types - they accept any value
+    if dtype in (pl.Object, pl.Binary):
+        return
+
     try:
         # Try to create a polars series and cast
         s = pl.Series([default_value])

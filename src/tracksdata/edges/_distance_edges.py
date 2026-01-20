@@ -2,6 +2,7 @@ from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
+import polars as pl
 from scipy.spatial import KDTree
 
 from tracksdata.attrs import NodeAttr
@@ -110,7 +111,7 @@ class DistanceEdges(BaseEdgesOperator):
         Initialize the edge attributes for the graph.
         """
         if self.output_key not in graph.edge_attr_keys():
-            graph.add_edge_attr_key(self.output_key, default_value=-99999.0)
+            graph.add_edge_attr_key(self.output_key, pl.Float64, default_value=-99999.0)
 
     def _add_edges_per_time(
         self,

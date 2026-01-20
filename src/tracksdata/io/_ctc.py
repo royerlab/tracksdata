@@ -220,7 +220,7 @@ def from_ctc(
     )
 
     # is duplicating an attribute that bad?
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACKLET_ID, -1)
+    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACKLET_ID, pl.Int64, -1)
     graph.update_node_attrs(
         node_ids=nodes_df[DEFAULT_ATTR_KEYS.NODE_ID].to_list(),
         attrs={

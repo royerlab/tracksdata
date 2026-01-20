@@ -21,7 +21,6 @@ from tracksdata.utils._cache import cache_method
 from tracksdata.utils._dtypes import (
     AttrSchema,
     column_to_numpy,
-    infer_default_value,
     polars_dtype_to_numpy_dtype,
 )
 from tracksdata.utils._logging import LOG
@@ -1096,13 +1095,13 @@ class BaseGraph(abc.ABC):
         )
 
         if matched_node_id_key not in self.node_attr_keys():
-            self.add_node_attr_key(matched_node_id_key, -1)
+            self.add_node_attr_key(matched_node_id_key, pl.Int64, default_value=-1)
 
         if match_score_key not in self.node_attr_keys():
-            self.add_node_attr_key(match_score_key, 0.0)
+            self.add_node_attr_key(match_score_key, pl.Float64, default_value=0.0)
 
         if matched_edge_mask_key not in self.edge_attr_keys():
-            self.add_edge_attr_key(matched_edge_mask_key, False)
+            self.add_edge_attr_key(matched_edge_mask_key, pl.Boolean, default_value=False)
 
         node_ids = functools.reduce(operator.iadd, matching_data["mapped_comp"])
         other_ids = functools.reduce(operator.iadd, matching_data["mapped_ref"])
@@ -1172,8 +1171,9 @@ class BaseGraph(abc.ABC):
 
         for col in node_attrs.columns:
             if col != DEFAULT_ATTR_KEYS.T:
-                first_value = node_attrs[col].first()
-                graph.add_node_attr_key(col, infer_default_value(first_value))
+                # Use the dtype from the source DataFrame
+                dtype = node_attrs[col].dtype
+                graph.add_node_attr_key(col, dtype)
 
         if graph.supports_custom_indices():
             new_node_ids = graph.bulk_add_nodes(
@@ -1197,7 +1197,9 @@ class BaseGraph(abc.ABC):
 
         for col in edge_attrs.columns:
             if col not in [DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET]:
-                graph.add_edge_attr_key(col, edge_attrs[col].first())
+                # Use the dtype from the source DataFrame
+                dtype = edge_attrs[col].dtype
+                graph.add_edge_attr_key(col, dtype)
 
         edge_attrs = edge_attrs.with_columns(
             edge_attrs[col].map_elements(node_map.get, return_dtype=pl.Int64).alias(col)

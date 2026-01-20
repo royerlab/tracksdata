@@ -371,7 +371,11 @@ class RustWorkXGraph(BaseGraph):
                 for key, value in first_node_attrs.items():
                     if key == DEFAULT_ATTR_KEYS.NODE_ID:
                         continue
-                    dtype = pl.Series([value]).dtype
+                    try:
+                        dtype = pl.Series([value]).dtype
+                    except (ValueError, TypeError):
+                        # If polars can't infer dtype (e.g., for complex objects), use Object
+                        dtype = pl.Object
                     self._node_attr_schemas[key] = AttrSchema(key=key, dtype=dtype)
 
             # Process edges: set edge IDs and infer schemas
@@ -389,7 +393,11 @@ class RustWorkXGraph(BaseGraph):
                     # TODO: check if EDGE_SOURCE and EDGE_TARGET should be also ignored or in the schema
                     if key == DEFAULT_ATTR_KEYS.EDGE_ID:
                         continue
-                    dtype = pl.Series([value]).dtype
+                    try:
+                        dtype = pl.Series([value]).dtype
+                    except (ValueError, TypeError):
+                        # If polars can't infer dtype (e.g., for complex objects), use Object
+                        dtype = pl.Object
                     self._edge_attr_schemas[key] = AttrSchema(key=key, dtype=dtype)
 
     @property

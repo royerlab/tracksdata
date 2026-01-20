@@ -623,7 +623,7 @@ class SQLGraph(BaseGraph):
             schemas = self._edge_attr_schemas
 
         # Return schema overrides for special types that need explicit casting
-        return {key: schema.dtype for key, schema in schemas.items() if isinstance(schema.dtype, pl.Boolean)}
+        return {key: schema.dtype for key, schema in schemas.items() if schema.dtype == pl.Boolean}
 
     def _cast_array_columns(self, table_class: type[DeclarativeBase], df: pl.DataFrame) -> pl.DataFrame:
         # Get the appropriate schema dict based on table class

@@ -2,6 +2,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, TypeVar
 
 import numpy as np
+import polars as pl
 from numpy.typing import NDArray
 
 from tracksdata.attrs import NodeAttr
@@ -109,7 +110,13 @@ class GenericFuncNodeAttrs(BaseNodeAttrsOperator):
         Initialize the node attributes for the graph.
         """
         if self.output_key not in graph.node_attr_keys():
-            graph.add_node_attr_key(self.output_key, default_value=self.default_value)
+            # Infer dtype from default_value using polars
+            if self.default_value is None:
+                dtype = pl.Object
+            else:
+                # Use polars to infer the dtype from the value
+                dtype = pl.Series([self.default_value]).dtype
+            graph.add_node_attr_key(self.output_key, dtype, self.default_value)
 
     def add_node_attrs(
         self,

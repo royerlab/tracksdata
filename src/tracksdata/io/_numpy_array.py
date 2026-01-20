@@ -112,11 +112,11 @@ def from_array(
                 "`tracklet_ids` must have the same length as `positions`. "
                 f"Expected {positions.shape[0]}, got {len(tracklet_ids)}."
             )
-        graph.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACKLET_ID, -1)
+        graph.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACKLET_ID, pl.Int64, -1)
         tracklet_ids = tracklet_ids.tolist()
 
     for col in spatial_cols:
-        graph.add_node_attr_key(col, -999_999)
+        graph.add_node_attr_key(col, pl.Float64, -999_999)
 
     node_attrs = []
 

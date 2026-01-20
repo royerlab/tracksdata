@@ -2,6 +2,7 @@ from functools import partial
 from typing import Any, Literal
 
 import numpy as np
+import polars as pl
 
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph._base_graph import BaseGraph
@@ -124,7 +125,7 @@ class RandomNodes(BaseNodesOperator):
         # Register each spatial column individually
         for col in self.spatial_cols:
             if col not in graph.node_attr_keys():
-                graph.add_node_attr_key(col, -999999.0)
+                graph.add_node_attr_key(col, pl.Float64, -999999.0)
 
         if t is None:
             time_points = range(self.n_time_points)
