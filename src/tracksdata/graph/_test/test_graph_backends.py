@@ -408,33 +408,22 @@ def test_subgraph_with_node_ids_and_filters(graph_backend: BaseGraph) -> None:
 
 
 @pytest.mark.parametrize(
-    "value",
+    "dtype, value",
     [
-        pytest.param(42, id="int-42"),
-        pytest.param(3.14, id="float-3.14"),
-        pytest.param("test_string", id="str-test_string"),
-        pytest.param(np.array([1, 2, 3]), id="ndarray-1d"),
-        pytest.param(np.array([[1.0, 2.0], [3.0, 4.0]]), id="ndarray-2d"),
-        pytest.param(Mask(mask=np.array([[True, False], [False, True]]), bbox=(0, 0, 2, 2)), id="mask"),
-        pytest.param(True, id="bool-True"),
-        pytest.param(False, id="bool-False"),
+        pytest.param(pl.Int64, 42, id="int-42"),
+        pytest.param(pl.Float64, 3.14, id="float-3.14"),
+        pytest.param(pl.String, "test_string", id="str-test_string"),
+        pytest.param(pl.Array(pl.Int64, 3), np.array([1, 2, 3]), id="ndarray-1d"),
+        pytest.param(pl.Array(pl.Float64, (2, 2)), np.array([[1.0, 2.0], [3.0, 4.0]]), id="ndarray-2d"),
+        pytest.param(pl.Object, Mask(mask=np.array([[True, False], [False, True]]), bbox=(0, 0, 2, 2)), id="mask"),
+        pytest.param(pl.Boolean, True, id="bool-True"),
+        pytest.param(pl.Boolean, False, id="bool-False"),
     ],
 )
-def test_add_node_attr_key(graph_backend: BaseGraph, value) -> None:
+def test_add_node_attr_key(graph_backend: BaseGraph, dtype: pl.DataType, value: Any) -> None:
     """Test adding new node attribute keys."""
     node = graph_backend.add_node({"t": 0})
-    # Infer dtype from value
-    if isinstance(value, bool):
-        dtype = pl.Boolean
-    elif isinstance(value, int):
-        dtype = pl.Int64
-    elif isinstance(value, float):
-        dtype = pl.Float64
-    elif isinstance(value, str):
-        dtype = pl.String
-    else:
-        # For arrays, masks, and other objects
-        dtype = pl.Object
+
     graph_backend.add_node_attr_key("new_attribute", dtype, default_value=value)
 
     df = graph_backend.filter(node_ids=[node]).node_attrs(attr_keys=["new_attribute"])

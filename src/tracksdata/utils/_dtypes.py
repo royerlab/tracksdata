@@ -427,8 +427,7 @@ def validate_default_value_dtype_compatibility(default_value: Any, dtype: pl.Dat
 
     try:
         # Try to create a polars series and cast
-        s = pl.Series([default_value])
-        s.cast(dtype)
+        pl.Series([default_value], dtype=dtype)
     except Exception as e:
         raise ValueError(
             f"default_value {default_value!r} (type: {type(default_value).__name__}) "
