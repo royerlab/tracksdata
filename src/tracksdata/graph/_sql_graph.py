@@ -1,7 +1,7 @@
 import binascii
 from collections.abc import Callable, Sequence
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import cloudpickle
 import numpy as np
@@ -582,30 +582,31 @@ class SQLGraph(BaseGraph):
                     dtype=pl_dtype,
                 )
 
+    # Mapping from SQLAlchemy types to polars dtypes for schema loading
+    _SQLALCHEMY_TO_POLARS_TYPE_MAP: ClassVar[dict[TypeEngine, pl.DataType]] = {
+        sa.Boolean: pl.Boolean,
+        sa.SmallInteger: pl.Int16,
+        sa.Integer: pl.Int32,
+        sa.BigInteger: pl.Int64,
+        sa.Float: pl.Float64,
+        sa.String: pl.String,
+        sa.Text: pl.String,
+        sa.LargeBinary: pl.Object,
+        sa.PickleType: pl.Object,
+    }
+
     def _sqlalchemy_type_to_polars_dtype(self, sa_type: TypeEngine) -> pl.DataType:
         """
         Convert a SQLAlchemy type to a polars dtype.
         This is a best-effort conversion for loading existing schemas.
         """
-        if isinstance(sa_type, sa.Boolean):
-            return pl.Boolean
-        elif isinstance(sa_type, sa.SmallInteger):
-            return pl.Int16
-        elif isinstance(sa_type, sa.Integer):
-            return pl.Int32
-        elif isinstance(sa_type, sa.BigInteger):
-            return pl.Int64
-        elif isinstance(sa_type, sa.Float):
-            return pl.Float64
-        elif isinstance(sa_type, sa.String | sa.Text):
-            return pl.String
-        elif isinstance(sa_type, sa.LargeBinary | sa.PickleType):
-            # For pickled/binary types, default to Object
-            # Array types will need to be re-added explicitly
-            return pl.Object
-        else:
-            # Fallback to Object for unknown types
-            return pl.Object
+        # Check the type map for known types
+        for sa_type_class, pl_dtype in self._SQLALCHEMY_TO_POLARS_TYPE_MAP.items():
+            if isinstance(sa_type, sa_type_class):
+                return pl_dtype
+
+        # Fallback to Object for unknown types
+        return pl.Object
 
     def _restore_pickled_column_types(self, table: sa.Table) -> None:
         for column in table.columns:
