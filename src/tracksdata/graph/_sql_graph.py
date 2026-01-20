@@ -1,7 +1,7 @@
 import binascii
 from collections.abc import Callable, Sequence
 from enum import Enum
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 import cloudpickle
 import numpy as np
@@ -22,6 +22,7 @@ from tracksdata.utils._dtypes import (
     AttrSchema,
     polars_dtype_to_sqlalchemy_type,
     process_attr_key_args,
+    sqlalchemy_type_to_polars_dtype,
 )
 from tracksdata.utils._logging import LOG
 from tracksdata.utils._signal import is_signal_on
@@ -560,7 +561,7 @@ class SQLGraph(BaseGraph):
             if column_name not in self._node_attr_schemas:
                 column = self.Node.__table__.columns[column_name]
                 # Infer polars dtype from SQLAlchemy type
-                pl_dtype = self._sqlalchemy_type_to_polars_dtype(column.type)
+                pl_dtype = sqlalchemy_type_to_polars_dtype(column.type)
                 # AttrSchema.__post_init__ will infer the default_value
                 self._node_attr_schemas[column_name] = AttrSchema(
                     key=column_name,
@@ -575,38 +576,12 @@ class SQLGraph(BaseGraph):
             if column_name not in self._edge_attr_schemas:
                 column = self.Edge.__table__.columns[column_name]
                 # Infer polars dtype from SQLAlchemy type
-                pl_dtype = self._sqlalchemy_type_to_polars_dtype(column.type)
+                pl_dtype = sqlalchemy_type_to_polars_dtype(column.type)
                 # AttrSchema.__post_init__ will infer the default_value
                 self._edge_attr_schemas[column_name] = AttrSchema(
                     key=column_name,
                     dtype=pl_dtype,
                 )
-
-    # Mapping from SQLAlchemy types to polars dtypes for schema loading
-    _SQLALCHEMY_TO_POLARS_TYPE_MAP: ClassVar[dict[TypeEngine, pl.DataType]] = {
-        sa.Boolean: pl.Boolean,
-        sa.SmallInteger: pl.Int16,
-        sa.Integer: pl.Int32,
-        sa.BigInteger: pl.Int64,
-        sa.Float: pl.Float64,
-        sa.String: pl.String,
-        sa.Text: pl.String,
-        sa.LargeBinary: pl.Object,
-        sa.PickleType: pl.Object,
-    }
-
-    def _sqlalchemy_type_to_polars_dtype(self, sa_type: TypeEngine) -> pl.DataType:
-        """
-        Convert a SQLAlchemy type to a polars dtype.
-        This is a best-effort conversion for loading existing schemas.
-        """
-        # Check the type map for known types
-        for sa_type_class, pl_dtype in self._SQLALCHEMY_TO_POLARS_TYPE_MAP.items():
-            if isinstance(sa_type, sa_type_class):
-                return pl_dtype
-
-        # Fallback to Object for unknown types
-        return pl.Object
 
     def _restore_pickled_column_types(self, table: sa.Table) -> None:
         for column in table.columns:

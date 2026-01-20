@@ -327,13 +327,12 @@ def infer_default_value_from_dtype(dtype: pl.DataType) -> Any:
     # Handle array types - create zeros with correct shape and dtype
     if isinstance(dtype, pl.Array):
         inner_dtype = dtype.inner
-        shape = dtype.size  # Use size instead of width (deprecated)
-        numpy_dtype = polars_dtype_to_numpy_dtype(inner_dtype, allow_sequence=False)
-        return np.zeros(shape, dtype=numpy_dtype)
+        numpy_dtype = polars_dtype_to_numpy_dtype(inner_dtype, allow_sequence=True)
+        return np.zeros(dtype.shape, dtype=numpy_dtype)
 
     # Handle list types
     if isinstance(dtype, pl.List):
-        return None
+        return []
 
     # Use dictionary lookup for standard types
     return DTYPE_DEFAULT_MAP.get(dtype, None)
@@ -395,6 +394,55 @@ def polars_dtype_to_sqlalchemy_type(dtype: pl.DataType) -> TypeEngine:
 
     # Object and fallback
     return sa.PickleType()
+
+
+# SQLAlchemy to polars type mapping for schema loading
+# Order matters: more specific types must come before more general types
+# (e.g., BigInteger before Integer, since BigInteger is a subclass of Integer)
+_SQLALCHEMY_TO_POLARS_TYPE_MAP = [
+    (sa.Boolean, pl.Boolean),
+    (sa.BigInteger, pl.Int64),  # Must come before Integer
+    (sa.SmallInteger, pl.Int16),  # Must come before Integer
+    (sa.Integer, pl.Int32),
+    (sa.Float, pl.Float64),
+    (sa.Text, pl.String),  # Must come before String
+    (sa.String, pl.String),
+    (sa.PickleType, pl.Object),  # Must come before LargeBinary
+    (sa.LargeBinary, pl.Object),
+]
+
+
+def sqlalchemy_type_to_polars_dtype(sa_type: TypeEngine) -> pl.DataType:
+    """
+    Convert a SQLAlchemy type to a polars dtype.
+
+    This is a best-effort conversion for loading existing database schemas.
+
+    Parameters
+    ----------
+    sa_type : TypeEngine
+        The SQLAlchemy type.
+
+    Returns
+    -------
+    pl.DataType
+        The corresponding polars dtype.
+
+    Examples
+    --------
+    >>> sqlalchemy_type_to_polars_dtype(sa.BigInteger())
+    Int64
+    >>> sqlalchemy_type_to_polars_dtype(sa.Boolean())
+    Boolean
+    """
+    # Check the type map for known types
+    # Order matters: more specific types are checked first
+    for sa_type_class, pl_dtype in _SQLALCHEMY_TO_POLARS_TYPE_MAP:
+        if isinstance(sa_type, sa_type_class):
+            return pl_dtype
+
+    # Fallback to Object for unknown types
+    return pl.Object
 
 
 def validate_default_value_dtype_compatibility(default_value: Any, dtype: pl.DataType) -> None:
