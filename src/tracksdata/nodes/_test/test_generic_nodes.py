@@ -70,6 +70,9 @@ def test_crop_func_attrs_simple_function_no_frames() -> None:
     def double_value(value: float) -> float:
         return value * 2.0
 
+    # Register output key before using operator
+    graph.add_node_attr_key("doubled_value", dtype=pl.Float64)
+
     # Create operator and add attributes
     operator = GenericFuncNodeAttrs(
         func=double_value,
@@ -117,6 +120,9 @@ def test_crop_func_attrs_function_with_frames() -> None:
     def intensity_sum(frame: NDArray, mask: Mask) -> float:
         cropped = mask.crop(frame)
         return float(np.sum(cropped[mask.mask]))
+
+    # Register output key before using operator
+    graph.add_node_attr_key("intensity_sum", dtype=pl.Float64)
 
     # Create operator and add attributes
     operator = GenericFuncNodeAttrs(
@@ -172,6 +178,9 @@ def test_crop_func_attrs_function_with_frames_and_attrs() -> None:
         cropped = mask.crop(frame)
         return float(np.sum(cropped[mask.mask]) * multiplier)
 
+    # Register output key before using operator
+    graph.add_node_attr_key("weighted_intensity", dtype=pl.Float64)
+
     # Create operator and add attributes
     operator = GenericFuncNodeAttrs(
         func=intensity_sum_times_multiplier,
@@ -221,6 +230,12 @@ def test_crop_func_attrs_function_returns_different_types() -> None:
     def return_array(mask: Mask) -> NDArray:
         return np.asarray([1, 2, 3])
 
+    # Register output keys before using operators
+    graph.add_node_attr_key("string_result", dtype=pl.String)
+    graph.add_node_attr_key("list_result", dtype=pl.List(pl.Int64))
+    graph.add_node_attr_key("dict_result", dtype=pl.Struct({"count": pl.Int64}))
+    graph.add_node_attr_key("array_result", dtype=pl.Array(pl.Int64, 3))
+
     # Test string return type
     operator_str = GenericFuncNodeAttrs(
         func=return_string,
@@ -262,32 +277,32 @@ def test_crop_func_attrs_function_returns_different_types() -> None:
 
 
 def test_crop_func_attrs_error_handling_missing_attr_key() -> None:
-    """Test error handling when required attr_key is missing."""
+    """Test error handling when output key is not registered."""
     graph = RustWorkXGraph()
 
     # Register attribute keys
     graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
-    # Note: "value" is not registered
+    # Note: "result" output key is NOT registered
 
     # Create test mask
     mask_data = np.array([[True, True], [True, False]], dtype=bool)
     mask = Mask(mask_data, bbox=np.array([0, 0, 2, 2]))
 
-    # Add node without the required attribute
+    # Add node
     graph.add_node({DEFAULT_ATTR_KEYS.T: 0, DEFAULT_ATTR_KEYS.MASK: mask})
 
-    def use_value(mask: Mask, value: float) -> float:
-        return value * 2.0
+    def double_mask_sum(mask: Mask) -> float:
+        return float(np.sum(mask.mask)) * 2.0
 
-    # Create operator that requires "value" attribute
+    # Create operator with output key that is not registered
     operator = GenericFuncNodeAttrs(
-        func=use_value,
+        func=double_mask_sum,
         output_key="result",
-        attr_keys=["value"],
+        attr_keys=[DEFAULT_ATTR_KEYS.MASK],
     )
 
-    # Should raise an error when trying to access missing attribute
-    with pytest.raises(KeyError):  # Specific exception type depends on graph backend
+    # Should raise ValueError when output key is not registered
+    with pytest.raises(ValueError, match="Output key 'result' not found in graph"):
         operator.add_node_attrs(graph)
 
 
@@ -322,6 +337,9 @@ def test_crop_func_attrs_function_with_frames_multiprocessing(n_workers: int) ->
         cropped = mask.crop(frame)
         return float(np.sum(cropped[mask.mask]))
 
+    # Register output key before using operator
+    graph.add_node_attr_key("intensity_sum", dtype=pl.Float64)
+
     # Create operator and add attributes
     operator = GenericFuncNodeAttrs(
         func=intensity_sum,
@@ -350,6 +368,7 @@ def test_crop_func_attrs_empty_graph() -> None:
 
     # Register attribute keys
     graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
+    graph.add_node_attr_key("result", dtype=pl.Float64)
 
     def dummy_func(mask: Mask) -> float:
         return 1.0
@@ -388,6 +407,9 @@ def test_crop_func_attrs_batch_processing_without_frames() -> None:
     def batch_double_value(value: list[float]) -> list[float]:
         """Batch function that doubles each value."""
         return [v * 2.0 for v in value]
+
+    # Register output key before using operator
+    graph.add_node_attr_key("doubled_value", dtype=pl.Float64)
 
     # Create operator with batch_size = 2
     operator = GenericFuncNodeAttrs(
@@ -446,6 +468,9 @@ def test_crop_func_attrs_batch_processing_with_frames() -> None:
             cropped = m.crop(frame)
             results.append(float(np.sum(cropped[m.mask])))
         return results
+
+    # Register output key before using operator
+    graph.add_node_attr_key("intensity_sum", dtype=pl.Float64)
 
     # Create operator with batch_size = 2
     operator = GenericFuncNodeAttrs(

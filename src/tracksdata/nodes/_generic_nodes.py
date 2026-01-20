@@ -2,7 +2,6 @@ from collections.abc import Callable, Sequence
 from typing import Any, TypeVar
 
 import numpy as np
-import polars as pl
 from numpy.typing import NDArray
 
 from tracksdata.attrs import NodeAttr
@@ -59,6 +58,8 @@ class GenericFuncNodeAttrs(BaseNodeAttrsOperator):
         attr_keys=["mask", "t"],
     )
 
+    graph.add_node_attr_key("intensity_median", pl.Float64)
+
     crop_attrs.add_node_attrs(graph, frames=video)
     ```
 
@@ -85,6 +86,8 @@ class GenericFuncNodeAttrs(BaseNodeAttrsOperator):
         attr_keys=["mask", "t"],
     )
 
+    graph.add_node_attr_key("intensity_median", pl.Float64)
+
     crop_attrs.add_node_attrs(graph, frames=video)
     ```
     """
@@ -95,28 +98,31 @@ class GenericFuncNodeAttrs(BaseNodeAttrsOperator):
         self,
         func: Callable[[T], R] | Callable[[list[T]], list[R]],
         output_key: str,
-        default_value: Any = None,
         attr_keys: Sequence[str] = (),
         batch_size: int = 0,
     ) -> None:
         super().__init__(output_key)
         self.func = func
+        self.output_key = output_key
         self.attr_keys = attr_keys
-        self.default_value = default_value
         self.batch_size = batch_size
 
     def _init_node_attrs(self, graph: BaseGraph) -> None:
         """
-        Initialize the node attributes for the graph.
+        Validate that the output key exists in the graph.
+
+        The output key must be added to the graph before using this operator.
+
+        Raises
+        ------
+        ValueError
+            If the output key is not found in the graph.
         """
         if self.output_key not in graph.node_attr_keys():
-            # Infer dtype from default_value using polars
-            if self.default_value is None:
-                dtype = pl.Object
-            else:
-                # Use polars to infer the dtype from the value
-                dtype = pl.Series([self.default_value]).dtype
-            graph.add_node_attr_key(self.output_key, dtype, self.default_value)
+            raise ValueError(
+                f"Output key '{self.output_key}' not found in graph. "
+                f"You must add it with graph.add_node_attr_key() before using this operator."
+            )
 
     def add_node_attrs(
         self,

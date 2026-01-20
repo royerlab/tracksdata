@@ -4,16 +4,19 @@ from typing import TYPE_CHECKING, Any
 
 import blosc2
 import numpy as np
+import polars as pl
 import skimage.morphology as morph
 from numpy.typing import ArrayLike, NDArray
 from skimage.measure import regionprops
 
-if TYPE_CHECKING:
-    from skimage.measure._regionprops import RegionProperties
-
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.functional._iou import fast_intersection_with_bbox, fast_iou_with_bbox
 from tracksdata.nodes._generic_nodes import GenericFuncNodeAttrs
+
+if TYPE_CHECKING:
+    from skimage.measure._regionprops import RegionProperties
+
+    from tracksdata.graph._base_graph import BaseGraph
 
 
 @lru_cache(maxsize=5)
@@ -497,6 +500,8 @@ class MaskDiskAttrs(GenericFuncNodeAttrs):
                 f"Expected image shape {image_shape} to have the same number of dimensions as attr_keys '{attr_keys}'."
             )
 
+        self._image_shape = image_shape
+
         super().__init__(
             func=lambda **kwargs: Mask.from_coordinates(
                 center=np.asarray(list(kwargs.values())),
@@ -505,6 +510,12 @@ class MaskDiskAttrs(GenericFuncNodeAttrs):
             ),
             output_key=output_key,
             attr_keys=attr_keys,
-            default_value=None,
             batch_size=0,
         )
+
+    def _init_node_attrs(self, graph: "BaseGraph") -> None:
+        """
+        Validate that the output key exists in the graph.
+        """
+        if self.output_key not in graph.node_attr_keys():
+            graph.add_node_attr_key(self.output_key, pl.Array(pl.Int64, 2 * len(self._image_shape)))
