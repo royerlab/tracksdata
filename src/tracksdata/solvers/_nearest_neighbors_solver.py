@@ -275,7 +275,7 @@ class NearestNeighborsSolver(BaseSolver):
         solution_edges_df = edges_df.filter(solution)
 
         if self.output_key not in graph.edge_attr_keys():
-            graph.add_edge_attr_key(self.output_key, pl.Boolean, default_value=False)
+            graph.add_edge_attr_key(self.output_key, pl.Boolean)
         elif self.reset:
             graph.update_edge_attrs(attrs={self.output_key: False})
 
@@ -294,7 +294,7 @@ class NearestNeighborsSolver(BaseSolver):
         )
 
         if self.output_key not in graph.node_attr_keys():
-            graph.add_node_attr_key(self.output_key, pl.Boolean, default_value=False)
+            graph.add_node_attr_key(self.output_key, pl.Boolean)
 
         graph.update_node_attrs(
             node_ids=node_ids,

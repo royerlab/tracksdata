@@ -1933,7 +1933,7 @@ def test_assign_tracklet_ids_node_id_filter(graph_backend: BaseGraph, return_id_
 def test_tracklet_graph_basic(graph_backend: BaseGraph) -> None:
     """Test basic tracklet_graph functionality."""
     # Add tracklet_id attribute and nodes with track IDs
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACKLET_ID, dtype=pl.Int64, default_value=-1)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACKLET_ID, pl.Int64)
 
     # Create nodes with different track IDs
     node0 = graph_backend.add_node({"t": 0, DEFAULT_ATTR_KEYS.TRACKLET_ID: 1})
@@ -1977,7 +1977,7 @@ def test_tracklet_graph_basic(graph_backend: BaseGraph) -> None:
 def test_tracklet_graph_with_ignore_tracklet_id(graph_backend: BaseGraph) -> None:
     """Test tracklet_graph with ignore_tracklet_id parameter."""
     # Add tracklet_id attribute and nodes with track IDs
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACKLET_ID, dtype=pl.Int64, default_value=-1)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACKLET_ID, pl.Int64)
     graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
 
     # Simple test case: just check that the method accepts the parameter
@@ -2082,7 +2082,7 @@ def test_sqlgraph_node_attr_index_create_and_drop(graph_backend: BaseGraph) -> N
     if not isinstance(graph_backend, SQLGraph):
         pytest.skip("Only SQLGraph supports explicit SQL indexes")
 
-    graph_backend.add_node_attr_key("label", dtype=pl.String, default_value="")
+    graph_backend.add_node_attr_key("label", pl.String)
     index_name = f"ix_{graph_backend.Node.__tablename__.lower()}_t_label"
 
     graph_backend.create_node_attr_index(["t", "label"], unique=False)

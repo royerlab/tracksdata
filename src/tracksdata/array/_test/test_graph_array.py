@@ -34,9 +34,7 @@ def test_graph_array_view_init(graph_backend: BaseGraph) -> None:
     # Add a attribute key
     graph_backend.add_node_attr_key("label", dtype=pl.Int64, default_value=0)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
-    graph_backend.add_node_attr_key(
-        DEFAULT_ATTR_KEYS.BBOX, dtype=pl.Object, default_value=np.asarray([0, 0, 0, 0, 0, 0])
-    )
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 6))
 
     array_view = GraphArrayView(graph=graph_backend, shape=(10, 100, 100), attr_key="label", offset=0)
 
@@ -62,9 +60,7 @@ def test_graph_array_view_getitem_empty_time(graph_backend: BaseGraph) -> None:
 
     graph_backend.add_node_attr_key("label", dtype=pl.Int64, default_value=0)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
-    graph_backend.add_node_attr_key(
-        DEFAULT_ATTR_KEYS.BBOX, dtype=pl.Object, default_value=np.asarray([0, 0, 0, 0, 0, 0])
-    )
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 6))
 
     array_view = GraphArrayView(graph=graph_backend, shape=(10, 100, 100), attr_key="label")
 

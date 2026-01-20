@@ -1095,13 +1095,13 @@ class BaseGraph(abc.ABC):
         )
 
         if matched_node_id_key not in self.node_attr_keys():
-            self.add_node_attr_key(matched_node_id_key, pl.Int64, default_value=-1)
+            self.add_node_attr_key(matched_node_id_key, pl.Int64)
 
         if match_score_key not in self.node_attr_keys():
             self.add_node_attr_key(match_score_key, pl.Float64, default_value=0.0)
 
         if matched_edge_mask_key not in self.edge_attr_keys():
-            self.add_edge_attr_key(matched_edge_mask_key, pl.Boolean, default_value=False)
+            self.add_edge_attr_key(matched_edge_mask_key, pl.Boolean)
 
         node_ids = functools.reduce(operator.iadd, matching_data["mapped_comp"])
         other_ids = functools.reduce(operator.iadd, matching_data["mapped_ref"])
