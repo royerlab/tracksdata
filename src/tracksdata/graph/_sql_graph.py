@@ -20,7 +20,6 @@ from tracksdata.utils._cache import cache_method
 from tracksdata.utils._dataframe import unpack_array_attrs, unpickle_bytes_columns
 from tracksdata.utils._dtypes import (
     AttrSchema,
-    infer_default_value_from_dtype,
     polars_dtype_to_sqlalchemy_type,
     process_attr_key_args,
 )
@@ -562,11 +561,10 @@ class SQLGraph(BaseGraph):
                 column = self.Node.__table__.columns[column_name]
                 # Infer polars dtype from SQLAlchemy type
                 pl_dtype = self._sqlalchemy_type_to_polars_dtype(column.type)
-                default_value = infer_default_value_from_dtype(pl_dtype)
+                # AttrSchema.__post_init__ will infer the default_value
                 self._node_attr_schemas[column_name] = AttrSchema(
                     key=column_name,
                     dtype=pl_dtype,
-                    default_value=default_value,
                 )
 
         # Initialize edge schemas from Edge table columns
@@ -578,11 +576,10 @@ class SQLGraph(BaseGraph):
                 column = self.Edge.__table__.columns[column_name]
                 # Infer polars dtype from SQLAlchemy type
                 pl_dtype = self._sqlalchemy_type_to_polars_dtype(column.type)
-                default_value = infer_default_value_from_dtype(pl_dtype)
+                # AttrSchema.__post_init__ will infer the default_value
                 self._edge_attr_schemas[column_name] = AttrSchema(
                     key=column_name,
                     dtype=pl_dtype,
-                    default_value=default_value,
                 )
 
     def _sqlalchemy_type_to_polars_dtype(self, sa_type: TypeEngine) -> pl.DataType:
