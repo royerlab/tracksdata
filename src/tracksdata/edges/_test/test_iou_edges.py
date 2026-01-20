@@ -34,7 +34,7 @@ def test_iou_edges_add_weights(n_workers: int) -> None:
 
     # Register attribute keys
     graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64)
 
     # Create test masks
     mask1_data = np.array([[True, True], [True, False]], dtype=bool)
@@ -84,7 +84,7 @@ def test_iou_edges_no_overlap() -> None:
 
     # Register attribute keys
     graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64)
 
     # Create non-overlapping masks
     mask1_data = np.array([[True, True], [False, False]], dtype=bool)
@@ -123,7 +123,7 @@ def test_iou_edges_perfect_overlap() -> None:
 
     # Register attribute keys
     graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64)
 
     # Create identical masks
     mask_data = np.array([[True, True], [True, False]], dtype=bool)
@@ -159,7 +159,7 @@ def test_iou_edges_custom_mask_key() -> None:
 
     # Register attribute keys
     graph.add_node_attr_key("custom_mask", pl.Object)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, pl.Float64, default_value=0.0)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, pl.Float64)
 
     # Create test masks
     mask1_data = np.array([[True, True], [True, True]], dtype=bool)

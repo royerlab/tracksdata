@@ -48,8 +48,8 @@ def test_nearest_neighbors_solver_solve_no_edges() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
-    graph.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64)
+    graph.add_node_attr_key("y", dtype=pl.Float64)
 
     # Add some nodes
     graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
@@ -67,9 +67,9 @@ def test_nearest_neighbors_solver_solve_simple_case() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
-    graph.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64)
+    graph.add_node_attr_key("y", dtype=pl.Float64)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64)
 
     # Add nodes
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
@@ -103,9 +103,9 @@ def test_nearest_neighbors_solver_solve_max_children_constraint() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
-    graph.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64)
+    graph.add_node_attr_key("y", dtype=pl.Float64)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64)
 
     # Add nodes
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})  # Parent
@@ -143,9 +143,9 @@ def test_nearest_neighbors_solver_solve_one_parent_constraint() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
-    graph.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64)
+    graph.add_node_attr_key("y", dtype=pl.Float64)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64)
 
     # Add nodes
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})  # Parent 1
@@ -175,9 +175,9 @@ def test_nearest_neighbors_solver_solve_custom_weight_expr() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
-    graph.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
-    graph.add_edge_attr_key("custom_weight", dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64)
+    graph.add_node_attr_key("y", dtype=pl.Float64)
+    graph.add_edge_attr_key("custom_weight", dtype=pl.Float64)
 
     # Add nodes
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
@@ -208,10 +208,10 @@ def test_nearest_neighbors_solver_solve_complex_expression() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
-    graph.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
-    graph.add_edge_attr_key("distance", dtype=pl.Float64, default_value=0.0)
-    graph.add_edge_attr_key("confidence", dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64)
+    graph.add_node_attr_key("y", dtype=pl.Float64)
+    graph.add_edge_attr_key("distance", dtype=pl.Float64)
+    graph.add_edge_attr_key("confidence", dtype=pl.Float64)
 
     # Add nodes
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
@@ -243,9 +243,9 @@ def test_nearest_neighbors_solver_solve_custom_output_key() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
-    graph.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64)
+    graph.add_node_attr_key("y", dtype=pl.Float64)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64)
 
     # Add nodes and edges
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
@@ -271,9 +271,9 @@ def test_nearest_neighbors_solver_solve_with_overlaps() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
-    graph.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64)
+    graph.add_node_attr_key("y", dtype=pl.Float64)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64)
 
     # Add nodes - overlapping pair at time t=1
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
@@ -326,9 +326,9 @@ def test_nearest_neighbors_solver_solve_large_graph() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
-    graph.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64)
+    graph.add_node_attr_key("y", dtype=pl.Float64)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64)
 
     # Create a more complex graph structure
     # Time 0: nodes 0, 1

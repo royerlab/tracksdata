@@ -57,7 +57,7 @@ def test_add_node(graph_backend: BaseGraph) -> None:
     """Test adding nodes with various attributes."""
 
     for key in ["x", "y"]:
-        graph_backend.add_node_attr_key(key, dtype=pl.Float64, default_value=0.0)
+        graph_backend.add_node_attr_key(key, dtype=pl.Float64)
 
     node_id = graph_backend.add_node({"t": 0, "x": 1.0, "y": 2.0})
     assert isinstance(node_id, int)
@@ -148,7 +148,7 @@ def test_remove_edge_by_id(graph_backend: BaseGraph) -> None:
 def test_remove_edge_by_nodes(graph_backend: BaseGraph) -> None:
     """Test removing an edge by its source/target IDs."""
     graph_backend.add_node_attr_key("x", pl.Float64)
-    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
 
     a = graph_backend.add_node({"t": 0, "x": 0.0})
     b = graph_backend.add_node({"t": 1, "x": 1.0})
@@ -257,7 +257,7 @@ def test_edge_attrs(graph_backend: BaseGraph) -> None:
     node1 = graph_backend.add_node({"t": 0})
     node2 = graph_backend.add_node({"t": 1})
 
-    graph_backend.add_edge_attr_key("weight", pl.Float64, default_value=0.0)
+    graph_backend.add_edge_attr_key("weight", pl.Float64)
     graph_backend.add_edge_attr_key("vector", pl.Array(pl.Float64, 2))
 
     graph_backend.add_edge(node1, node2, attrs={"weight": 0.5, "vector": np.array([1.0, 2.0])})
@@ -276,7 +276,7 @@ def test_edge_attrs(graph_backend: BaseGraph) -> None:
 def test_edge_attrs_subgraph_edge_ids(graph_backend: BaseGraph) -> None:
     """Test that edge_attrs preserves original edge IDs when using node_ids parameter."""
     # Add edge attribute key
-    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
 
     # Create nodes
     node1 = graph_backend.add_node({"t": 0})
@@ -335,10 +335,10 @@ def test_edge_attrs_subgraph_edge_ids(graph_backend: BaseGraph) -> None:
 
 def test_subgraph_with_node_and_edge_attr_filters(graph_backend: BaseGraph) -> None:
     """Test subgraph with node and edge attribute filters."""
-    graph_backend.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
-    graph_backend.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
-    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
-    graph_backend.add_edge_attr_key("length", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_node_attr_key("x", dtype=pl.Float64)
+    graph_backend.add_node_attr_key("y", dtype=pl.Float64)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
+    graph_backend.add_edge_attr_key("length", dtype=pl.Float64)
 
     node1 = graph_backend.add_node({"t": 0, "x": 1.0, "y": 0.0})
     node2 = graph_backend.add_node({"t": 1, "x": 2.0, "y": 0.0})
@@ -375,7 +375,7 @@ def test_subgraph_with_node_and_edge_attr_filters(graph_backend: BaseGraph) -> N
 def test_subgraph_with_node_ids_and_filters(graph_backend: BaseGraph) -> None:
     """Test subgraph with node IDs and filters."""
     graph_backend.add_node_attr_key("x", pl.Float64)
-    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
 
     node0 = graph_backend.add_node({"t": 0, "x": 1.0})
     node1 = graph_backend.add_node({"t": 1, "x": 2.0})
@@ -472,7 +472,7 @@ def test_add_edge_attr_key(graph_backend: BaseGraph) -> None:
     node1 = graph_backend.add_node({"t": 0})
     node2 = graph_backend.add_node({"t": 1})
 
-    graph_backend.add_edge_attr_key("new_attribute", dtype=pl.Int64, default_value=42)
+    graph_backend.add_edge_attr_key("new_attribute", dtype=pl.Int64)
     graph_backend.add_edge(node1, node2, attrs={"new_attribute": 42})
 
     df = graph_backend.edge_attrs(attr_keys=["new_attribute"])
@@ -501,7 +501,7 @@ def test_remove_edge_attr_key(graph_backend: BaseGraph) -> None:
 
 def test_update_node_attrs(graph_backend: BaseGraph) -> None:
     """Test updating node attributes."""
-    graph_backend.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_node_attr_key("x", dtype=pl.Float64)
 
     node_1 = graph_backend.add_node({"t": 0, "x": 1.0})
     node_2 = graph_backend.add_node({"t": 0, "x": 2.0})
@@ -527,7 +527,7 @@ def test_update_edge_attrs(graph_backend: BaseGraph) -> None:
     node1 = graph_backend.add_node({"t": 0})
     node2 = graph_backend.add_node({"t": 1})
 
-    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
     edge_id = graph_backend.add_edge(node1, node2, attrs={"weight": 0.5})
 
     graph_backend.update_edge_attrs(edge_ids=[edge_id], attrs={"weight": 1.0})
@@ -544,7 +544,7 @@ def test_num_edges(graph_backend: BaseGraph) -> None:
     node1 = graph_backend.add_node({"t": 0})
     node2 = graph_backend.add_node({"t": 1})
 
-    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
     graph_backend.add_edge(node1, node2, attrs={"weight": 0.5})
 
     assert graph_backend.num_edges() == 1
@@ -561,7 +561,7 @@ def test_num_nodes(graph_backend: BaseGraph) -> None:
 def test_edge_attrs_include_targets(graph_backend: BaseGraph) -> None:
     """Test the inclusive flag behavior in edge_attrs method."""
     # Add edge attribute key
-    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
 
     # Create a graph with 4 nodes
     # Graph structure:
@@ -678,9 +678,9 @@ def test_from_ctc(
 def test_sucessors_and_degree(graph_backend: BaseGraph) -> None:
     """Test getting successors of nodes."""
     # Add attribute keys
-    graph_backend.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
-    graph_backend.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
-    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_node_attr_key("x", dtype=pl.Float64)
+    graph_backend.add_node_attr_key("y", dtype=pl.Float64)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
 
     # Create a simple graph structure: node0 -> node1 -> node2
     #                                      \-> node3
@@ -769,9 +769,9 @@ def test_sucessors_and_degree(graph_backend: BaseGraph) -> None:
 def test_predecessors_and_degree(graph_backend: BaseGraph) -> None:
     """Test getting predecessors of nodes."""
     # Add attribute keys
-    graph_backend.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
-    graph_backend.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
-    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_node_attr_key("x", dtype=pl.Float64)
+    graph_backend.add_node_attr_key("y", dtype=pl.Float64)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
 
     # Create a simple graph structure: node0 -> node1 -> node2
     #                                      \-> node3
@@ -858,10 +858,10 @@ def test_predecessors_and_degree(graph_backend: BaseGraph) -> None:
 def test_sucessors_with_attr_keys(graph_backend: BaseGraph) -> None:
     """Test getting successors with specific attribute keys."""
     # Add attribute keys
-    graph_backend.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
-    graph_backend.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_node_attr_key("x", dtype=pl.Float64)
+    graph_backend.add_node_attr_key("y", dtype=pl.Float64)
     graph_backend.add_node_attr_key("label", dtype=pl.String, default_value="X")
-    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
 
     # Create nodes
     node0 = graph_backend.add_node({"t": 0, "x": 0.0, "y": 0.0, "label": "A"})
@@ -905,10 +905,10 @@ def test_sucessors_with_attr_keys(graph_backend: BaseGraph) -> None:
 def test_predecessors_with_attr_keys(graph_backend: BaseGraph) -> None:
     """Test getting predecessors with specific attribute keys."""
     # Add attribute keys
-    graph_backend.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
-    graph_backend.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_node_attr_key("x", dtype=pl.Float64)
+    graph_backend.add_node_attr_key("y", dtype=pl.Float64)
     graph_backend.add_node_attr_key("label", dtype=pl.String, default_value="X")
-    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
 
     # Create nodes
     node0 = graph_backend.add_node({"t": 0, "x": 0.0, "y": 0.0, "label": "A"})
@@ -948,8 +948,8 @@ def test_predecessors_with_attr_keys(graph_backend: BaseGraph) -> None:
 def test_sucessors_predecessors_edge_cases(graph_backend: BaseGraph) -> None:
     """Test edge cases for successors and predecessors methods."""
     # Add attribute keys
-    graph_backend.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
-    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_node_attr_key("x", dtype=pl.Float64)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
 
     # Create isolated nodes (no edges)
     node0 = graph_backend.add_node({"t": 0, "x": 0.0})
@@ -1131,15 +1131,15 @@ def test_match_method(graph_backend: BaseGraph) -> None:
 def test_attrs_with_duplicated_attr_keys(graph_backend: BaseGraph) -> None:
     """Test that node attributeswith duplicated attribute keys are handled correctly."""
     # Add attribute keys
-    graph_backend.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
-    graph_backend.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_node_attr_key("x", dtype=pl.Float64)
+    graph_backend.add_node_attr_key("y", dtype=pl.Float64)
 
     # Add nodes
     node_1 = graph_backend.add_node({"t": 0, "x": 1.0, "y": 1.0})
     node_2 = graph_backend.add_node({"t": 1, "x": 2.0, "y": 2.0})
 
     # Add edges
-    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
     graph_backend.add_edge(node_1, node_2, {"weight": 0.5})
 
     # Test with duplicated attribute keys
@@ -1366,8 +1366,8 @@ def test_from_other_with_edges(
     # Create source graph with nodes, edges, and attributes
     graph_backend.update_metadata(special_key="special_value")
 
-    graph_backend.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
-    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_node_attr_key("x", dtype=pl.Float64)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
     graph_backend.add_edge_attr_key("type", dtype=pl.String, default_value="forward")
 
     node1 = graph_backend.add_node({"t": 0, "x": 1.0})
@@ -1636,8 +1636,8 @@ def test_compute_overlaps_empty_graph(graph_backend: BaseGraph) -> None:
 
 def test_summary(graph_backend: BaseGraph) -> None:
     """Test summary method."""
-    graph_backend.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
-    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_node_attr_key("x", dtype=pl.Float64)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
     graph_backend.add_edge_attr_key("type", dtype=pl.String, default_value="good")
 
     node1 = graph_backend.add_node({"t": 0, "x": 1.0})
@@ -1946,7 +1946,7 @@ def test_tracklet_graph_basic(graph_backend: BaseGraph) -> None:
     node7 = graph_backend.add_node({"t": 2, DEFAULT_ATTR_KEYS.TRACKLET_ID: 4})
     node8 = graph_backend.add_node({"t": 3, DEFAULT_ATTR_KEYS.TRACKLET_ID: 4})
 
-    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
 
     # Add edges within tracks (will be filtered out)
     graph_backend.add_edge(node0, node1, {"weight": 0.5})
@@ -1978,7 +1978,7 @@ def test_tracklet_graph_with_ignore_tracklet_id(graph_backend: BaseGraph) -> Non
     """Test tracklet_graph with ignore_tracklet_id parameter."""
     # Add tracklet_id attribute and nodes with track IDs
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACKLET_ID, pl.Int64)
-    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
 
     # Simple test case: just check that the method accepts the parameter
     # and filters out nodes properly when there are no edges
@@ -2005,7 +2005,7 @@ def test_tracklet_graph_missing_tracklet_id_key(graph_backend: BaseGraph) -> Non
 
 
 def test_nodes_interface(graph_backend: BaseGraph) -> None:
-    graph_backend.add_node_attr_key("x", dtype=pl.Int64, default_value=0)
+    graph_backend.add_node_attr_key("x", dtype=pl.Int64)
 
     # Simple test case: just check that the method accepts the parameter
     # and filters out nodes properly when there are no edges
@@ -2037,8 +2037,8 @@ def test_custom_indices(graph_backend: BaseGraph) -> None:
         pytest.skip("Graph does not support custom indices")
 
     # Add attribute keys for testing
-    graph_backend.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
-    graph_backend.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_node_attr_key("x", dtype=pl.Float64)
+    graph_backend.add_node_attr_key("y", dtype=pl.Float64)
 
     # Test add_node with custom index
     custom_node_id = graph_backend.add_node({"t": 0, "x": 10.0, "y": 20.0}, index=12345)
@@ -2103,7 +2103,7 @@ def test_sqlgraph_edge_attr_index_create_and_drop(graph_backend: BaseGraph) -> N
     if not isinstance(graph_backend, SQLGraph):
         pytest.skip("Only SQLGraph supports explicit SQL indexes")
 
-    graph_backend.add_edge_attr_key("score", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_edge_attr_key("score", dtype=pl.Float64)
     index_name = f"ix_{graph_backend.Edge.__tablename__.lower()}_score"
 
     graph_backend.create_edge_attr_index("score", unique=True)
@@ -2132,9 +2132,9 @@ def test_sqlgraph_index_missing_column(graph_backend: BaseGraph) -> None:
 def test_remove_node(graph_backend: BaseGraph) -> None:
     """Test removing nodes from the graph."""
     # Add attribute keys
-    graph_backend.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
-    graph_backend.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
-    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_node_attr_key("x", dtype=pl.Float64)
+    graph_backend.add_node_attr_key("y", dtype=pl.Float64)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
 
     # Add nodes
     node1 = graph_backend.add_node({"t": 0, "x": 1.0, "y": 1.0})
@@ -2194,8 +2194,8 @@ def test_remove_node(graph_backend: BaseGraph) -> None:
 def test_remove_node_and_add_new_nodes(graph_backend: BaseGraph) -> None:
     """Test removing nodes and then adding new nodes."""
     # Add attribute keys
-    graph_backend.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
-    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_node_attr_key("x", dtype=pl.Float64)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
 
     # Add initial nodes
     node1 = graph_backend.add_node({"t": 0, "x": 1.0})
@@ -2291,9 +2291,9 @@ def test_remove_all_nodes_in_time_point(graph_backend: BaseGraph) -> None:
 
 
 def _fill_mock_geff_graph(graph_backend: BaseGraph) -> None:
-    graph_backend.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
-    graph_backend.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
-    graph_backend.add_node_attr_key("z", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_node_attr_key("x", dtype=pl.Float64)
+    graph_backend.add_node_attr_key("y", dtype=pl.Float64)
+    graph_backend.add_node_attr_key("z", dtype=pl.Float64)
     graph_backend.add_node_attr_key(
         DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4), default_value=np.array([0, 0, 1, 1], dtype=int)
     )
@@ -2568,7 +2568,7 @@ def test_to_traccuracy_graph(graph_backend: BaseGraph) -> None:
         {"t": 2, "x": 3.0, "y": 3.0, DEFAULT_ATTR_KEYS.MASK: mask3, DEFAULT_ATTR_KEYS.BBOX: mask3.bbox}
     )
 
-    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
     graph_backend.add_edge(node1, node2, {"weight": 0.5})
     graph_backend.add_edge(node2, node3, {"weight": 0.3})
     graph_backend.add_edge(node1, node3, {"weight": 0.3})

@@ -794,7 +794,7 @@ class BaseGraph(abc.ABC):
         Add edge attribute with custom default:
 
         ```python
-        graph.add_edge_attr_key("distance", pl.Float64, default_value=0.0)
+        graph.add_edge_attr_key("distance", pl.Float64)
         ```
 
         Using AttrSchema:

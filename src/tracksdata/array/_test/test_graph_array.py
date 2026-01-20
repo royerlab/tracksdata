@@ -32,7 +32,7 @@ def test_chain_indices() -> None:
 def test_graph_array_view_init(graph_backend: BaseGraph) -> None:
     """Test GraphArrayView initialization."""
     # Add a attribute key
-    graph_backend.add_node_attr_key("label", dtype=pl.Int64, default_value=0)
+    graph_backend.add_node_attr_key("label", dtype=pl.Int64)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 6))
 
@@ -58,7 +58,7 @@ def test_graph_array_view_init_invalid_attr_key(graph_backend: BaseGraph) -> Non
 def test_graph_array_view_getitem_empty_time(graph_backend: BaseGraph) -> None:
     """Test __getitem__ with empty time point (no nodes)."""
 
-    graph_backend.add_node_attr_key("label", dtype=pl.Int64, default_value=0)
+    graph_backend.add_node_attr_key("label", dtype=pl.Int64)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 6))
 
@@ -77,11 +77,11 @@ def test_graph_array_view_getitem_with_nodes(graph_backend: BaseGraph) -> None:
     """Test __getitem__ with nodes at time point."""
 
     # Add attribute keys
-    graph_backend.add_node_attr_key("label", dtype=pl.Int64, default_value=0)
+    graph_backend.add_node_attr_key("label", dtype=pl.Int64)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4))
-    graph_backend.add_node_attr_key("y", dtype=pl.Int64, default_value=0)
-    graph_backend.add_node_attr_key("x", dtype=pl.Int64, default_value=0)
+    graph_backend.add_node_attr_key("y", dtype=pl.Int64)
+    graph_backend.add_node_attr_key("x", dtype=pl.Int64)
 
     # Create a mask
     mask_data = np.array([[True, True], [True, False]], dtype=bool)
@@ -127,11 +127,11 @@ def test_graph_array_view_getitem_multiple_nodes(graph_backend: BaseGraph) -> No
     """Test __getitem__ with multiple nodes at same time point."""
 
     # Add attribute keys
-    graph_backend.add_node_attr_key("label", dtype=pl.Int64, default_value=0)
+    graph_backend.add_node_attr_key("label", dtype=pl.Int64)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4))
-    graph_backend.add_node_attr_key("y", dtype=pl.Int64, default_value=0)
-    graph_backend.add_node_attr_key("x", dtype=pl.Int64, default_value=0)
+    graph_backend.add_node_attr_key("y", dtype=pl.Int64)
+    graph_backend.add_node_attr_key("x", dtype=pl.Int64)
 
     # Create two masks at different locations
     mask1_data = np.array([[True, True]], dtype=bool)
@@ -185,8 +185,8 @@ def test_graph_array_view_getitem_boolean_dtype(graph_backend: BaseGraph) -> Non
     graph_backend.add_node_attr_key("is_active", pl.Boolean)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4))
-    graph_backend.add_node_attr_key("y", dtype=pl.Int64, default_value=0)
-    graph_backend.add_node_attr_key("x", dtype=pl.Int64, default_value=0)
+    graph_backend.add_node_attr_key("y", dtype=pl.Int64)
+    graph_backend.add_node_attr_key("x", dtype=pl.Int64)
 
     # Create a mask
     mask_data = np.array([[True]], dtype=bool)
@@ -219,11 +219,11 @@ def test_graph_array_view_dtype_inference(graph_backend: BaseGraph) -> None:
     """Test that dtype is properly inferred from data."""
 
     # Add attribute keys
-    graph_backend.add_node_attr_key("float_label", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_node_attr_key("float_label", dtype=pl.Float64)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4))
-    graph_backend.add_node_attr_key("y", dtype=pl.Int64, default_value=0)
-    graph_backend.add_node_attr_key("x", dtype=pl.Int64, default_value=0)
+    graph_backend.add_node_attr_key("y", dtype=pl.Int64)
+    graph_backend.add_node_attr_key("x", dtype=pl.Int64)
 
     # Create a mask
     mask_data = np.array([[True]], dtype=bool)
@@ -341,7 +341,7 @@ def test_graph_array_view_getitem_time_index_nested(multi_node_graph_from_image,
 
 def test_graph_array_set_options(graph_backend: BaseGraph) -> None:
     with Options(gav_chunk_shape=(512, 512), gav_default_dtype=np.int16):
-        graph_backend.add_node_attr_key("label", dtype=pl.Int64, default_value=0)
+        graph_backend.add_node_attr_key("label", dtype=pl.Int64)
         graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
         graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4))
         array_view = GraphArrayView(graph=graph_backend, shape=(10, 100, 100), attr_key="label")

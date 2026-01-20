@@ -42,8 +42,8 @@ def test_generic_edges_add_weights_single_attr_key() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64)
 
     # Add nodes at time 0
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 1.0})
@@ -79,9 +79,9 @@ def test_generic_edges_add_weights_multiple_attr_keys() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
-    graph.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64)
+    graph.add_node_attr_key("y", dtype=pl.Float64)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64)
 
     # Add nodes at time 0
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
@@ -113,8 +113,8 @@ def test_generic_edges_add_weights_all_time_points() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64)
 
     # Add nodes at different time points
     node0_t0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 1.0})
@@ -143,7 +143,7 @@ def test_generic_edges_no_edges_at_time_point() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64)
 
     # Add nodes but no edges at time 0
     graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 1.0})
@@ -164,8 +164,8 @@ def test_generic_edges_creates_output_key() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64)
 
     # Add nodes and edge
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 1.0})
@@ -192,9 +192,9 @@ def test_generic_edges_dict_input_function() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("value", dtype=pl.Float64, default_value=0.0)
-    graph.add_node_attr_key("weight", dtype=pl.Float64, default_value=0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("value", dtype=pl.Float64)
+    graph.add_node_attr_key("weight", dtype=pl.Float64)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64)
 
     # Add nodes
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "value": 10.0, "weight": 2.0})

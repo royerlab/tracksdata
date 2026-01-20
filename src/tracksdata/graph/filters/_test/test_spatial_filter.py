@@ -13,9 +13,9 @@ from tracksdata.graph.filters._spatial_filter import BBoxSpatialFilter, SpatialF
 def sample_graph() -> RustWorkXGraph:
     """Create a sample graph with nodes for testing."""
     graph = RustWorkXGraph()
-    graph.add_node_attr_key("z", dtype=pl.Int64, default_value=0)
-    graph.add_node_attr_key("y", dtype=pl.Int64, default_value=0)
-    graph.add_node_attr_key("x", dtype=pl.Int64, default_value=0)
+    graph.add_node_attr_key("z", dtype=pl.Int64)
+    graph.add_node_attr_key("y", dtype=pl.Int64)
+    graph.add_node_attr_key("x", dtype=pl.Int64)
 
     # Add some nodes with spatial coordinates
     nodes = [
@@ -141,9 +141,9 @@ def test_spatial_filter_querying(sample_graph: RustWorkXGraph) -> None:
 def test_spatial_filter_dimensions() -> None:
     """Test SpatialFilter with different coordinate dimensions."""
     graph = RustWorkXGraph()
-    graph.add_node_attr_key("z", dtype=pl.Int64, default_value=0)
-    graph.add_node_attr_key("y", dtype=pl.Int64, default_value=0)
-    graph.add_node_attr_key("x", dtype=pl.Int64, default_value=0)
+    graph.add_node_attr_key("z", dtype=pl.Int64)
+    graph.add_node_attr_key("y", dtype=pl.Int64)
+    graph.add_node_attr_key("x", dtype=pl.Int64)
     graph.add_node({"t": 0, "z": 0, "y": 10, "x": 20})
 
     # Test 2D coordinates
@@ -171,9 +171,9 @@ def test_spatial_filter_error_handling(sample_graph: RustWorkXGraph) -> None:
 def test_spatial_filter_with_edges() -> None:
     """Test SpatialFilter preserves edges in subgraphs."""
     graph = RustWorkXGraph()
-    graph.add_node_attr_key("y", dtype=pl.Int64, default_value=0)
-    graph.add_node_attr_key("x", dtype=pl.Int64, default_value=0)
-    graph.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("y", dtype=pl.Int64)
+    graph.add_node_attr_key("x", dtype=pl.Int64)
+    graph.add_edge_attr_key("weight", dtype=pl.Float64)
 
     # Add nodes and edge
     node1_id = graph.add_node({"t": 0, "y": 10, "x": 20})
@@ -215,7 +215,7 @@ def test_bbox_spatial_filter_with_edges() -> None:
     """Test SpatialFilter preserves edges in subgraphs."""
     graph = RustWorkXGraph()
     graph.add_node_attr_key("bbox", dtype=pl.List(pl.Int64), default_value=[0, 0, 0, 0])
-    graph.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
+    graph.add_edge_attr_key("weight", dtype=pl.Float64)
 
     # Add nodes and edge
     node1_id = graph.add_node({"t": 0, "bbox": [10, 20, 15, 25]})

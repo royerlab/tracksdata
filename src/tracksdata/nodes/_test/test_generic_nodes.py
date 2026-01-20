@@ -61,7 +61,7 @@ def test_crop_func_attrs_simple_function_no_frames() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("value", dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("value", dtype=pl.Float64)
 
     # Add nodes with values
     node1 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "value": 10.0})
@@ -378,7 +378,7 @@ def test_crop_func_attrs_batch_processing_without_frames() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("value", dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("value", dtype=pl.Float64)
 
     # Add nodes with values
     node1 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "value": 10.0})
