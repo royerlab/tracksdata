@@ -44,7 +44,7 @@ def test_napari_conversion(metadata_shape: bool) -> None:
     mask_attrs.add_node_attrs(graph)
 
     # Maybe we should update the MaskDiskAttrs to handle bounding boxes
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, dtype=pl.Object, default_value=None)
+    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, dtype=pl.Array(pl.Int64, 6))
     masks = graph.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.MASK])[DEFAULT_ATTR_KEYS.MASK]
     graph.update_node_attrs(
         attrs={DEFAULT_ATTR_KEYS.BBOX: [mask.bbox for mask in masks]},

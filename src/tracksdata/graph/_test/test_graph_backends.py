@@ -19,10 +19,10 @@ from tracksdata.nodes._mask import Mask
 
 def test_already_existing_keys(graph_backend: BaseGraph) -> None:
     """Test that adding already existing keys raises an error."""
-    graph_backend.add_node_attr_key("x", dtype=pl.Object, default_value=None)
+    graph_backend.add_node_attr_key("x", pl.Float64)
 
     with pytest.raises(ValueError):
-        graph_backend.add_node_attr_key("x", dtype=pl.Object, default_value=None)
+        graph_backend.add_node_attr_key("x", pl.Float64)
 
     with pytest.raises(ValueError):
         # missing x
@@ -77,7 +77,7 @@ def test_add_node(graph_backend: BaseGraph) -> None:
 def test_add_edge(graph_backend: BaseGraph) -> None:
     """Test adding edges with attributes."""
     # Add node attribute key
-    graph_backend.add_node_attr_key("x", dtype=pl.Object, default_value=None)
+    graph_backend.add_node_attr_key("x", pl.Float64)
 
     # Add two nodes first
     node1 = graph_backend.add_node({"t": 0, "x": 1.0})
@@ -110,7 +110,7 @@ def test_add_edge(graph_backend: BaseGraph) -> None:
 def test_remove_edge_by_id(graph_backend: BaseGraph) -> None:
     """Test removing an edge by ID across backends using unified API."""
     # Setup
-    graph_backend.add_node_attr_key("x", dtype=pl.Object, default_value=None)
+    graph_backend.add_node_attr_key("x", pl.Float64)
     graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
 
     n1 = graph_backend.add_node({"t": 0, "x": 1.0})
@@ -147,7 +147,7 @@ def test_remove_edge_by_id(graph_backend: BaseGraph) -> None:
 
 def test_remove_edge_by_nodes(graph_backend: BaseGraph) -> None:
     """Test removing an edge by its source/target IDs."""
-    graph_backend.add_node_attr_key("x", dtype=pl.Object, default_value=None)
+    graph_backend.add_node_attr_key("x", pl.Float64)
     graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
 
     a = graph_backend.add_node({"t": 0, "x": 0.0})
@@ -184,7 +184,7 @@ def test_node_ids(graph_backend: BaseGraph) -> None:
 
 def test_filter_nodes_by_attribute(graph_backend: BaseGraph) -> None:
     """Test filtering nodes by attributes."""
-    graph_backend.add_node_attr_key("label", dtype=pl.Object, default_value=None)
+    graph_backend.add_node_attr_key("label", pl.String)
 
     node1 = graph_backend.add_node({"t": 0, "label": "A"})
     node2 = graph_backend.add_node({"t": 0, "label": "B"})
@@ -235,8 +235,8 @@ def test_time_points(graph_backend: BaseGraph) -> None:
 
 def test_node_attrs(graph_backend: BaseGraph) -> None:
     """Test retrieving node attributes."""
-    graph_backend.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
-    graph_backend.add_node_attr_key("coordinates", dtype=pl.Object, default_value=np.array([0.0, 0.0]))
+    graph_backend.add_node_attr_key("x", pl.Float64)
+    graph_backend.add_node_attr_key("coordinates", pl.Array(pl.Float64, 2))
 
     node1 = graph_backend.add_node({"t": 0, "x": 1.0, "coordinates": np.array([10.0, 20.0])})
     node2 = graph_backend.add_node({"t": 1, "x": 2.0, "coordinates": np.array([30.0, 40.0])})
@@ -257,8 +257,8 @@ def test_edge_attrs(graph_backend: BaseGraph) -> None:
     node1 = graph_backend.add_node({"t": 0})
     node2 = graph_backend.add_node({"t": 1})
 
-    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
-    graph_backend.add_edge_attr_key("vector", dtype=pl.Object, default_value=np.array([0.0, 0.0]))
+    graph_backend.add_edge_attr_key("weight", pl.Float64, default_value=0.0)
+    graph_backend.add_edge_attr_key("vector", pl.Array(pl.Float64, 2))
 
     graph_backend.add_edge(node1, node2, attrs={"weight": 0.5, "vector": np.array([1.0, 2.0])})
 
@@ -374,7 +374,7 @@ def test_subgraph_with_node_and_edge_attr_filters(graph_backend: BaseGraph) -> N
 
 def test_subgraph_with_node_ids_and_filters(graph_backend: BaseGraph) -> None:
     """Test subgraph with node IDs and filters."""
-    graph_backend.add_node_attr_key("x", dtype=pl.Object, default_value=None)
+    graph_backend.add_node_attr_key("x", pl.Float64)
     graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
 
     node0 = graph_backend.add_node({"t": 0, "x": 1.0})
@@ -994,7 +994,7 @@ def test_match_method(graph_backend: BaseGraph) -> None:
     # Create first graph (self) with masks
     graph_backend.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
     graph_backend.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=None)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
 
     # Create masks for first graph
     mask1_data = np.array([[True, True], [True, True]], dtype=bool)
@@ -1028,7 +1028,7 @@ def test_match_method(graph_backend: BaseGraph) -> None:
     other_graph = graph_backend.__class__(**kwargs)
     other_graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
     other_graph.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
-    other_graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=None)
+    other_graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
 
     # Create overlapping masks for second graph
     # This mask overlaps significantly with mask1 (IoU > 0.5)
@@ -1502,7 +1502,7 @@ def test_form_other_regionprops_nodes(
 
 def test_compute_overlaps_basic(graph_backend: BaseGraph) -> None:
     """Test basic compute_overlaps functionality."""
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=None)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
 
     # Create overlapping masks at time 0
     mask1_data = np.array([[True, True], [True, True]], dtype=bool)
@@ -1524,7 +1524,7 @@ def test_compute_overlaps_basic(graph_backend: BaseGraph) -> None:
 
 def test_compute_overlaps_with_threshold(graph_backend: BaseGraph) -> None:
     """Test compute_overlaps with different IoU thresholds."""
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=None)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
 
     # Create masks with different overlap levels
     mask1_data = np.array([[True, True], [True, True]], dtype=bool)
@@ -1558,7 +1558,7 @@ def test_compute_overlaps_with_threshold(graph_backend: BaseGraph) -> None:
 
 def test_compute_overlaps_multiple_timepoints(graph_backend: BaseGraph) -> None:
     """Test compute_overlaps across multiple time points."""
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=None)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
 
     # Time 0: overlapping masks
     mask1_t0 = Mask(np.array([[True, True], [True, True]], dtype=bool), bbox=np.array([0, 0, 2, 2]))
@@ -1585,7 +1585,7 @@ def test_sql_graph_mask_update_survives_reload(tmp_path: Path) -> None:
     """Ensure SQLGraph keeps pickled column types after reloading from disk."""
     db_path = tmp_path / "mask_graph.db"
     graph = SQLGraph("sqlite", str(db_path))
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=None)
+    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
 
     mask_data = np.array([[True, False], [False, True]], dtype=bool)
     mask = Mask(mask_data, bbox=np.array([0, 0, 2, 2]))
@@ -1659,10 +1659,10 @@ def test_summary(graph_backend: BaseGraph) -> None:
 
 
 def test_spatial_filter_basic(graph_backend: BaseGraph) -> None:
-    graph_backend.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
-    graph_backend.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
-    graph_backend.add_node_attr_key("z", dtype=pl.Float64, default_value=0.0)
-    graph_backend.add_node_attr_key("bbox", pl.Array(pl.Int64, 6), default_value=np.zeros(6, dtype=int))
+    graph_backend.add_node_attr_key("x", pl.Float64)
+    graph_backend.add_node_attr_key("y", pl.Float64)
+    graph_backend.add_node_attr_key("z", pl.Float64)
+    graph_backend.add_node_attr_key("bbox", pl.Array(pl.Int64, 6))
 
     node1 = graph_backend.add_node({"t": 0, "x": 1.0, "y": 1.0, "z": 1.0, "bbox": np.array([6, 6, 6, 8, 8, 8])})
     node2 = graph_backend.add_node({"t": 1, "x": 2.0, "y": 2.0, "z": 2.0, "bbox": np.array([0, 0, 0, 3, 3, 3])})
@@ -1823,7 +1823,7 @@ def test_assign_tracklet_ids_node_id_filter(graph_backend: BaseGraph, return_id_
 
     # Ensure tracklet_id attribute exists after nodes were added
     if DEFAULT_ATTR_KEYS.TRACKLET_ID not in graph_backend.node_attr_keys():
-        graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACKLET_ID, dtype=pl.Int64, default_value=-1)
+        graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACKLET_ID, pl.Int64)
 
     for seeds, expected in (
         ([A1], [[A0, A1, A2, A3]]),
@@ -2017,7 +2017,7 @@ def test_nodes_interface(graph_backend: BaseGraph) -> None:
     assert graph_backend[node2]["x"] == 0
     assert graph_backend[node3]["x"] == -1
 
-    graph_backend.add_node_attr_key("y", dtype=pl.Int64, default_value=-1)
+    graph_backend.add_node_attr_key("y", pl.Int64)
 
     graph_backend[node2]["y"] = 5
 
@@ -2297,11 +2297,11 @@ def _fill_mock_geff_graph(graph_backend: BaseGraph) -> None:
     graph_backend.add_node_attr_key(
         DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4), default_value=np.array([0, 0, 1, 1], dtype=int)
     )
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=None)
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACKLET_ID, dtype=pl.Int64, default_value=-1)
-    graph_backend.add_node_attr_key("ndfeature", dtype=pl.Object, default_value=np.asarray([[1.0], [2.0], [3.0]]))
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACKLET_ID, pl.Int64)
+    graph_backend.add_node_attr_key("ndfeature", pl.Object)
 
-    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_edge_attr_key("weight", pl.Float64)
 
     graph_backend.update_metadata(
         shape=[1, 25, 25],
@@ -2475,9 +2475,9 @@ def test_pickle_roundtrip(graph_backend: BaseGraph) -> None:
     if isinstance(graph_backend, SQLGraph):
         pytest.skip("SQLGraph does not support pickle roundtrip")
 
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, dtype=pl.Object, default_value=None)
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=None)
-    graph_backend.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4))
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
+    graph_backend.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, pl.Float64)
 
     bbox = np.array([0, 0, 2, 2])
     mask = Mask(np.array([[True, True], [True, True]], dtype=bool), bbox=bbox)
@@ -2519,7 +2519,7 @@ def test_sql_graph_huge_update() -> None:
     random_t = np.random.randint(0, 1000, n_nodes).tolist()
     random_x = np.random.rand(n_nodes).tolist()
     graph.bulk_add_nodes([{"t": t} for t in random_t])
-    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=-1.0)
+    graph.add_node_attr_key("x", pl.Float64)
 
     # testing with varying values
     graph.update_node_attrs(
@@ -2541,13 +2541,11 @@ def test_to_traccuracy_graph(graph_backend: BaseGraph) -> None:
     from traccuracy.metrics import CTCMetrics
 
     # Create first graph (self) with masks
-    graph_backend.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
-    graph_backend.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=None)
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4), default_value=np.zeros(4, dtype=int))
-    graph_backend.update_metadata(
-        shape=[3, 25, 25],
-    )
+    graph_backend.add_node_attr_key("x", pl.Float64)
+    graph_backend.add_node_attr_key("y", pl.Float64)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4))
+    graph_backend.update_metadata(shape=[3, 25, 25])
 
     # Create masks for first graph
     mask1_data = np.array([[True, True], [True, True]], dtype=bool)

@@ -33,7 +33,7 @@ def test_graph_array_view_init(graph_backend: BaseGraph) -> None:
     """Test GraphArrayView initialization."""
     # Add a attribute key
     graph_backend.add_node_attr_key("label", dtype=pl.Int64, default_value=0)
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=None)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
     graph_backend.add_node_attr_key(
         DEFAULT_ATTR_KEYS.BBOX, dtype=pl.Object, default_value=np.asarray([0, 0, 0, 0, 0, 0])
     )
@@ -61,7 +61,7 @@ def test_graph_array_view_getitem_empty_time(graph_backend: BaseGraph) -> None:
     """Test __getitem__ with empty time point (no nodes)."""
 
     graph_backend.add_node_attr_key("label", dtype=pl.Int64, default_value=0)
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=None)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
     graph_backend.add_node_attr_key(
         DEFAULT_ATTR_KEYS.BBOX, dtype=pl.Object, default_value=np.asarray([0, 0, 0, 0, 0, 0])
     )
@@ -82,8 +82,8 @@ def test_graph_array_view_getitem_with_nodes(graph_backend: BaseGraph) -> None:
 
     # Add attribute keys
     graph_backend.add_node_attr_key("label", dtype=pl.Int64, default_value=0)
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=None)
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, dtype=pl.Object, default_value=np.asarray([0, 0, 0, 0]))
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4))
     graph_backend.add_node_attr_key("y", dtype=pl.Int64, default_value=0)
     graph_backend.add_node_attr_key("x", dtype=pl.Int64, default_value=0)
 
@@ -132,8 +132,8 @@ def test_graph_array_view_getitem_multiple_nodes(graph_backend: BaseGraph) -> No
 
     # Add attribute keys
     graph_backend.add_node_attr_key("label", dtype=pl.Int64, default_value=0)
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=None)
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, dtype=pl.Object, default_value=np.asarray([0, 0, 0, 0]))
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4))
     graph_backend.add_node_attr_key("y", dtype=pl.Int64, default_value=0)
     graph_backend.add_node_attr_key("x", dtype=pl.Int64, default_value=0)
 
@@ -186,9 +186,9 @@ def test_graph_array_view_getitem_boolean_dtype(graph_backend: BaseGraph) -> Non
     """Test __getitem__ with boolean attribute values."""
 
     # Add attribute keys
-    graph_backend.add_node_attr_key("is_active", dtype=pl.Boolean, default_value=False)
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=None)
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, dtype=pl.Object, default_value=np.asarray([0, 0, 0, 0]))
+    graph_backend.add_node_attr_key("is_active", pl.Boolean)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4))
     graph_backend.add_node_attr_key("y", dtype=pl.Int64, default_value=0)
     graph_backend.add_node_attr_key("x", dtype=pl.Int64, default_value=0)
 
@@ -224,8 +224,8 @@ def test_graph_array_view_dtype_inference(graph_backend: BaseGraph) -> None:
 
     # Add attribute keys
     graph_backend.add_node_attr_key("float_label", dtype=pl.Float64, default_value=0.0)
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=None)
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, dtype=pl.Object, default_value=np.asarray([0, 0, 0, 0]))
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4))
     graph_backend.add_node_attr_key("y", dtype=pl.Int64, default_value=0)
     graph_backend.add_node_attr_key("x", dtype=pl.Int64, default_value=0)
 
@@ -346,8 +346,8 @@ def test_graph_array_view_getitem_time_index_nested(multi_node_graph_from_image,
 def test_graph_array_set_options(graph_backend: BaseGraph) -> None:
     with Options(gav_chunk_shape=(512, 512), gav_default_dtype=np.int16):
         graph_backend.add_node_attr_key("label", dtype=pl.Int64, default_value=0)
-        graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=None)
-        graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, dtype=pl.Object, default_value=np.asarray([0, 0, 0, 0]))
+        graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
+        graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4))
         array_view = GraphArrayView(graph=graph_backend, shape=(10, 100, 100), attr_key="label")
         assert array_view.chunk_shape == (512, 512)
         assert array_view.dtype == np.int16
@@ -371,7 +371,7 @@ def test_graph_array_raise_error_on_non_scalar_attr_key(graph_backend: BaseGraph
     graph_backend.add_node_attr_key(
         "label", dtype=pl.Object, default_value=np.array([0, 1])
     )  # Non-scalar default value
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=None)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
     graph_backend.add_node(
         {
             DEFAULT_ATTR_KEYS.T: 0,

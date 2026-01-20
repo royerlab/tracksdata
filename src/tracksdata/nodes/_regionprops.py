@@ -128,13 +128,11 @@ class RegionPropsNodes(BaseNodesOperator):
         Initialize the node attributes for the graph.
         """
         if DEFAULT_ATTR_KEYS.MASK not in graph.node_attr_keys():
-            graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object, None)
+            graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
 
         if DEFAULT_ATTR_KEYS.BBOX not in graph.node_attr_keys():
             bbox_size = 2 * (ndims - 1)
-            graph.add_node_attr_key(
-                DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, bbox_size), np.zeros(bbox_size, dtype=int)
-            )
+            graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, bbox_size))
 
         if "label" in self.attr_keys() and "label" not in graph.node_attr_keys():
             graph.add_node_attr_key("label", pl.Int64, 0)

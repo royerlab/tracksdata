@@ -94,7 +94,7 @@ def test_crop_func_attrs_function_with_frames() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=None)
+    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
 
     # Create test masks
     mask1_data = np.array([[True, True], [True, False]], dtype=bool)
@@ -147,7 +147,7 @@ def test_crop_func_attrs_function_with_frames_and_attrs() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=None)
+    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
     graph.add_node_attr_key("multiplier", dtype=pl.Float64, default_value=1.0)
 
     # Create test masks
@@ -200,7 +200,7 @@ def test_crop_func_attrs_function_returns_different_types() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=None)
+    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
 
     # Create test mask
     mask_data = np.array([[True, True], [True, False]], dtype=bool)
@@ -266,7 +266,7 @@ def test_crop_func_attrs_error_handling_missing_attr_key() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=None)
+    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
     # Note: "value" is not registered
 
     # Create test mask
@@ -297,7 +297,7 @@ def test_crop_func_attrs_function_with_frames_multiprocessing(n_workers: int) ->
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=None)
+    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
 
     # Create test masks for multiple time points
     mask1_data = np.array([[True, True], [True, False]], dtype=bool)
@@ -349,7 +349,7 @@ def test_crop_func_attrs_empty_graph() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=None)
+    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
 
     def dummy_func(mask: Mask) -> float:
         return 1.0
@@ -415,7 +415,7 @@ def test_crop_func_attrs_batch_processing_with_frames() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=None)
+    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
 
     # Create test masks
     mask1_data = np.array([[True, True], [True, False]], dtype=bool)

@@ -292,7 +292,7 @@ def test_bbox_spatial_filter_error_handling() -> None:
 
 
 def test_add_and_remove_node(graph_backend: BaseGraph) -> None:
-    graph_backend.add_node_attr_key("bbox", dtype=pl.Object, default_value=np.asarray([0, 0, 0, 0]))
+    graph_backend.add_node_attr_key("bbox", pl.Array(pl.Int64, 4))
 
     # testing if _node_tree is created in BBoxSpatialFilter when graph is empty
     _ = BBoxSpatialFilter(graph_backend, frame_attr_key="t", bbox_attr_key="bbox")
@@ -342,7 +342,7 @@ def test_add_and_remove_node(graph_backend: BaseGraph) -> None:
 
 def test_bbox_spatial_filter_handles_list_dtype(graph_backend: BaseGraph) -> None:
     """Ensure bounding boxes stored as list dtype still work with the spatial filter."""
-    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, dtype=pl.Object, default_value=None)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4))
     first = graph_backend.add_node({"t": 0, "bbox": [0, 0, 2, 2]})
     second = graph_backend.add_node({"t": 1, "bbox": [5, 5, 8, 8]})
 

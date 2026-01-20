@@ -15,8 +15,8 @@ def test_export_from_ctc_roundtrip(tmp_path: Path, metadata_shape: bool) -> None
     # Create original graph with nodes and edges
     in_graph = RustWorkXGraph()
 
-    in_graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object, None)
-    in_graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Object, None)
+    in_graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
+    in_graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4))
     in_graph.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACKLET_ID, pl.Int64, -1)
     in_graph.add_node_attr_key("x", pl.Float64, -999_999)
     in_graph.add_node_attr_key("y", pl.Float64, -999_999)

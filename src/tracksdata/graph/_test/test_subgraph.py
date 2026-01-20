@@ -37,8 +37,8 @@ def create_test_graph(graph_backend: BaseGraph, use_subgraph: bool = False) -> B
         Either the original graph or a subgraph with test data.
     """
     # Add attribute keys
-    graph_backend.add_node_attr_key("x", dtype=pl.Float64, default_value=-1.0)
-    graph_backend.add_node_attr_key("y", dtype=pl.Float64, default_value=-1.0)
+    graph_backend.add_node_attr_key("x", pl.Float64)
+    graph_backend.add_node_attr_key("y", pl.Float64)
     graph_backend.add_node_attr_key("label", dtype=pl.String, default_value="0")
     graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
     graph_backend.add_edge_attr_key("new_attribute", dtype=pl.Float64, default_value=0.0)
@@ -1101,8 +1101,8 @@ def test_graph_view_remove_edge(graph_backend: BaseGraph) -> None:
     Tests removal by endpoints and by edge_id with the view in sync mode.
     """
     # Setup root graph with attributes
-    graph_backend.add_node_attr_key("x", dtype=pl.Object, default_value=None)
-    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_node_attr_key("x", pl.Float64)
+    graph_backend.add_edge_attr_key("weight", pl.Float64, default_value=0.0)
 
     # Nodes and edges
     n0 = graph_backend.add_node({"t": 0, "x": 0.0})
