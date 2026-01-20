@@ -10,9 +10,9 @@ from tracksdata.graph import RustWorkXGraph
 def sample_graph() -> RustWorkXGraph:
     """Create a sample graph with spatial nodes for testing."""
     graph = RustWorkXGraph()
-    graph.add_node_attr_key("z", 0)
-    graph.add_node_attr_key("y", 0)
-    graph.add_node_attr_key("x", 0)
+    graph.add_node_attr_key("z", dtype=pl.Int64, default_value=0)
+    graph.add_node_attr_key("y", dtype=pl.Int64, default_value=0)
+    graph.add_node_attr_key("x", dtype=pl.Int64, default_value=0)
 
     # Add nodes in a grid pattern
     nodes = [
@@ -112,8 +112,8 @@ def test_apply_tiled_default_attrs(sample_graph: RustWorkXGraph) -> None:
 def test_apply_tiled_2d_tiling() -> None:
     """Test apply_tiled with 2D spatial coordinates."""
     graph = RustWorkXGraph()
-    graph.add_node_attr_key("y", 0)
-    graph.add_node_attr_key("x", 0)
+    graph.add_node_attr_key("y", dtype=pl.Int64, default_value=0)
+    graph.add_node_attr_key("x", dtype=pl.Int64, default_value=0)
 
     for y in [5, 11, 14]:
         for x in [10, 30]:

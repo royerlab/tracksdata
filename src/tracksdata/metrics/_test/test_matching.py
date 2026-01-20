@@ -50,8 +50,8 @@ class TestMaskMatching:
         graph2 = RustWorkXGraph()
 
         default_mask = Mask(np.array([[False]]), np.array([0, 0, 1, 1]))
-        graph1.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, default_mask)
-        graph2.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, default_mask)
+        graph1.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=default_mask)
+        graph2.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=default_mask)
 
         # Test 1: Perfect overlap (IoU = 1.0)
         mask_perfect = create_2d_mask_from_coords([(0, 0), (0, 1), (0, 2)])
@@ -72,8 +72,8 @@ class TestMaskMatching:
         # Test 2: Partial overlap (3/5 intersection, IoU = 3/7)
         graph1 = RustWorkXGraph()
         graph2 = RustWorkXGraph()
-        graph1.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, default_mask)
-        graph2.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, default_mask)
+        graph1.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=default_mask)
+        graph2.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=default_mask)
 
         mask1 = create_2d_mask_from_coords([(0, 0), (0, 1), (0, 2), (0, 3), (0, 4)])
         mask2 = create_2d_mask_from_coords([(0, 2), (0, 3), (0, 4), (0, 5), (0, 6)])
@@ -94,8 +94,8 @@ class TestMaskMatching:
         # Test 3: Below threshold (1/5 = 0.2 < 0.5) - should not match
         graph1 = RustWorkXGraph()
         graph2 = RustWorkXGraph()
-        graph1.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, default_mask)
-        graph2.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, default_mask)
+        graph1.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=default_mask)
+        graph2.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=default_mask)
 
         mask1 = create_2d_mask_from_coords([(0, 0), (0, 1), (0, 2), (0, 3), (0, 4)])
         mask2 = create_2d_mask_from_coords([(0, 4), (0, 5), (0, 6), (0, 7), (0, 8)])
@@ -134,10 +134,10 @@ class TestDistanceMatching:
         graph1 = RustWorkXGraph()
         graph2 = RustWorkXGraph()
 
-        graph1.add_node_attr_key("y", 0.0)
-        graph1.add_node_attr_key("x", 0.0)
-        graph2.add_node_attr_key("y", 0.0)
-        graph2.add_node_attr_key("x", 0.0)
+        graph1.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
+        graph1.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
+        graph2.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
+        graph2.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
 
         # Close nodes (distance ≈ 1.414)
         node1 = graph1.add_node({DEFAULT_ATTR_KEYS.T: 0, "y": 10.0, "x": 10.0})
@@ -157,10 +157,10 @@ class TestDistanceMatching:
         # Far nodes (distance ≈ 141.4)
         graph1 = RustWorkXGraph()
         graph2 = RustWorkXGraph()
-        graph1.add_node_attr_key("y", 0.0)
-        graph1.add_node_attr_key("x", 0.0)
-        graph2.add_node_attr_key("y", 0.0)
-        graph2.add_node_attr_key("x", 0.0)
+        graph1.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
+        graph1.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
+        graph2.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
+        graph2.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
 
         graph1.add_node({DEFAULT_ATTR_KEYS.T: 0, "y": 0.0, "x": 0.0})
         graph2.add_node({DEFAULT_ATTR_KEYS.T: 0, "y": 100.0, "x": 100.0})
@@ -180,8 +180,8 @@ class TestDistanceMatching:
         graph2 = RustWorkXGraph()
 
         for key in ["z", "y", "x"]:
-            graph1.add_node_attr_key(key, 0.0)
-            graph2.add_node_attr_key(key, 0.0)
+            graph1.add_node_attr_key(key, dtype=pl.Float64, default_value=0.0)
+            graph2.add_node_attr_key(key, dtype=pl.Float64, default_value=0.0)
 
         node1 = graph1.add_node({DEFAULT_ATTR_KEYS.T: 0, "z": 5.0, "y": 10.0, "x": 15.0})
         graph2.add_node({DEFAULT_ATTR_KEYS.T: 0, "z": 6.0, "y": 11.0, "x": 16.0})
@@ -202,10 +202,10 @@ class TestDistanceMatching:
         graph1 = RustWorkXGraph()
         graph2 = RustWorkXGraph()
 
-        graph1.add_node_attr_key("y", 0.0)
-        graph1.add_node_attr_key("x", 0.0)
-        graph2.add_node_attr_key("y", 0.0)
-        graph2.add_node_attr_key("x", 0.0)
+        graph1.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
+        graph1.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
+        graph2.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
+        graph2.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
 
         # Nodes far in y but close in x
         graph1.add_node({DEFAULT_ATTR_KEYS.T: 0, "y": 0.0, "x": 0.0})
@@ -234,10 +234,10 @@ class TestDistanceMatching:
         graph1 = RustWorkXGraph()
         graph2 = RustWorkXGraph()
 
-        graph1.add_node_attr_key(DEFAULT_ATTR_KEYS.Y, 0.0)
-        graph1.add_node_attr_key(DEFAULT_ATTR_KEYS.X, 0.0)
-        graph2.add_node_attr_key(DEFAULT_ATTR_KEYS.Y, 0.0)
-        graph2.add_node_attr_key(DEFAULT_ATTR_KEYS.X, 0.0)
+        graph1.add_node_attr_key(DEFAULT_ATTR_KEYS.Y, dtype=pl.Float64, default_value=0.0)
+        graph1.add_node_attr_key(DEFAULT_ATTR_KEYS.X, dtype=pl.Float64, default_value=0.0)
+        graph2.add_node_attr_key(DEFAULT_ATTR_KEYS.Y, dtype=pl.Float64, default_value=0.0)
+        graph2.add_node_attr_key(DEFAULT_ATTR_KEYS.X, dtype=pl.Float64, default_value=0.0)
 
         node1 = graph1.add_node({DEFAULT_ATTR_KEYS.T: 0, DEFAULT_ATTR_KEYS.Y: 10.0, DEFAULT_ATTR_KEYS.X: 10.0})
         graph2.add_node({DEFAULT_ATTR_KEYS.T: 0, DEFAULT_ATTR_KEYS.Y: 11.0, DEFAULT_ATTR_KEYS.X: 11.0})
@@ -258,10 +258,10 @@ class TestDistanceMatching:
         graph1 = RustWorkXGraph()
         graph2 = RustWorkXGraph()
 
-        graph1.add_node_attr_key("y", 0.0)
-        graph1.add_node_attr_key("x", 0.0)
-        graph2.add_node_attr_key("y", 0.0)
-        graph2.add_node_attr_key("x", 0.0)
+        graph1.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
+        graph1.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
+        graph2.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
+        graph2.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
 
         graph1.add_node({DEFAULT_ATTR_KEYS.T: 0, "y": 10.0, "x": 10.0})
         graph2.add_node({DEFAULT_ATTR_KEYS.T: 0, "y": 11.0, "x": 11.0})
@@ -286,8 +286,8 @@ class TestMatchingIntegration:
         graph2 = RustWorkXGraph()
 
         default_mask = Mask(np.array([[False]]), np.array([0, 0, 1, 1]))
-        graph1.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, default_mask)
-        graph2.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, default_mask)
+        graph1.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=default_mask)
+        graph2.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=default_mask)
 
         mask1 = create_2d_mask_from_coords([(0, 0), (0, 1), (0, 2), (0, 3), (0, 4)])
         mask2 = create_2d_mask_from_coords([(0, 2), (0, 3), (0, 4), (0, 5), (0, 6)])
@@ -322,10 +322,10 @@ class TestMatchingIntegration:
         graph1 = RustWorkXGraph()
         graph2 = RustWorkXGraph()
 
-        graph1.add_node_attr_key("y", 0.0)
-        graph1.add_node_attr_key("x", 0.0)
-        graph2.add_node_attr_key("y", 0.0)
-        graph2.add_node_attr_key("x", 0.0)
+        graph1.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
+        graph1.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
+        graph2.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
+        graph2.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
 
         node1 = graph1.add_node({DEFAULT_ATTR_KEYS.T: 0, "y": 10.0, "x": 10.0})
         node2 = graph2.add_node({DEFAULT_ATTR_KEYS.T: 0, "y": 11.0, "x": 11.0})

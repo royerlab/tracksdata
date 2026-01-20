@@ -1,4 +1,5 @@
 import numpy as np
+import polars as pl
 import pytest
 
 from tracksdata.constants import DEFAULT_ATTR_KEYS
@@ -25,8 +26,8 @@ def test_napari_conversion(metadata_shape: bool) -> None:
         tracklet_ids=tracklet_ids,
         tracklet_id_graph=tracklet_id_graph,
     )
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.SOLUTION, True)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.SOLUTION, True)
+    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.SOLUTION, dtype=pl.Boolean, default_value=True)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.SOLUTION, dtype=pl.Boolean, default_value=True)
 
     shape = (2, 10, 22, 32)
     if metadata_shape:
@@ -43,7 +44,7 @@ def test_napari_conversion(metadata_shape: bool) -> None:
     mask_attrs.add_node_attrs(graph)
 
     # Maybe we should update the MaskDiskAttrs to handle bounding boxes
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
+    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, dtype=pl.Object, default_value=None)
     masks = graph.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.MASK])[DEFAULT_ATTR_KEYS.MASK]
     graph.update_node_attrs(
         attrs={DEFAULT_ATTR_KEYS.BBOX: [mask.bbox for mask in masks]},

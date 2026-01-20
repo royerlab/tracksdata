@@ -37,11 +37,11 @@ def create_test_graph(graph_backend: BaseGraph, use_subgraph: bool = False) -> B
         Either the original graph or a subgraph with test data.
     """
     # Add attribute keys
-    graph_backend.add_node_attr_key("x", -1.0)
-    graph_backend.add_node_attr_key("y", -1.0)
-    graph_backend.add_node_attr_key("label", "0")
-    graph_backend.add_edge_attr_key("weight", 0.0)
-    graph_backend.add_edge_attr_key("new_attribute", 0.0)
+    graph_backend.add_node_attr_key("x", dtype=pl.Float64, default_value=-1.0)
+    graph_backend.add_node_attr_key("y", dtype=pl.Float64, default_value=-1.0)
+    graph_backend.add_node_attr_key("label", dtype=pl.String, default_value="0")
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_edge_attr_key("new_attribute", dtype=pl.Float64, default_value=0.0)
 
     # Add nodes with various attributes
     node0 = graph_backend.add_node({"t": 0, "x": 0.0, "y": 0.0, "label": "0"})
@@ -199,7 +199,7 @@ def test_add_node_attr_key_with_data(graph_backend: BaseGraph, use_subgraph: boo
     graph_with_data = create_test_graph(graph_backend, use_subgraph)
 
     # Add a new attribute key with default value
-    graph_with_data.add_node_attr_key("new_node_attribute", 42)
+    graph_with_data.add_node_attr_key("new_node_attribute", dtype=pl.Int64, default_value=42)
 
     # Check that all nodes have this attribute with the default value
     nodes = graph_with_data._test_nodes  # type: ignore
@@ -214,7 +214,7 @@ def test_add_edge_attr_key_with_data(graph_backend: BaseGraph, use_subgraph: boo
     graph_with_data = create_test_graph(graph_backend, use_subgraph)
 
     # Add a new edge attribute key with default value
-    graph_with_data.add_edge_attr_key("new_edge_attribute", 99)
+    graph_with_data.add_edge_attr_key("new_edge_attribute", dtype=pl.Int64, default_value=99)
 
     # Check that all edges have this attribute with the default value
     df = graph_with_data.edge_attrs(attr_keys=["new_edge_attribute"])
@@ -862,7 +862,7 @@ def test_bulk_add_nodes_returned_ids(graph_backend: BaseGraph, use_subgraph: boo
     graph_with_data = create_test_graph(graph_backend, use_subgraph)
 
     # Add attribute keys for the new nodes
-    graph_with_data.add_node_attr_key("z", 0.0)
+    graph_with_data.add_node_attr_key("z", dtype=pl.Float64, default_value=0.0)
 
     # Test bulk adding nodes
     nodes_to_add = [
@@ -913,7 +913,7 @@ def test_bulk_add_edges_returned_ids(graph_backend: BaseGraph, use_subgraph: boo
     graph_with_data = create_test_graph(graph_backend, use_subgraph)
 
     # Add attribute keys for the new edges
-    graph_with_data.add_edge_attr_key("strength", 0.0)
+    graph_with_data.add_edge_attr_key("strength", dtype=pl.Float64, default_value=0.0)
 
     # Get some existing nodes to create edges between
     existing_nodes = graph_with_data._test_nodes  # type: ignore
@@ -1101,8 +1101,8 @@ def test_graph_view_remove_edge(graph_backend: BaseGraph) -> None:
     Tests removal by endpoints and by edge_id with the view in sync mode.
     """
     # Setup root graph with attributes
-    graph_backend.add_node_attr_key("x", None)
-    graph_backend.add_edge_attr_key("weight", 0.0)
+    graph_backend.add_node_attr_key("x", dtype=pl.Object, default_value=None)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
 
     # Nodes and edges
     n0 = graph_backend.add_node({"t": 0, "x": 0.0})

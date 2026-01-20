@@ -1,5 +1,6 @@
 import math
 
+import polars as pl
 import pytest
 
 from tracksdata.attrs import Attr
@@ -85,8 +86,8 @@ def test_ilp_solver_solve_no_edges(caplog: pytest.LogCaptureFixture) -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
 
     # Add some nodes
     graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
@@ -107,9 +108,9 @@ def test_ilp_solver_solve_simple_case() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
 
     # Add nodes
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
@@ -147,9 +148,9 @@ def test_ilp_solver_solve_with_appearance_weight() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
 
     # Add nodes
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
@@ -187,9 +188,9 @@ def test_ilp_solver_solve_with_disappearance_weight() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
 
     # Add nodes
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
@@ -227,9 +228,9 @@ def test_ilp_solver_solve_with_division_weight() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
 
     # Add nodes for division scenario
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
@@ -279,10 +280,10 @@ def test_ilp_solver_solve_custom_edge_weight_expr() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
-    graph.add_edge_attr_key("custom_weight", 0.0)
-    graph.add_edge_attr_key("confidence", 0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
+    graph.add_edge_attr_key("custom_weight", dtype=pl.Float64, default_value=0.0)
+    graph.add_edge_attr_key("confidence", dtype=pl.Float64, default_value=0.0)
 
     # Add nodes
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
@@ -309,9 +310,9 @@ def test_ilp_solver_solve_custom_node_weight_expr() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("quality", 0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("quality", dtype=pl.Float64, default_value=0.0)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
 
     # Add nodes with quality attribute
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "quality": 0.9})
@@ -337,9 +338,9 @@ def test_ilp_solver_solve_custom_output_key() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
 
     # Add nodes and edges
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
@@ -365,9 +366,9 @@ def test_ilp_solver_solve_with_all_weights() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
 
     # Add nodes
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
@@ -430,9 +431,9 @@ def test_ilp_solver_division_constraint() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
 
     # Create a scenario where division would be tempting but should be constrained
     # Time 0: 1 parent node
@@ -503,9 +504,9 @@ def test_ilp_solver_solve_with_inf_expr() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
 
     # Add nodes
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 5.0})
@@ -536,8 +537,8 @@ def test_ilp_solver_solve_with_pos_inf_rejection() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
 
     # Add nodes
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 1.0})
@@ -565,8 +566,8 @@ def test_ilp_solver_solve_with_neg_inf_node_weight() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("priority", 0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    graph.add_node_attr_key("priority", dtype=pl.Float64, default_value=0.0)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
 
     # Add nodes
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "priority": 1.0})  # High priority
@@ -594,8 +595,8 @@ def test_ilp_solver_solve_with_inf_edge_weight() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_edge_attr_key("confidence", 0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
+    graph.add_edge_attr_key("confidence", dtype=pl.Float64, default_value=0.0)
 
     # Add nodes
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0})
@@ -626,9 +627,9 @@ def test_ilp_solver_solve_with_overlaps() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
 
     # Add nodes - overlapping pair at time t=1
     node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
@@ -681,9 +682,9 @@ def test_ilp_solver_solve_with_merge_weight() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("y", dtype=pl.Float64, default_value=0.0)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
 
     # Simple merge scenario: 2 tracks -> 1 merge point
     track1_node = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
@@ -713,8 +714,8 @@ def test_ilp_solver_solve_with_merge_weight() -> None:
 def test_ilp_solver_solve_with_positive_merge_weight() -> None:
     """Test solving with positive merge weight to penalize merges."""
     graph = RustWorkXGraph()
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
 
     # Create merge scenario
     track1_node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0})
@@ -742,8 +743,8 @@ def test_ilp_solver_solve_with_positive_merge_weight() -> None:
 def test_ilp_solver_solve_with_merge_expression() -> None:
     """Test solving with merge weight as an expression."""
     graph = RustWorkXGraph()
-    graph.add_node_attr_key("merge_cost", 0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    graph.add_node_attr_key("merge_cost", dtype=pl.Float64, default_value=0.0)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
 
     # Two source nodes
     source1 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "merge_cost": 0.0})
@@ -774,8 +775,8 @@ def test_ilp_solver_solve_merge_and_division_combined() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    graph.add_node_attr_key("x", dtype=pl.Float64, default_value=0.0)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64, default_value=0.0)
 
     # Create complex scenario: merge followed by division
     # Time 0: Two separate tracks

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import numpy as np
+import polars as pl
 import pytest
 
 from tracksdata.constants import DEFAULT_ATTR_KEYS
@@ -14,11 +15,11 @@ def test_export_from_ctc_roundtrip(tmp_path: Path, metadata_shape: bool) -> None
     # Create original graph with nodes and edges
     in_graph = RustWorkXGraph()
 
-    in_graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, None)
-    in_graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, None)
-    in_graph.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACKLET_ID, -1)
-    in_graph.add_node_attr_key("x", -999_999)
-    in_graph.add_node_attr_key("y", -999_999)
+    in_graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object, None)
+    in_graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Object, None)
+    in_graph.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACKLET_ID, pl.Int64, -1)
+    in_graph.add_node_attr_key("x", pl.Float64, -999_999)
+    in_graph.add_node_attr_key("y", pl.Float64, -999_999)
 
     node_1 = in_graph.add_node(
         attrs={
@@ -62,7 +63,7 @@ def test_export_from_ctc_roundtrip(tmp_path: Path, metadata_shape: bool) -> None
         },
     )
 
-    in_graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, 0.0)
+    in_graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, pl.Float64, 0.0)
     in_graph.add_edge(node_1, node_2, attrs={DEFAULT_ATTR_KEYS.EDGE_DIST: 1.0})
     in_graph.add_edge(node_1, node_3, attrs={DEFAULT_ATTR_KEYS.EDGE_DIST: 1.0})
 

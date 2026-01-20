@@ -1,3 +1,5 @@
+import polars as pl
+
 import tracksdata as td
 
 
@@ -43,7 +45,7 @@ def test_ancestral_connected_edges():
     ref_graph.add_edge(7, 8, {})
 
     # manual matching
-    input_graph.add_node_attr_key(td.DEFAULT_ATTR_KEYS.MATCHED_NODE_ID, -1)
+    input_graph.add_node_attr_key(td.DEFAULT_ATTR_KEYS.MATCHED_NODE_ID, dtype=pl.Int64, default_value=-1)
     input_graph.update_node_attrs(
         attrs={
             td.DEFAULT_ATTR_KEYS.MATCHED_NODE_ID: [0, 1, 2, 3, 4, 5, 6, 8],
