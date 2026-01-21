@@ -29,9 +29,6 @@ class GenericFuncNodeAttrs(BaseNodeAttrsOperator):
         Key of the new attribute to add.
     attr_keys : Sequence[str], optional
         Additional attributes to pass to the `func` as keyword arguments.
-    default_value : Any, optional
-        Default value to use for the new attribute.
-        TODO: this should be replaced by a more advanced typing that takes default values.
     batch_size : int, optional
         Batch size to use for the function.
         If 0, the function will be called for each node separately.
