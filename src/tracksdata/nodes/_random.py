@@ -3,6 +3,7 @@ from typing import Any, Literal
 
 import numpy as np
 
+from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.nodes._base_nodes import BaseNodesOperator
 from tracksdata.utils._multiprocessing import multiprocessing_apply
@@ -99,9 +100,9 @@ class RandomNodes(BaseNodesOperator):
         self.n_nodes = n_nodes_per_tp
 
         if n_dim == 2:
-            self.spatial_cols = ["x", "y"]
+            self.spatial_cols = [DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
         elif n_dim == 3:
-            self.spatial_cols = ["x", "y", "z"]
+            self.spatial_cols = [DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
         else:
             raise ValueError(f"Invalid number of dimensions: {n_dim}")
 
@@ -122,7 +123,7 @@ class RandomNodes(BaseNodesOperator):
         """
         # Register each spatial column individually
         for col in self.spatial_cols:
-            if col not in graph.node_attr_keys:
+            if col not in graph.node_attr_keys():
                 graph.add_node_attr_key(col, -999999.0)
 
         if t is None:

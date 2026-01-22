@@ -146,7 +146,7 @@ class RXFilter(BaseFilter):
         # only edges are filtered return nodes that pass edge filters
         sources = []
         targets = []
-        data = {k: [] for k in self._graph.edge_attr_keys}
+        data = {k: [] for k in self._graph.edge_attr_keys()}
         data[DEFAULT_ATTR_KEYS.EDGE_ID] = []
 
         check_node_ids = None
@@ -201,7 +201,7 @@ class RXFilter(BaseFilter):
             return df
 
         if attr_keys is None:
-            attr_keys = self._graph.edge_attr_keys
+            attr_keys = self._graph.edge_attr_keys()
 
         attr_keys = [
             DEFAULT_ATTR_KEYS.EDGE_ID,
@@ -334,7 +334,7 @@ class RustWorkXGraph(BaseGraph):
 
             elif not isinstance(self._graph.attrs, dict):
                 LOG.warning(
-                    "previous attribute %s will be added to key 'old_attrs' of `graph.metadata`",
+                    "previous attribute %s will be added to key 'old_attrs' of `graph.metadata()`",
                     self._graph.attrs,
                 )
                 self._graph.attrs = {
@@ -415,7 +415,7 @@ class RustWorkXGraph(BaseGraph):
 
         # avoiding copying attributes on purpose, it could be a problem in the future
         if validate_keys:
-            self._validate_attributes(attrs, self.node_attr_keys, "node")
+            self._validate_attributes(attrs, self.node_attr_keys(), "node")
 
             if "t" not in attrs:
                 raise ValueError(f"Node attributes must have a 't' key. Got {attrs.keys()}")
@@ -521,7 +521,7 @@ class RustWorkXGraph(BaseGraph):
             useful to speed up the operation when doing bulk insertions.
         """
         if validate_keys:
-            self._validate_attributes(attrs, self.edge_attr_keys, "edge")
+            self._validate_attributes(attrs, self.edge_attr_keys(), "edge")
         edge_id = self.rx_graph.add_edge(source_id, target_id, attrs)
         attrs[DEFAULT_ATTR_KEYS.EDGE_ID] = edge_id
         return edge_id
@@ -860,14 +860,12 @@ class RustWorkXGraph(BaseGraph):
         """
         return list(self._time_to_nodes.keys())
 
-    @property
     def node_attr_keys(self) -> list[str]:
         """
         Get the keys of the attributes of the nodes.
         """
         return self._node_attr_keys.copy()
 
-    @property
     def edge_attr_keys(self) -> list[str]:
         """
         Get the keys of the attributes of the edges.
@@ -886,13 +884,27 @@ class RustWorkXGraph(BaseGraph):
         default_value : Any
             The default value for existing nodes for the new attribute key.
         """
-        if key in self.node_attr_keys:
+        if key in self.node_attr_keys():
             raise ValueError(f"Attribute key {key} already exists")
 
         self._node_attr_keys.append(key)
         rx_graph = self.rx_graph
         for node_id in rx_graph.node_indices():
             rx_graph[node_id][key] = default_value
+
+    def remove_node_attr_key(self, key: str) -> None:
+        """
+        Remove an existing node attribute key from the graph.
+        """
+        if key not in self.node_attr_keys():
+            raise ValueError(f"Node attribute key {key} does not exist")
+
+        if key in (DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.T):
+            raise ValueError(f"Cannot remove required node attribute key {key}")
+
+        self._node_attr_keys.remove(key)
+        for node_attr in self.rx_graph.nodes():
+            node_attr.pop(key, None)
 
     def add_edge_attr_key(self, key: str, default_value: Any) -> None:
         """
@@ -906,12 +918,23 @@ class RustWorkXGraph(BaseGraph):
         default_value : Any
             The default value for existing edges for the new attribute key.
         """
-        if key in self.edge_attr_keys:
+        if key in self.edge_attr_keys():
             raise ValueError(f"Attribute key {key} already exists")
 
         self._edge_attr_keys.append(key)
-        for _, _, edge_attr in self.rx_graph.weighted_edge_list():
+        for edge_attr in self.rx_graph.edges():
             edge_attr[key] = default_value
+
+    def remove_edge_attr_key(self, key: str) -> None:
+        """
+        Remove an existing edge attribute key from the graph.
+        """
+        if key not in self.edge_attr_keys():
+            raise ValueError(f"Edge attribute key {key} does not exist")
+
+        self._edge_attr_keys.remove(key)
+        for edge_attr in self.rx_graph.edges():
+            edge_attr.pop(key, None)
 
     def _node_attrs_from_node_ids(
         self,
@@ -945,7 +968,7 @@ class RustWorkXGraph(BaseGraph):
             node_ids = list(rx_graph.node_indices())
 
         if attr_keys is None:
-            attr_keys = self.node_attr_keys
+            attr_keys = self.node_attr_keys()
 
         if isinstance(attr_keys, str):
             attr_keys = [attr_keys]
@@ -1009,7 +1032,7 @@ class RustWorkXGraph(BaseGraph):
             Whether to unpack array attributesinto multiple scalar attributes.
         """
         if attr_keys is None:
-            attr_keys = self.edge_attr_keys
+            attr_keys = self.edge_attr_keys()
 
         attr_keys = [DEFAULT_ATTR_KEYS.EDGE_ID, *attr_keys]
         attr_keys = list(dict.fromkeys(attr_keys))
@@ -1047,14 +1070,12 @@ class RustWorkXGraph(BaseGraph):
             df = unpack_array_attrs(df)
         return df
 
-    @property
     def num_edges(self) -> int:
         """
         The number of edges in the graph.
         """
         return self._graph.num_edges()
 
-    @property
     def num_nodes(self) -> int:
         """
         The number of nodes in the graph.
@@ -1081,8 +1102,8 @@ class RustWorkXGraph(BaseGraph):
             node_ids = self.node_ids()
 
         for key, value in attrs.items():
-            if key not in self.node_attr_keys:
-                raise ValueError(f"Node attribute key '{key}' not found in graph. Expected '{self.node_attr_keys}'")
+            if key not in self.node_attr_keys():
+                raise ValueError(f"Node attribute key '{key}' not found in graph. Expected '{self.node_attr_keys()}'")
 
             if not np.isscalar(value) and len(attrs[key]) != len(node_ids):
                 raise ValueError(f"Attribute '{key}' has wrong size. Expected {len(node_ids)}, got {len(attrs[key])}")
@@ -1115,8 +1136,8 @@ class RustWorkXGraph(BaseGraph):
 
         size = len(edge_ids)
         for key, value in attrs.items():
-            if key not in self.edge_attr_keys:
-                raise ValueError(f"Edge attribute key '{key}' not found in graph. Expected '{self.edge_attr_keys}'")
+            if key not in self.edge_attr_keys():
+                raise ValueError(f"Edge attribute key '{key}' not found in graph. Expected '{self.edge_attr_keys()}'")
 
             if np.isscalar(value):
                 attrs[key] = [value] * size
@@ -1155,7 +1176,7 @@ class RustWorkXGraph(BaseGraph):
                 )
             )
         else:
-            if output_key not in self.node_attr_keys:
+            if output_key not in self.node_attr_keys():
                 previous_id_df = None
                 self.add_node_attr_key(output_key, -1)
                 if tracklet_id_offset is None:
@@ -1344,6 +1365,12 @@ class RustWorkXGraph(BaseGraph):
         rx_graph, node_map = self.rx_graph.subgraph_with_nodemap(node_ids)
         return rx_graph, node_map
 
+    def has_node(self, node_id: int) -> bool:
+        """
+        Check if the graph has a node with the given id.
+        """
+        return self.rx_graph.has_node(node_id)
+
     def has_edge(self, source_id: int, target_id: int) -> bool:
         """
         Check if the graph has an edge between two nodes.
@@ -1356,7 +1383,6 @@ class RustWorkXGraph(BaseGraph):
         """
         return self.rx_graph.get_edge_data(source_id, target_id)[DEFAULT_ATTR_KEYS.EDGE_ID]
 
-    @property
     def metadata(self) -> dict[str, Any]:
         return self._graph.attrs
 
@@ -1366,8 +1392,14 @@ class RustWorkXGraph(BaseGraph):
     def remove_metadata(self, key: str) -> None:
         self._graph.attrs.pop(key, None)
 
+    def edge_list(self) -> list[list[int, int]]:
+        """
+        Get the edge list of the graph.
+        """
+        return self.rx_graph.edge_list()
 
-class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
+
+class IndexedRXGraph(MappedGraphMixin, RustWorkXGraph):
     """
     A graph with arbitrary node indices.
 
@@ -1427,7 +1459,6 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
         self._next_external_id += 1
         return next_id
 
-    @property
     def supports_custom_indices(self) -> bool:
         return True
 
@@ -1834,24 +1865,6 @@ class IndexedRXGraph(RustWorkXGraph, MappedGraphMixin):
             include_targets=include_targets,
             include_sources=include_sources,
         )
-
-    def has_edge(self, source_id: int, target_id: int) -> bool:
-        """
-        Check if the graph has an edge between two nodes.
-        """
-        try:
-            source_id = self._map_to_local(source_id)
-        except KeyError:
-            LOG.warning(f"`source_id` {source_id} not found in index map.")
-            return False
-
-        try:
-            target_id = self._map_to_local(target_id)
-        except KeyError:
-            LOG.warning(f"`target_id` {target_id} not found in index map.")
-            return False
-
-        return self.rx_graph.has_edge(source_id, target_id)
 
     def edge_id(self, source_id: int, target_id: int) -> int:
         """

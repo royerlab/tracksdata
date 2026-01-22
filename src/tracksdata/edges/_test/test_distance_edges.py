@@ -40,7 +40,7 @@ def test_distance_edges_add_edges_empty_graph() -> None:
 
     # Should not raise an error on empty graph
     operator.add_edges(graph)
-    assert graph.num_edges == 0
+    assert graph.num_edges() == 0
 
 
 def test_distance_edges_add_edges_single_timepoint_no_previous() -> None:
@@ -59,7 +59,7 @@ def test_distance_edges_add_edges_single_timepoint_no_previous() -> None:
 
     # Should not add any edges since there are no nodes at t=0
     operator.add_edges(graph)
-    assert graph.num_edges == 0
+    assert graph.num_edges() == 0
 
 
 def test_distance_edges_add_edges_single_timepoint_no_current() -> None:
@@ -78,7 +78,7 @@ def test_distance_edges_add_edges_single_timepoint_no_current() -> None:
 
     # Should not add any edges since there are no nodes at t=1
     operator.add_edges(graph)
-    assert graph.num_edges == 0
+    assert graph.num_edges() == 0
 
 
 def test_distance_edges_add_edges_2d_coordinates() -> None:
@@ -102,7 +102,7 @@ def test_distance_edges_add_edges_2d_coordinates() -> None:
     operator.add_edges(graph)
 
     # Should have edges from t=0 to t=1 nodes within distance threshold
-    assert graph.num_edges == 2  # other edges are outside distance threshold
+    assert graph.num_edges() == 2  # other edges are outside distance threshold
 
     # Check that edge weights are added
     edges_df = graph.edge_attrs()
@@ -131,7 +131,7 @@ def test_distance_edges_add_edges_3d_coordinates() -> None:
     operator.add_edges(graph)
 
     # Should have edges from t=0 to t=1 nodes within distance threshold
-    assert graph.num_edges == 2  # other edges are outside distance threshold
+    assert graph.num_edges() == 2  # other edges are outside distance threshold
 
 
 def test_distance_edges_add_edges_custom_attr_keys() -> None:
@@ -155,7 +155,7 @@ def test_distance_edges_add_edges_custom_attr_keys() -> None:
     operator.add_edges(graph)
 
     # Should work with custom attribute keys
-    assert graph.num_edges == 2  # other edges are outside distance threshold
+    assert graph.num_edges() == 2  # other edges are outside distance threshold
 
 
 def test_distance_edges_add_edges_distance_threshold() -> None:
@@ -177,7 +177,7 @@ def test_distance_edges_add_edges_distance_threshold() -> None:
     operator.add_edges(graph)
 
     # Should have no edges due to distance threshold
-    assert graph.num_edges == 0
+    assert graph.num_edges() == 0
 
 
 @pytest.mark.parametrize("n_workers", [1, 2])
@@ -201,7 +201,7 @@ def test_distance_edges_add_edges_multiple_timepoints(n_workers: int) -> None:
         operator.add_edges(graph)
 
     # Should have some edges
-    assert graph.num_edges >= 0
+    assert graph.num_edges() >= 0
 
 
 def test_distance_edges_add_edges_custom_weight_key() -> None:
@@ -223,7 +223,7 @@ def test_distance_edges_add_edges_custom_weight_key() -> None:
 
     operator.add_edges(graph)
 
-    if graph.num_edges > 0:
+    if graph.num_edges() > 0:
         edges_df = graph.edge_attrs()
         assert len(edges_df) == 1
         assert custom_weight_key in edges_df.columns
@@ -255,7 +255,7 @@ def test_distance_edges_n_neighbors_limit() -> None:
     operator.add_edges(graph)
 
     # Should have at most 2 edges (limited by n_neighbors)
-    assert graph.num_edges == 2
+    assert graph.num_edges() == 2
 
 
 @pytest.mark.parametrize("n_workers", [1, 2])

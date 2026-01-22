@@ -34,6 +34,7 @@ if TYPE_CHECKING:
         BBoxSpatialFilter,
         SpatialFilter,
     )
+    from tracksdata.metrics._matching import Matching
 else:
     TrackingGraph = Any
 
@@ -52,7 +53,6 @@ class BaseGraph(abc.ABC):
     def __init__(self) -> None:
         self._cache = {}
 
-    @property
     def supports_custom_indices(self) -> bool:
         """
         Whether the graph backend supports custom indices.
@@ -625,14 +625,12 @@ class BaseGraph(abc.ABC):
             Whether to unpack array attributesinto multiple scalar attributes.
         """
 
-    @property
     @abc.abstractmethod
     def node_attr_keys(self) -> list[str]:
         """
         Get the keys of the attributes of the nodes.
         """
 
-    @property
     @abc.abstractmethod
     def edge_attr_keys(self) -> list[str]:
         """
@@ -647,20 +645,40 @@ class BaseGraph(abc.ABC):
         """
 
     @abc.abstractmethod
+    def remove_node_attr_key(self, key: str) -> None:
+        """
+        Remove an existing node attribute key from the graph.
+
+        Parameters
+        ----------
+        key : str
+            The attribute key to remove.
+        """
+
+    @abc.abstractmethod
     def add_edge_attr_key(self, key: str, default_value: Any) -> None:
         """
         Add a new attribute key to the graph.
         All existing edges will have the default value for the new attribute key.
         """
 
-    @property
+    @abc.abstractmethod
+    def remove_edge_attr_key(self, key: str) -> None:
+        """
+        Remove an existing edge attribute key from the graph.
+
+        Parameters
+        ----------
+        key : str
+            The attribute key to remove.
+        """
+
     @abc.abstractmethod
     def num_edges(self) -> int:
         """
         The number of edges in the graph.
         """
 
-    @property
     @abc.abstractmethod
     def num_nodes(self) -> int:
         """
@@ -862,6 +880,7 @@ class BaseGraph(abc.ABC):
     def match(
         self,
         other: "BaseGraph",
+        matching: "Matching | None" = None,
         matched_node_id_key: str = DEFAULT_ATTR_KEYS.MATCHED_NODE_ID,
         match_score_key: str = DEFAULT_ATTR_KEYS.MATCH_SCORE,
         matched_edge_mask_key: str = DEFAULT_ATTR_KEYS.MATCHED_EDGE_MASK,
@@ -873,35 +892,70 @@ class BaseGraph(abc.ABC):
         ----------
         other : BaseGraph
             The other graph to match to.
+        matching : Matching | None
+            The matching strategy to use. If None, defaults to
+            MaskMatching with optimal=True and min_reference_intersection=0.5.
+            See [MaskMatching][tracksdata.metrics.MaskMatching] and
+            [DistanceMatching][tracksdata.metrics.DistanceMatching] for available strategies.
         matched_node_id_key : str
             The key of the output value of the corresponding node ID in the other graph.
         match_score_key : str
-            The key of the output value of the match score between matched nodes
+            The key of the output value of the match score between matched nodes.
         matched_edge_mask_key : str
             The key of the output as a boolean value indicating if a corresponding edge exists in the other graph.
+
+        Examples
+        --------
+        Match using default mask-based matching:
+
+        ```python
+        graph1.match(graph2)
+        ```
+
+        Match using distance-based matching:
+
+        ```python
+        from tracksdata.metrics import DistanceMatching
+
+        matching = DistanceMatching(optimal=True, max_distance=10.0, centroid_keys=("y", "x"))
+        graph1.match(graph2, matching=matching)
+        ```
+
+        Match with custom mask matching threshold:
+
+        ```python
+        from tracksdata.metrics import MaskMatching
+
+        matching = MaskMatching(optimal=True, min_reference_intersection=0.7)
+        graph1.match(graph2, matching=matching)
+        ```
         """
         from tracksdata.metrics._ctc_metrics import _matching_data
+        from tracksdata.metrics._matching import MaskMatching
+
+        if matching is None:
+            matching = MaskMatching(optimal=True, min_reference_intersection=0.5)
 
         matching_data = _matching_data(
             self,
             other,
             input_graph_key=DEFAULT_ATTR_KEYS.NODE_ID,
             reference_graph_key=DEFAULT_ATTR_KEYS.NODE_ID,
-            optimal_matching=True,
+            matching=matching,
         )
 
-        if matched_node_id_key not in self.node_attr_keys:
+        if matched_node_id_key not in self.node_attr_keys():
             self.add_node_attr_key(matched_node_id_key, -1)
 
-        if match_score_key not in self.node_attr_keys:
+        if match_score_key not in self.node_attr_keys():
             self.add_node_attr_key(match_score_key, 0.0)
 
-        if matched_edge_mask_key not in self.edge_attr_keys:
+        if matched_edge_mask_key not in self.edge_attr_keys():
             self.add_edge_attr_key(matched_edge_mask_key, False)
 
         node_ids = functools.reduce(operator.iadd, matching_data["mapped_comp"])
         other_ids = functools.reduce(operator.iadd, matching_data["mapped_ref"])
-        ious = functools.reduce(operator.iadd, matching_data["ious"])
+        scores = functools.reduce(operator.iadd, matching_data["scores"])
 
         if len(node_ids) == 0:
             LOG.warning("No matching nodes found.")
@@ -909,7 +963,7 @@ class BaseGraph(abc.ABC):
 
         self.update_node_attrs(
             node_ids=node_ids,
-            attrs={matched_node_id_key: other_ids, match_score_key: ious},
+            attrs={matched_node_id_key: other_ids, match_score_key: scores},
         )
 
         other_to_node_ids = dict(zip(other_ids, node_ids, strict=True))
@@ -942,6 +996,9 @@ class BaseGraph(abc.ABC):
         """
         Create a graph from another graph.
 
+        Important:
+        Metadata is copied by reference, so if the content is modified in one graph, it will be modified in the other.
+
         Parameters
         ----------
         other : BaseGraph
@@ -960,20 +1017,21 @@ class BaseGraph(abc.ABC):
         node_attrs = node_attrs.drop(DEFAULT_ATTR_KEYS.NODE_ID)
 
         graph = cls(**kwargs)
+        graph.update_metadata(**other.metadata())
 
         for col in node_attrs.columns:
             if col != DEFAULT_ATTR_KEYS.T:
                 first_value = node_attrs[col].first()
                 graph.add_node_attr_key(col, infer_default_value(first_value))
 
-        if graph.supports_custom_indices:
+        if graph.supports_custom_indices():
             new_node_ids = graph.bulk_add_nodes(
                 list(node_attrs.rows(named=True)),
                 indices=other_node_ids.to_list(),
             )
         else:
             new_node_ids = graph.bulk_add_nodes(list(node_attrs.rows(named=True)))
-            if other.supports_custom_indices:
+            if other.supports_custom_indices():
                 LOG.warning(
                     f"Other graph ({type(other).__name__}) supports custom indices, but this graph "
                     f"({type(graph).__name__}) does not, indexing automatically."
@@ -1066,8 +1124,8 @@ class BaseGraph(abc.ABC):
         summary = ""
 
         summary += "Graph summary:\n"
-        summary += f"Number of nodes: {self.num_nodes}\n"
-        summary += f"Number of edges: {self.num_edges}\n"
+        summary += f"Number of nodes: {self.num_nodes()}\n"
+        summary += f"Number of edges: {self.num_edges()}\n"
         summary += f"Number of overlaps: {len(self.overlaps())}\n"
 
         time_points = self.time_points()
@@ -1113,11 +1171,13 @@ class BaseGraph(abc.ABC):
         ----------
         attr_keys : list[str] | None, optional
             List of attribute keys to use as spatial coordinates. If None, defaults to
-            ["t", "z", "y", "x"] filtered to only include keys present in the graph.
+            [DEFAULT_ATTR_KEYS.T, DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
+            filtered to only include keys present in the graph.
             Common combinations include:
-            - 2D: ["y", "x"]
-            - 3D: ["z", "y", "x"] or ["t", "y", "x"]
-            - 4D: ["t", "z", "y", "x"]
+            - 2D: [DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
+            - 3D: [DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X] or
+                  [DEFAULT_ATTR_KEYS.T, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
+            - 4D: [DEFAULT_ATTR_KEYS.T, DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
 
         Returns
         -------
@@ -1349,8 +1409,8 @@ class BaseGraph(abc.ABC):
         """
         from tracksdata.functional._edges import join_node_attrs_to_edges
 
-        if tracklet_id_key not in self.node_attr_keys:
-            raise ValueError(f"Track id key '{tracklet_id_key}' not found in graph. Expected '{self.node_attr_keys}'")
+        if tracklet_id_key not in self.node_attr_keys():
+            raise ValueError(f"Track id key '{tracklet_id_key}' not found in graph. Expected '{self.node_attr_keys()}'")
 
         nodes_df = self.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, tracklet_id_key])
         edges_df = self.edge_attrs(attr_keys=[])
@@ -1400,6 +1460,8 @@ class BaseGraph(abc.ABC):
         cls: type[T],
         geff_store: StoreLike,
         geff_read_kwargs: dict[str, Any] | None = None,
+        node_attr_key_map: dict[str, str] | None = None,
+        edge_attr_key_map: dict[str, str] | None = None,
         **kwargs,
     ) -> tuple[T, GeffMetadata]:
         """
@@ -1411,6 +1473,12 @@ class BaseGraph(abc.ABC):
             The store or path to the geff data directory to read the graph from.
         geff_read_kwargs : dict[str, Any] | None
             Additional keyword arguments to pass to the `geff.read` function.
+        node_attr_key_map : dict[str, str] | None
+            A mapping to rename node attribute keys.
+            If a key is not in the mapping, it is not renamed.
+        edge_attr_key_map : dict[str, str] | None
+            A mapping to rename edge attribute keys.
+            If a key is not in the mapping, it is not renamed.
         **kwargs
             Additional keyword arguments to pass to the graph constructor.
 
@@ -1436,13 +1504,35 @@ class BaseGraph(abc.ABC):
         node_id_map = rx_graph.attrs["to_rx_id_map"]
         rx_graph.attrs = {"geff": rx_graph.attrs, **rx_graph.attrs["extra"].pop("tracksdata", {})}
 
-        indexed_graph = IndexedRXGraph(
-            rx_graph=rx_graph,
-            node_id_map=node_id_map,
-            **kwargs,
-        )
+        if node_attr_key_map is not None:
+            LOG.info("Mapping node attributes: %s", node_attr_key_map)
+            for src_k, dst_k in node_attr_key_map.items():
+                geff_metadata.node_props_metadata[dst_k] = geff_metadata.node_props_metadata.pop(src_k)
+                for node_attr in rx_graph.nodes():
+                    node_attr[dst_k] = node_attr.pop(src_k)
 
-        if DEFAULT_ATTR_KEYS.MASK in indexed_graph.node_attr_keys:
+        if edge_attr_key_map is not None:
+            LOG.info("Mapping edge attributes: %s", edge_attr_key_map)
+            for src_k, dst_k in edge_attr_key_map.items():
+                geff_metadata.edge_props_metadata[dst_k] = geff_metadata.edge_props_metadata.pop(src_k)
+                for edge_attr in rx_graph.edges():
+                    edge_attr[dst_k] = edge_attr.pop(src_k)
+
+        if cls == IndexedRXGraph:
+            indexed_graph = IndexedRXGraph(
+                rx_graph=rx_graph,
+                node_id_map=node_id_map,
+                **kwargs,
+            )
+        else:
+            # kwargs is used in the final call to cls.from_other
+            indexed_graph = IndexedRXGraph(
+                rx_graph=rx_graph,
+                node_id_map=node_id_map,
+            )
+
+        node_attr_key = indexed_graph.node_attr_keys()
+        if DEFAULT_ATTR_KEYS.MASK in node_attr_key and DEFAULT_ATTR_KEYS.BBOX in node_attr_key:
             from tracksdata.nodes._mask import Mask
 
             # unsafe operation, changing graph content inplace
@@ -1490,7 +1580,13 @@ class BaseGraph(abc.ABC):
 
         if geff_metadata is None:
             axes = [Axis(name=DEFAULT_ATTR_KEYS.T, type="time")]
-            axes.extend([Axis(name=c, type="space") for c in ("z", "y", "x") if c in node_attrs.columns])
+            axes.extend(
+                [
+                    Axis(name=c, type="space")
+                    for c in (DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X)
+                    if c in node_attrs.columns
+                ]
+            )
 
             if DEFAULT_ATTR_KEYS.TRACKLET_ID in node_attrs.columns:
                 track_node_props = {
@@ -1512,7 +1608,7 @@ class BaseGraph(abc.ABC):
                 for k, v in edge_attrs.to_dict().items()
             }
 
-            td_metadata = self.metadata.copy()
+            td_metadata = self.metadata().copy()
             td_metadata.pop("geff", None)  # avoid geff being written multiple times
 
             geff_metadata = geff.GeffMetadata(
@@ -1549,6 +1645,59 @@ class BaseGraph(abc.ABC):
             zarr_format=zarr_format,
         )
 
+    @abc.abstractmethod
+    def metadata(self) -> dict[str, Any]:
+        """
+        Return the metadata of the graph.
+
+        Returns
+        -------
+        dict[str, Any]
+            The metadata of the graph as a dictionary.
+
+        Examples
+        --------
+        ```python
+        metadata = graph.metadata()
+        print(metadata["shape"])
+        ```
+        """
+
+    @abc.abstractmethod
+    def update_metadata(self, **kwargs) -> None:
+        """
+        Set or update metadata for the graph.
+
+        Parameters
+        ----------
+        **kwargs : Any
+            The metadata items to set by key. Values will be stored as JSON.
+
+        Examples
+        --------
+        ```python
+        graph.update_metadata(shape=[1, 25, 25], path="path/to/image.ome.zarr")
+        graph.update_metadata(description="Tracking data from experiment 1")
+        ```
+        """
+
+    @abc.abstractmethod
+    def remove_metadata(self, key: str) -> None:
+        """
+        Remove a metadata key from the graph.
+
+        Parameters
+        ----------
+        key : str
+            The key of the metadata to remove.
+
+        Examples
+        --------
+        ```python
+        graph.remove_metadata("shape")
+        ```
+        """
+
     def to_traccuracy_graph(self, array_view_kwargs: dict[str, Any] | None = None) -> "TrackingGraph":
         """
         Convert the graph to a `traccuracy.TrackingGraph`.
@@ -1566,6 +1715,12 @@ class BaseGraph(abc.ABC):
         from tracksdata.metrics._traccuracy import to_traccuracy_graph
 
         return to_traccuracy_graph(self, array_view_kwargs=array_view_kwargs)
+
+    @abc.abstractmethod
+    def has_node(self, node_id: int) -> bool:
+        """
+        Check if the graph has a node with the given id.
+        """
 
     @abc.abstractmethod
     def has_edge(self, source_id: int, target_id: int) -> bool:
@@ -1665,56 +1820,8 @@ class NodeInterface:
         )
         return data
 
-    @property
     @abc.abstractmethod
-    def metadata(self) -> dict[str, Any]:
+    def edge_list(self) -> list[list[int, int]]:
         """
-        Return the metadata of the graph.
-
-        Returns
-        -------
-        dict[str, Any]
-            The metadata of the graph as a dictionary.
-
-        Examples
-        --------
-        ```python
-        metadata = graph.metadata
-        print(metadata["shape"])
-        ```
-        """
-
-    @abc.abstractmethod
-    def update_metadata(self, **kwargs) -> None:
-        """
-        Set or update metadata for the graph.
-
-        Parameters
-        ----------
-        **kwargs : Any
-            The metadata items to set by key. Values will be stored as JSON.
-
-        Examples
-        --------
-        ```python
-        graph.update_metadata(shape=[1, 25, 25], path="path/to/image.ome.zarr")
-        graph.update_metadata(description="Tracking data from experiment 1")
-        ```
-        """
-
-    @abc.abstractmethod
-    def remove_metadata(self, key: str) -> None:
-        """
-        Remove a metadata key from the graph.
-
-        Parameters
-        ----------
-        key : str
-            The key of the metadata to remove.
-
-        Examples
-        --------
-        ```python
-        graph.remove_metadata("shape")
-        ```
+        Get the edge list of the graph.
         """

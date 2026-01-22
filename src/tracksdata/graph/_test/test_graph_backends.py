@@ -6,6 +6,7 @@ import numpy as np
 import polars as pl
 import pytest
 import rustworkx as rx
+import sqlalchemy as sa
 from zarr.storage import MemoryStore
 
 from tracksdata.attrs import EdgeAttr, NodeAttr
@@ -30,8 +31,8 @@ def test_already_existing_keys(graph_backend: BaseGraph) -> None:
 
 def testing_empty_graph(graph_backend: BaseGraph) -> None:
     """Test that the graph is empty."""
-    assert graph_backend.num_nodes == 0
-    assert graph_backend.num_edges == 0
+    assert graph_backend.num_nodes() == 0
+    assert graph_backend.num_edges() == 0
 
     assert graph_backend.node_attrs().is_empty()
     assert graph_backend.edge_attrs().is_empty()
@@ -119,13 +120,13 @@ def test_remove_edge_by_id(graph_backend: BaseGraph) -> None:
     e1 = graph_backend.add_edge(n1, n2, {"weight": 0.5})
     e2 = graph_backend.add_edge(n2, n3, {"weight": 0.7})
 
-    assert graph_backend.num_edges == 2
+    assert graph_backend.num_edges() == 2
     assert graph_backend.has_edge(n1, n2)
     assert graph_backend.has_edge(n2, n3)
 
     # Delete first edge
     graph_backend.remove_edge(edge_id=e1)
-    assert graph_backend.num_edges == 1
+    assert graph_backend.num_edges() == 1
     assert not graph_backend.has_edge(n1, n2)
     assert graph_backend.has_edge(n2, n3)
 
@@ -358,11 +359,11 @@ def test_subgraph_with_node_and_edge_attr_filters(graph_backend: BaseGraph) -> N
             edge_attr_keys=edge_attrs,
         )
 
-        assert set(subgraph.node_attr_keys) == {DEFAULT_ATTR_KEYS.T, *node_attrs}
-        assert set(subgraph.edge_attr_keys) == set(edge_attrs)
+        assert set(subgraph.node_attr_keys()) == {DEFAULT_ATTR_KEYS.T, *node_attrs}
+        assert set(subgraph.edge_attr_keys()) == set(edge_attrs)
 
-        assert subgraph.num_nodes == 3
-        assert subgraph.num_edges == 1
+        assert subgraph.num_nodes() == 3
+        assert subgraph.num_edges() == 1
 
         subgraph_node_ids = subgraph.node_ids()
         assert set(subgraph_node_ids) == {node1, node3, node5}
@@ -396,8 +397,8 @@ def test_subgraph_with_node_ids_and_filters(graph_backend: BaseGraph) -> None:
 
     subgraph = g_filter.subgraph()
 
-    assert subgraph.num_nodes == 2
-    assert subgraph.num_edges == 0
+    assert subgraph.num_nodes() == 2
+    assert subgraph.num_edges() == 0
 
     subgraph_node_ids = subgraph.node_ids()
     assert set(subgraph_node_ids) == {node0, node2}
@@ -433,6 +434,27 @@ def test_add_node_attr_key(graph_backend: BaseGraph, value) -> None:
         assert new_attr_value == value
 
 
+def test_remove_node_attr_key(graph_backend: BaseGraph) -> None:
+    """Test removing node attribute keys."""
+    graph_backend.add_node_attr_key("label", "init")
+    node_a = graph_backend.add_node({"t": 0, "label": "a"})
+    node_b = graph_backend.add_node({"t": 1, "label": "b"})
+
+    assert "label" in graph_backend.node_attr_keys()
+
+    graph_backend.remove_node_attr_key("label")
+    assert "label" not in graph_backend.node_attr_keys()
+
+    df = graph_backend.filter(node_ids=[node_a, node_b]).node_attrs()
+    assert "label" not in df.columns
+
+    with pytest.raises(ValueError):
+        graph_backend.remove_node_attr_key("label")
+
+    with pytest.raises(ValueError):
+        graph_backend.remove_node_attr_key(DEFAULT_ATTR_KEYS.T)
+
+
 def test_add_edge_attr_key(graph_backend: BaseGraph) -> None:
     """Test adding new edge attribute keys."""
     node1 = graph_backend.add_node({"t": 0})
@@ -443,6 +465,26 @@ def test_add_edge_attr_key(graph_backend: BaseGraph) -> None:
 
     df = graph_backend.edge_attrs(attr_keys=["new_attribute"])
     assert df["new_attribute"].to_list() == [42]
+
+
+def test_remove_edge_attr_key(graph_backend: BaseGraph) -> None:
+    """Test removing edge attribute keys."""
+    node1 = graph_backend.add_node({"t": 0})
+    node2 = graph_backend.add_node({"t": 1})
+
+    graph_backend.add_edge_attr_key("weight", 0.5)
+    graph_backend.add_edge(node1, node2, attrs={"weight": 1.2})
+
+    assert "weight" in graph_backend.edge_attr_keys()
+
+    graph_backend.remove_edge_attr_key("weight")
+    assert "weight" not in graph_backend.edge_attr_keys()
+
+    df = graph_backend.edge_attrs()
+    assert "weight" not in df.columns
+
+    with pytest.raises(ValueError):
+        graph_backend.remove_edge_attr_key("weight")
 
 
 def test_update_node_attrs(graph_backend: BaseGraph) -> None:
@@ -493,7 +535,7 @@ def test_num_edges(graph_backend: BaseGraph) -> None:
     graph_backend.add_edge_attr_key("weight", 0.0)
     graph_backend.add_edge(node1, node2, attrs={"weight": 0.5})
 
-    assert graph_backend.num_edges == 1
+    assert graph_backend.num_edges() == 1
 
 
 def test_num_nodes(graph_backend: BaseGraph) -> None:
@@ -501,7 +543,7 @@ def test_num_nodes(graph_backend: BaseGraph) -> None:
     graph_backend.add_node({"t": 0})
     graph_backend.add_node({"t": 1})
 
-    assert graph_backend.num_nodes == 2
+    assert graph_backend.num_nodes() == 2
 
 
 def test_edge_attrs_include_targets(graph_backend: BaseGraph) -> None:
@@ -617,8 +659,8 @@ def test_from_ctc(
 
     graph = graph_backend.__class__.from_ctc(ctc_data_dir / "02_GT/TRA", **kwargs)
 
-    assert graph.num_nodes > 0
-    assert graph.num_edges > 0
+    assert graph.num_nodes() > 0
+    assert graph.num_edges() > 0
 
 
 def test_sucessors_and_degree(graph_backend: BaseGraph) -> None:
@@ -1020,9 +1062,9 @@ def test_match_method(graph_backend: BaseGraph) -> None:
     )
 
     # Verify that attribute keys were added
-    assert match_node_id_key in graph_backend.node_attr_keys
-    assert match_score_key in graph_backend.node_attr_keys
-    assert edge_match_key in graph_backend.edge_attr_keys
+    assert match_node_id_key in graph_backend.node_attr_keys()
+    assert match_score_key in graph_backend.node_attr_keys()
+    assert edge_match_key in graph_backend.edge_attr_keys()
 
     # Get node attributesto check matching results
     nodes_df = graph_backend.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, match_node_id_key, match_score_key])
@@ -1037,7 +1079,7 @@ def test_match_method(graph_backend: BaseGraph) -> None:
             "score": row[match_score_key],
         }
 
-    assert len(nodes_df) == graph_backend.num_nodes
+    assert len(nodes_df) == graph_backend.num_nodes()
 
     # Check expected matches:
     # node1 (mask1) should match ref_node1 (ref_mask1) - high IoU
@@ -1212,8 +1254,8 @@ def test_from_numpy_array_basic(graph_backend: BaseGraph) -> None:
     else:
         from_array(positions, graph_backend)
 
-    assert graph_backend.num_nodes == 3
-    assert graph_backend.num_edges == 0  # No tracklet_ids, so no edges
+    assert graph_backend.num_nodes() == 3
+    assert graph_backend.num_edges() == 0  # No tracklet_ids, so no edges
 
     # Check node attributes
     nodes_df = graph_backend.node_attrs(attr_keys=["t", "y", "x"])
@@ -1251,8 +1293,8 @@ def test_from_numpy_array_3d(graph_backend: BaseGraph) -> None:
             tracklet_id_graph=tracklet_id_graph,
         )
 
-    assert graph_backend.num_nodes == 3
-    assert graph_backend.num_edges == 2
+    assert graph_backend.num_nodes() == 3
+    assert graph_backend.num_edges() == 2
 
     edges_df = graph_backend.edge_attrs()
     assert len(edges_df) == 2
@@ -1310,6 +1352,8 @@ def test_from_other_with_edges(
 ) -> None:
     """Ensure from_other preserves structure across backend conversions."""
     # Create source graph with nodes, edges, and attributes
+    graph_backend.update_metadata(special_key="special_value")
+
     graph_backend.add_node_attr_key("x", 0.0)
     graph_backend.add_edge_attr_key("weight", 0.0)
     graph_backend.add_edge_attr_key("type", "forward")
@@ -1328,12 +1372,14 @@ def test_from_other_with_edges(
 
     # Verify the new graph has the same structure
     assert isinstance(new_graph, target_cls)
-    assert new_graph.num_nodes == graph_backend.num_nodes
-    assert new_graph.num_edges == graph_backend.num_edges
+    assert new_graph.num_nodes() == graph_backend.num_nodes()
+    assert new_graph.num_edges() == graph_backend.num_edges()
 
     # Verify node and edge attribute keys are copied
-    assert set(new_graph.node_attr_keys) == set(graph_backend.node_attr_keys)
-    assert set(new_graph.edge_attr_keys) == set(graph_backend.edge_attr_keys)
+    assert set(new_graph.node_attr_keys()) == set(graph_backend.node_attr_keys())
+    assert set(new_graph.edge_attr_keys()) == set(graph_backend.edge_attr_keys())
+
+    assert new_graph.metadata() == graph_backend.metadata()
 
     # Verify edge attributes are copied correctly
     source_edges = graph_backend.edge_attrs(attr_keys=["weight", "type"])
@@ -1361,7 +1407,7 @@ def test_from_other_with_edges(
     )
     node_mapping_df = source_nodes_df.join(new_nodes_df, on=[DEFAULT_ATTR_KEYS.T, "x"], how="inner")
     node_map = dict(zip(node_mapping_df["source_id"], node_mapping_df["target_id"], strict=True))
-    assert len(node_map) == graph_backend.num_nodes
+    assert len(node_map) == graph_backend.num_nodes()
 
     # Verify graph connectivity is preserved by checking degrees
     source_out_degrees = sorted(graph_backend.out_degree())
@@ -1408,12 +1454,12 @@ def test_form_other_regionprops_nodes(
     operator = RegionPropsNodes(extra_properties=["area"])
     operator.add_nodes(graph_backend, labels=labels)
 
-    assert graph_backend.num_nodes == 4
+    assert graph_backend.num_nodes() == 4
 
     copied_graph = target_cls.from_other(graph_backend, **target_kwargs)
 
-    assert copied_graph.num_nodes == graph_backend.num_nodes
-    assert set(copied_graph.node_attr_keys) == set(graph_backend.node_attr_keys)
+    assert copied_graph.num_nodes() == graph_backend.num_nodes()
+    assert set(copied_graph.node_attr_keys()) == set(graph_backend.node_attr_keys())
 
     def build_node_map(graph: BaseGraph) -> dict[tuple[int, tuple[int, ...]], dict[str, Any]]:
         nodes_df = graph.node_attrs()
@@ -1764,7 +1810,7 @@ def test_assign_tracklet_ids_node_id_filter(graph_backend: BaseGraph, return_id_
     graph_backend.add_edge(B4, B5, {})
 
     # Ensure tracklet_id attribute exists after nodes were added
-    if DEFAULT_ATTR_KEYS.TRACKLET_ID not in graph_backend.node_attr_keys:
+    if DEFAULT_ATTR_KEYS.TRACKLET_ID not in graph_backend.node_attr_keys():
         graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACKLET_ID, -1)
 
     for seeds, expected in (
@@ -1975,7 +2021,7 @@ def test_nodes_interface(graph_backend: BaseGraph) -> None:
 def test_custom_indices(graph_backend: BaseGraph) -> None:
     """Test custom node indices functionality."""
 
-    if not graph_backend.supports_custom_indices:
+    if not graph_backend.supports_custom_indices():
         pytest.skip("Graph does not support custom indices")
 
     # Add attribute keys for testing
@@ -2020,6 +2066,57 @@ def test_custom_indices(graph_backend: BaseGraph) -> None:
         graph_backend.bulk_add_nodes([{"t": 3, "x": 1.0, "y": 1.0}], indices=[1, 2, 3])
 
 
+def test_sqlgraph_node_attr_index_create_and_drop(graph_backend: BaseGraph) -> None:
+    if not isinstance(graph_backend, SQLGraph):
+        pytest.skip("Only SQLGraph supports explicit SQL indexes")
+
+    graph_backend.add_node_attr_key("label", "")
+    index_name = f"ix_{graph_backend.Node.__tablename__.lower()}_t_label"
+
+    graph_backend.create_node_attr_index(["t", "label"], unique=False)
+
+    inspector = sa.inspect(graph_backend._engine)
+    indexes = inspector.get_indexes(graph_backend.Node.__tablename__)
+    assert len(indexes) == 1
+    assert any(idx["name"] == index_name and idx["column_names"] == ["t", "label"] for idx in indexes)
+
+    dropped_name = graph_backend.drop_node_attr_index(["t", "label"])
+    assert dropped_name == index_name
+
+    indexes_after = sa.inspect(graph_backend._engine).get_indexes(graph_backend.Node.__tablename__)
+    assert all(idx["name"] != index_name for idx in indexes_after)
+
+
+def test_sqlgraph_edge_attr_index_create_and_drop(graph_backend: BaseGraph) -> None:
+    if not isinstance(graph_backend, SQLGraph):
+        pytest.skip("Only SQLGraph supports explicit SQL indexes")
+
+    graph_backend.add_edge_attr_key("score", 0.0)
+    index_name = f"ix_{graph_backend.Edge.__tablename__.lower()}_score"
+
+    graph_backend.create_edge_attr_index("score", unique=True)
+
+    inspector = sa.inspect(graph_backend._engine)
+    indexes = inspector.get_indexes(graph_backend.Edge.__tablename__)
+    assert len(indexes) == 3  # including source_id and target_id indexes
+    assert any(idx["name"] == index_name and idx.get("unique") for idx in indexes)
+
+    dropped_name = graph_backend.drop_edge_attr_index("score")
+    assert dropped_name == index_name
+
+    indexes_after = sa.inspect(graph_backend._engine).get_indexes(graph_backend.Edge.__tablename__)
+    assert len(indexes_after) == 2  # only source_id and target_id indexes remain
+    assert all(idx["name"] != index_name for idx in indexes_after)
+
+
+def test_sqlgraph_index_missing_column(graph_backend: BaseGraph) -> None:
+    if not isinstance(graph_backend, SQLGraph):
+        pytest.skip("Only SQLGraph supports explicit SQL indexes")
+
+    with pytest.raises(ValueError, match=r"Columns .* do not exist"):
+        graph_backend.create_node_attr_index("does_not_exist")
+
+
 def test_remove_node(graph_backend: BaseGraph) -> None:
     """Test removing nodes from the graph."""
     # Add attribute keys
@@ -2040,13 +2137,13 @@ def test_remove_node(graph_backend: BaseGraph) -> None:
     # Add overlap
     graph_backend.add_overlap(node1, node3)
 
-    initial_node_count = graph_backend.num_nodes
+    initial_node_count = graph_backend.num_nodes()
 
     # Remove node2 - this should also remove edges involving node2
     graph_backend.remove_node(node2)
 
     # Check node count decreased
-    assert graph_backend.num_nodes == initial_node_count - 1
+    assert graph_backend.num_nodes() == initial_node_count - 1
 
     # Check that node2 is no longer in the graph
     assert node2 not in graph_backend.node_ids()
@@ -2097,27 +2194,27 @@ def test_remove_node_and_add_new_nodes(graph_backend: BaseGraph) -> None:
     graph_backend.add_edge(node1, node2, {"weight": 0.5})
     graph_backend.add_edge(node2, node3, {"weight": 0.7})
 
-    initial_node_count = graph_backend.num_nodes
-    initial_edge_count = graph_backend.num_edges
+    initial_node_count = graph_backend.num_nodes()
+    initial_edge_count = graph_backend.num_edges()
 
     # Remove the middle node
     graph_backend.remove_node(node2)
 
-    assert graph_backend.num_nodes == initial_node_count - 1
-    assert graph_backend.num_edges == initial_edge_count - 2  # Both edges removed
+    assert graph_backend.num_nodes() == initial_node_count - 1
+    assert graph_backend.num_edges() == initial_edge_count - 2  # Both edges removed
 
     # Add new nodes after removal
     new_node1 = graph_backend.add_node({"t": 1, "x": 10.0})
     new_node2 = graph_backend.add_node({"t": 3, "x": 20.0})
 
-    assert graph_backend.num_nodes == initial_node_count + 1  # net +1 node
+    assert graph_backend.num_nodes() == initial_node_count + 1  # net +1 node
 
     # Add new edges with new nodes
     graph_backend.add_edge(node1, new_node1, {"weight": 0.9})
     graph_backend.add_edge(new_node1, node3, {"weight": 0.8})
     graph_backend.add_edge(node3, new_node2, {"weight": 0.6})
 
-    assert graph_backend.num_edges == initial_edge_count + 1  # net +1 edge
+    assert graph_backend.num_edges() == initial_edge_count + 1  # net +1 edge
 
     # Verify the graph structure by checking node attributes
     # Since RustWorkX can reuse node IDs, we need to check attributes instead of just IDs
@@ -2136,7 +2233,7 @@ def test_remove_node_and_add_new_nodes(graph_backend: BaseGraph) -> None:
     assert (3, 20.0) in current_nodes  # new_node2 attributes
 
     # Verify edge count is correct
-    assert graph_backend.num_edges == initial_edge_count + 1  # net +1 edge
+    assert graph_backend.num_edges() == initial_edge_count + 1  # net +1 edge
 
     # Test time points are updated correctly
     time_points = set(graph_backend.time_points())
@@ -2149,12 +2246,12 @@ def test_remove_isolated_node(graph_backend: BaseGraph) -> None:
     node1 = graph_backend.add_node({"t": 0})
     node2 = graph_backend.add_node({"t": 1})  # isolated node
 
-    initial_count = graph_backend.num_nodes
+    initial_count = graph_backend.num_nodes()
 
     # Remove the isolated node
     graph_backend.remove_node(node2)
 
-    assert graph_backend.num_nodes == initial_count - 1
+    assert graph_backend.num_nodes() == initial_count - 1
     assert node1 in graph_backend.node_ids()
     assert node2 not in graph_backend.node_ids()
 
@@ -2181,9 +2278,7 @@ def test_remove_all_nodes_in_time_point(graph_backend: BaseGraph) -> None:
     assert time_points_after_two == {0, 2}  # t=1 should be gone
 
 
-def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
-    """Test geff roundtrip."""
-
+def _fill_mock_geff_graph(graph_backend: BaseGraph) -> None:
     graph_backend.add_node_attr_key("x", 0.0)
     graph_backend.add_node_attr_key("y", 0.0)
     graph_backend.add_node_attr_key("z", 0.0)
@@ -2243,28 +2338,72 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
     graph_backend.add_edge(node1, node2, {"weight": 0.8})
     graph_backend.add_edge(node2, node3, {"weight": 0.9})
 
+
+def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
+    """Test geff roundtrip."""
+
+    _fill_mock_geff_graph(graph_backend)
+
     output_store = MemoryStore()
 
     graph_backend.to_geff(geff_store=output_store)
 
     geff_graph, _ = IndexedRXGraph.from_geff(output_store)
 
-    assert "geff" in geff_graph.metadata
+    assert "geff" in geff_graph.metadata()
 
     # geff metadata was not stored in original graph
-    geff_graph.metadata.pop("geff")
-    assert geff_graph.metadata == graph_backend.metadata
+    geff_graph.metadata().pop("geff")
+    assert geff_graph.metadata() == graph_backend.metadata()
 
-    assert geff_graph.num_nodes == 3
-    assert geff_graph.num_edges == 2
+    assert geff_graph.num_nodes() == 3
+    assert geff_graph.num_edges() == 2
 
     rx_graph = graph_backend.filter().subgraph().rx_graph
 
-    assert set(graph_backend.node_attr_keys) == set(geff_graph.node_attr_keys)
-    assert set(graph_backend.edge_attr_keys) == set(geff_graph.edge_attr_keys)
+    assert set(graph_backend.node_attr_keys()) == set(geff_graph.node_attr_keys())
+    assert set(graph_backend.edge_attr_keys()) == set(geff_graph.edge_attr_keys())
 
     for node_id in geff_graph.node_ids():
         assert geff_graph[node_id].to_dict() == graph_backend[node_id].to_dict()
+
+    assert rx.is_isomorphic(
+        rx_graph,
+        geff_graph.rx_graph,
+    )
+
+
+def test_geff_with_keymapping(graph_backend: BaseGraph) -> None:
+    """Test geff roundtrip."""
+
+    _fill_mock_geff_graph(graph_backend)
+
+    output_store = MemoryStore()
+
+    graph_backend.to_geff(geff_store=output_store)
+
+    geff_graph, _ = IndexedRXGraph.from_geff(
+        output_store,
+        node_attr_key_map={"x": "x_new", "y": "y_new"},
+        edge_attr_key_map={"weight": "weight_new"},
+    )
+
+    assert "geff" in geff_graph.metadata()
+
+    # geff metadata was not stored in original graph
+    geff_graph.metadata().pop("geff")
+    assert geff_graph.metadata() == graph_backend.metadata()
+
+    assert geff_graph.num_nodes() == 3
+    assert geff_graph.num_edges() == 2
+
+    assert set(graph_backend.node_attr_keys()) - set(geff_graph.node_attr_keys()) == {"x", "y"}
+    assert set(graph_backend.edge_attr_keys()) - set(geff_graph.edge_attr_keys()) == {"weight"}
+
+    assert set(geff_graph.node_attr_keys()) - set(graph_backend.node_attr_keys()) == {"x_new", "y_new"}
+    assert set(geff_graph.edge_attr_keys()) - set(graph_backend.edge_attr_keys()) == {"weight_new"}
+
+    rx_graph = graph_backend.filter().subgraph().rx_graph
 
     assert rx.is_isomorphic(
         rx_graph,
@@ -2293,7 +2432,7 @@ def test_metadata_multiple_dtypes(graph_backend: BaseGraph) -> None:
     graph_backend.update_metadata(**test_metadata)
 
     # Retrieve and verify
-    retrieved = graph_backend.metadata
+    retrieved = graph_backend.metadata()
 
     for key, expected_value in test_metadata.items():
         assert key in retrieved, f"Key '{key}' not found in metadata"
@@ -2301,7 +2440,7 @@ def test_metadata_multiple_dtypes(graph_backend: BaseGraph) -> None:
 
     # Test updating existing keys
     graph_backend.update_metadata(string="updated_value", new_key="new_value")
-    retrieved = graph_backend.metadata
+    retrieved = graph_backend.metadata()
 
     assert retrieved["string"] == "updated_value"
     assert retrieved["new_key"] == "new_value"
@@ -2309,11 +2448,11 @@ def test_metadata_multiple_dtypes(graph_backend: BaseGraph) -> None:
 
     # Testing removing metadata
     graph_backend.remove_metadata("string")
-    retrieved = graph_backend.metadata
+    retrieved = graph_backend.metadata()
     assert "string" not in retrieved
 
     graph_backend.remove_metadata("mixed_list")
-    retrieved = graph_backend.metadata
+    retrieved = graph_backend.metadata()
     assert "string" not in retrieved
     assert "mixed_list" not in retrieved
 
@@ -2350,11 +2489,11 @@ def test_pickle_roundtrip(graph_backend: BaseGraph) -> None:
     pickled_graph = cloudpickle.dumps(graph_backend)
     unpickled_graph = cloudpickle.loads(pickled_graph)
 
-    assert unpickled_graph.num_nodes == graph_backend.num_nodes
-    assert unpickled_graph.num_edges == graph_backend.num_edges
+    assert unpickled_graph.num_nodes() == graph_backend.num_nodes()
+    assert unpickled_graph.num_edges() == graph_backend.num_edges()
 
-    assert unpickled_graph.node_attr_keys == graph_backend.node_attr_keys
-    assert unpickled_graph.edge_attr_keys == graph_backend.edge_attr_keys
+    assert unpickled_graph.node_attr_keys() == graph_backend.node_attr_keys()
+    assert unpickled_graph.edge_attr_keys() == graph_backend.edge_attr_keys()
 
 
 @pytest.mark.slow

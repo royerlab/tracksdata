@@ -400,7 +400,7 @@ class ILPSolver(BaseSolver):
 
         selected_nodes = [node_id for node_id, var in self._node_vars.items() if solution[var.index] > 0.5]
 
-        if self.output_key not in graph.node_attr_keys:
+        if self.output_key not in graph.node_attr_keys():
             graph.add_node_attr_key(self.output_key, False)
         elif self.reset:
             graph.update_node_attrs(attrs={self.output_key: False})
@@ -412,7 +412,7 @@ class ILPSolver(BaseSolver):
 
         selected_edges = [edge_id for edge_id, var in self._edge_vars.items() if solution[var.index] > 0.5]
 
-        if self.output_key not in graph.edge_attr_keys:
+        if self.output_key not in graph.edge_attr_keys():
             graph.add_edge_attr_key(self.output_key, False)
         elif self.reset:
             graph.update_edge_attrs(attrs={self.output_key: False})

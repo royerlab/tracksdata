@@ -86,7 +86,7 @@ def test_apply_tiled_with_aggregation(sample_graph: RustWorkXGraph) -> None:
 
     assert isinstance(total, int)
     # Due to overlaps, total should be >= original node count
-    assert total >= sample_graph.num_nodes
+    assert total >= sample_graph.num_nodes()
 
 
 def test_apply_tiled_default_attrs(sample_graph: RustWorkXGraph) -> None:

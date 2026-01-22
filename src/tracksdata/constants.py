@@ -53,6 +53,9 @@ class DefaultAttrKeys:
 
     NODE_ID = "node_id"
     T = "t"
+    Z = "z"
+    Y = "y"
+    X = "x"
     MASK = "mask"
     BBOX = "bbox"
     SOLUTION = "solution"

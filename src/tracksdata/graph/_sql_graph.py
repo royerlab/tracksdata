@@ -294,12 +294,12 @@ class SQLFilter(BaseFilter):
         if node_attr_keys is not None:
             node_attr_keys = [DEFAULT_ATTR_KEYS.T, *node_attr_keys]
         else:
-            node_attr_keys = [DEFAULT_ATTR_KEYS.T, *self._graph.node_attr_keys]
+            node_attr_keys = [DEFAULT_ATTR_KEYS.T, *self._graph.node_attr_keys()]
 
         node_attr_keys = list(dict.fromkeys(node_attr_keys))
 
         if edge_attr_keys is None:
-            edge_attr_keys = self._graph.edge_attr_keys.copy()
+            edge_attr_keys = self._graph.edge_attr_keys().copy()
 
         node_query = self._query_from_attr_keys(
             query=self._node_query,
@@ -475,7 +475,6 @@ class SQLGraph(BaseGraph):
         self._max_id_per_time = {}
         self._update_max_id_per_time()
 
-    @property
     def supports_custom_indices(self) -> bool:
         return True
 
@@ -636,7 +635,7 @@ class SQLGraph(BaseGraph):
         ```
         """
         if validate_keys:
-            self._validate_attributes(attrs, self.node_attr_keys, "node")
+            self._validate_attributes(attrs, self.node_attr_keys(), "node")
 
             if "t" not in attrs:
                 raise ValueError(f"Node attributes must have a 't' key. Got {attrs.keys()}")
@@ -814,7 +813,7 @@ class SQLGraph(BaseGraph):
         ```
         """
         if validate_keys:
-            self._validate_attributes(attrs, self.edge_attr_keys, "edge")
+            self._validate_attributes(attrs, self.edge_attr_keys(), "edge")
 
         if hasattr(source_id, "item"):
             source_id = source_id.item()
@@ -1282,17 +1281,175 @@ class SQLGraph(BaseGraph):
 
         return edges_df
 
-    @property
     def node_attr_keys(self) -> list[str]:
         keys = list(self.Node.__table__.columns.keys())
         return keys
 
-    @property
     def edge_attr_keys(self) -> list[str]:
         keys = list(self.Edge.__table__.columns.keys())
         for k in [DEFAULT_ATTR_KEYS.EDGE_ID, DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET]:
             keys.remove(k)
         return keys
+
+    def _resolve_attr_keys(
+        self,
+        table_class: type[DeclarativeBase],
+        attr_keys: Sequence[str] | str,
+    ) -> tuple[list[sa.Column], str]:
+        """Check that the given attribute keys exist on the table class and
+        generate resolved columns and an index name based on them.
+
+        Parameters
+        ----------
+        table_class : type[DeclarativeBase]
+            The SQLAlchemy table class.
+        attr_keys : Sequence[str] | str
+            The attribute keys to include in the index name.
+
+        Returns
+        -------
+        str
+            The generated index name.
+        """
+        if isinstance(attr_keys, str):
+            attr_keys = [attr_keys]
+
+        if len(attr_keys) == 0:
+            raise ValueError("attr_keys must contain at least one column name")
+
+        missing = [key for key in attr_keys if key not in table_class.__table__.columns]
+        if missing:
+            raise ValueError(f"Columns {missing} do not exist on table {table_class.__tablename__}")
+        resolved_columns = [getattr(table_class, key) for key in attr_keys]
+
+        if isinstance(attr_keys, str):
+            attr_keys = [attr_keys]
+
+        cols_fragment = "_".join(attr_keys)
+        name = f"ix_{table_class.__tablename__.lower()}_{cols_fragment}"
+        return resolved_columns, name
+
+    def _create_attr_index(
+        self,
+        table_class: type[DeclarativeBase],
+        attr_keys: Sequence[str] | str,
+        *,
+        unique: bool = False,
+    ) -> str:
+        resolved_columns, name = self._resolve_attr_keys(table_class, attr_keys)
+
+        index = sa.Index(name, *resolved_columns, unique=unique)
+
+        LOG.info(
+            "Ensuring index '%s' on table %s (columns=%s, unique=%s)",
+            name,
+            table_class.__tablename__,
+            attr_keys,
+            unique,
+        )
+        index.create(bind=self._engine, checkfirst=True)
+        return name
+
+    def _drop_attr_index(
+        self,
+        table_class: type[DeclarativeBase],
+        attr_keys: Sequence[str] | str,
+    ) -> str:
+        resolved_columns, name = self._resolve_attr_keys(table_class, attr_keys)
+        index = sa.Index(name, *resolved_columns)
+
+        LOG.info(
+            "Dropping index '%s' on table %s (columns=%s)",
+            name,
+            table_class.__tablename__,
+            attr_keys,
+        )
+        index.drop(bind=self._engine, checkfirst=True)
+        return name
+
+    def create_node_attr_index(
+        self,
+        attr_keys: Sequence[str] | str,
+        *,
+        unique: bool = False,
+    ) -> str:
+        """
+        Ensure an index exists for the given node attribute columns.
+        If they are already indexed, they are kept as they are.
+
+        Parameters
+        ----------
+        attr_keys : Sequence[str] | str
+            Column names to include in the index. Can be a single column name
+            or a list of multiple columns for a composite index.
+        unique : bool, default False
+            Whether the index should enforce uniqueness.
+
+        Returns
+        -------
+        str
+            The name of the index.
+
+        """
+
+        return self._create_attr_index(self.Node, attr_keys, unique=unique)
+
+    def create_edge_attr_index(
+        self,
+        attr_keys: Sequence[str] | str,
+        *,
+        unique: bool = False,
+    ) -> str:
+        """Ensure an index exists for the given edge attribute columns.
+
+        Parameters
+        ----------
+        attr_keys : Sequence[str] | str
+            Column names to include in the index. Can be a single column name
+            or a list of multiple columns for a composite index.
+        unique : bool, default False
+            Whether the index should enforce uniqueness.
+
+        Returns
+        -------
+        str
+            The name of the index.
+
+        """
+
+        return self._create_attr_index(self.Edge, attr_keys, unique=unique)
+
+    def drop_node_attr_index(self, attr_keys: Sequence[str] | str) -> str:
+        """Drop an index for the given node attribute columns.
+
+        Parameters
+        ----------
+        attr_keys : Sequence[str] | str
+            Column names to include in the index. Can be a single column name
+            or a list of multiple columns for a composite index.
+
+        Returns
+        -------
+        str
+            The dropped index name.
+        """
+        return self._drop_attr_index(self.Node, attr_keys)
+
+    def drop_edge_attr_index(self, attr_keys: Sequence[str] | str) -> str:
+        """Drop an index for the given edge attribute columns.
+
+        Parameters
+        ----------
+        attr_keys : Sequence[str] | str
+            Column names to include in the index. Can be a single column name
+            or a list of multiple columns for a composite index.
+
+        Returns
+        -------
+        str
+            The dropped index name.
+        """
+        return self._drop_attr_index(self.Edge, attr_keys)
 
     def _sqlalchemy_type_inference(self, default_value: Any) -> TypeEngine:
         if np.isscalar(default_value) and hasattr(default_value, "item"):
@@ -1367,24 +1524,52 @@ class SQLGraph(BaseGraph):
         setattr(table_class, key, sa_column)
         table_class.__table__.append_column(sa_column)
 
+    def _drop_column(self, table_class: type[DeclarativeBase], key: str) -> None:
+        drop_column_stmt = sa.DDL(f"ALTER TABLE {table_class.__table__} DROP COLUMN {key}")
+        LOG.info("drop %s column statement:\n'%s'", table_class.__table__, drop_column_stmt)
+
+        with Session(self._engine) as session:
+            session.execute(drop_column_stmt)
+            session.commit()
+
+        # refresh ORM schema to reflect database changes
+        self._define_schema(overwrite=False)
+
     def add_node_attr_key(self, key: str, default_value: Any) -> None:
-        if key in self.node_attr_keys:
+        if key in self.node_attr_keys():
             raise ValueError(f"Node attribute key {key} already exists")
 
         self._add_new_column(self.Node, key, default_value)
 
+    def remove_node_attr_key(self, key: str) -> None:
+        if key not in self.node_attr_keys():
+            raise ValueError(f"Node attribute key {key} does not exist")
+
+        if key in (DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.T):
+            raise ValueError(f"Cannot remove required node attribute key {key}")
+
+        self._boolean_columns[self.Node.__tablename__].pop(key, None)
+        self._array_columns[self.Node.__tablename__].pop(key, None)
+        self._drop_column(self.Node, key)
+
     def add_edge_attr_key(self, key: str, default_value: Any) -> None:
-        if key in self.edge_attr_keys:
+        if key in self.edge_attr_keys():
             raise ValueError(f"Edge attribute key {key} already exists")
 
         self._add_new_column(self.Edge, key, default_value)
 
-    @property
+    def remove_edge_attr_key(self, key: str) -> None:
+        if key not in self.edge_attr_keys():
+            raise ValueError(f"Edge attribute key {key} does not exist")
+
+        self._boolean_columns[self.Edge.__tablename__].pop(key, None)
+        self._array_columns[self.Edge.__tablename__].pop(key, None)
+        self._drop_column(self.Edge, key)
+
     def num_edges(self) -> int:
         with Session(self._engine) as session:
             return int(session.query(self.Edge).count())
 
-    @property
     def num_nodes(self) -> int:
         with Session(self._engine) as session:
             return int(session.query(self.Node).count())
@@ -1500,7 +1685,7 @@ class SQLGraph(BaseGraph):
             track_node_ids = list(set(self.tracklet_nodes(node_ids)))
         else:
             track_node_ids = None
-        if output_key in self.node_attr_keys:
+        if output_key in self.node_attr_keys():
             node_attr_keys = [output_key]
         else:
             node_attr_keys = []
@@ -1592,8 +1777,8 @@ class SQLGraph(BaseGraph):
             A compressed tracklet graph.
         """
 
-        if tracklet_id_key not in self.node_attr_keys:
-            raise ValueError(f"Track id key '{tracklet_id_key}' not found in graph. Expected '{self.node_attr_keys}'")
+        if tracklet_id_key not in self.node_attr_keys():
+            raise ValueError(f"Track id key '{tracklet_id_key}' not found in graph. Expected '{self.node_attr_keys()}'")
 
         with Session(self._engine) as session:
             node_query = sa.select(getattr(self.Node, tracklet_id_key)).distinct()
@@ -1655,6 +1840,13 @@ class SQLGraph(BaseGraph):
 
         return graph
 
+    def has_node(self, node_id: int) -> bool:
+        """
+        Check if the graph has a node with the given id.
+        """
+        with Session(self._engine) as session:
+            return session.scalar(sa.sql.expression.exists().where(self.Node.node_id == node_id).select())
+
     def has_edge(self, source_id: int, target_id: int) -> bool:
         """
         Check if the graph has an edge between two nodes.
@@ -1708,7 +1900,6 @@ class SQLGraph(BaseGraph):
                     raise ValueError(f"Edge {edge_id} does not exist in the graph.")
             session.commit()
 
-    @property
     def metadata(self) -> dict[str, Any]:
         with Session(self._engine) as session:
             result = session.query(self.Metadata).all()
@@ -1725,3 +1916,13 @@ class SQLGraph(BaseGraph):
         with Session(self._engine) as session:
             session.query(self.Metadata).filter(self.Metadata.key == key).delete()
             session.commit()
+
+    def edge_list(self) -> list[list[int, int]]:
+        """
+        Get the edge list of the graph.
+        """
+        with Session(self._engine) as session:
+            return [
+                [source_id, target_id]
+                for source_id, target_id in session.query(self.Edge.source_id, self.Edge.target_id).all()
+            ]

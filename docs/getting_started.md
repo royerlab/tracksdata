@@ -38,8 +38,8 @@ edge_generator.add_edges(graph)
 solver = td.solvers.NearestNeighborsSolver(edge_weight="distance")
 solution = solver.solve(graph)
 
-print(f"Original graph has {graph.num_nodes} nodes and {graph.num_edges} edges")
-print(f"Solution has {solution.num_nodes} nodes and {solution.num_edges} edges")
+print(f"Original graph has {graph.num_nodes()} nodes and {graph.num_edges()} edges")
+print(f"Solution has {solution.num_nodes()} nodes and {solution.num_edges()} edges")
 ```
 
 ## Working with Real Data

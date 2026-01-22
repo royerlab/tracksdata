@@ -4,30 +4,32 @@ from typing import TYPE_CHECKING
 import numpy as np
 import polars as pl
 import scipy.sparse as sp
+from scipy.optimize import linear_sum_assignment
 
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.io._ctc import compressed_tracks_table
 from tracksdata.options import get_options
-from tracksdata.utils._dtypes import column_from_bytes, column_to_bytes
+from tracksdata.utils._dtypes import column_to_bytes
 from tracksdata.utils._logging import LOG
 from tracksdata.utils._multiprocessing import multiprocessing_apply
 
 if TYPE_CHECKING:
     from tracksdata.graph import RustWorkXGraph
     from tracksdata.graph._base_graph import BaseGraph
+    from tracksdata.metrics._matching import Matching
 
 
-def _fill_empty(weights: sp.csr_array, eps: float = 1e-10) -> None:
+def _fill_empty(weights: sp.csr_array, fill_value: float) -> None:
     """
     Fill empty rows and columns of a sparse matrix with a small value.
     """
     empty_rows = weights.sum(axis=1) == 0
     if empty_rows.any():
-        weights[empty_rows, :] = eps
+        weights[empty_rows, :] = fill_value
 
     empty_cols = weights.sum(axis=0) == 0
     if empty_cols.any():
-        weights[:, empty_cols] = eps
+        weights[:, empty_cols] = fill_value
 
 
 def _match_single_frame(
@@ -36,8 +38,7 @@ def _match_single_frame(
     groups_by_time: dict[str, dict[int, pl.DataFrame]],
     reference_graph_key: str,
     input_graph_key: str,
-    optimal_matching: bool = False,
-    min_reference_intersection: float = 0.5,
+    matching: "Matching",
 ) -> tuple[list[int], list[int], list[float]]:
     """
     Match the groups of the reference and input graphs for a single time point.
@@ -52,15 +53,14 @@ def _match_single_frame(
         The key to obtain the track id from the reference graph.
     input_graph_key : str
         The key to obtain the track id from the input graph.
-    optimal_matching : bool, optional
-        Whether to solve the optimal matching.
-    min_reference_intersection : float, optional
-        The minimum intersection between the reference and input masks to be considered as a match.
+    matching : Matching
+        The matching strategy to use.
 
     Returns
     -------
     tuple[list[int], list[int], list[float]]
-        For each matching, their respective reference id, input id and IoU.
+        For each matching, their respective reference id, input id and score.
+        Score is IoU for mask matching or 1/(1+distance) for distance matching.
     """
     try:
         ref_group = groups_by_time["ref"][t]
@@ -69,37 +69,12 @@ def _match_single_frame(
     except KeyError:
         return [], [], []
 
-    if ref_group[DEFAULT_ATTR_KEYS.MASK].dtype == pl.Binary:
-        ref_group = column_from_bytes(ref_group, DEFAULT_ATTR_KEYS.MASK)
-        comp_group = column_from_bytes(comp_group, DEFAULT_ATTR_KEYS.MASK)
+    # Use the matching strategy to compute weights
+    _mapped_ref, _mapped_comp, _rows, _cols, _ious = matching.compute_weights(
+        ref_group, comp_group, reference_graph_key, input_graph_key
+    )
 
-    _mapped_ref = []
-    _mapped_comp = []
-    _ious = []
-    _rows = []
-    _cols = []
-
-    for i, (ref_id, ref_mask) in enumerate(
-        zip(ref_group[reference_graph_key], ref_group[DEFAULT_ATTR_KEYS.MASK], strict=True)
-    ):
-        for j, (comp_id, comp_mask) in enumerate(
-            zip(comp_group[input_graph_key], comp_group[DEFAULT_ATTR_KEYS.MASK], strict=True)
-        ):
-            # intersection over reference is used to select the matches
-            inter = ref_mask.intersection(comp_mask)
-            ctc_score = inter / ref_mask.size
-            if ctc_score > min_reference_intersection:
-                _mapped_ref.append(ref_id)
-                _mapped_comp.append(comp_id)
-                _rows.append(i)
-                _cols.append(j)
-
-                # NOTE: there was something weird with IoU, the length when compared with `ctc_metrics`
-                #       sometimes it had an extra element
-                iou = inter / (ref_mask.size + comp_mask.size - inter)
-                _ious.append(iou.item())
-
-    if optimal_matching and len(_rows) > 0:
+    if matching.optimal and len(_rows) > 0:
         LOG.info("Solving optimal matching ...")
 
         weights = sp.csr_array((_ious, (_rows, _cols)), dtype=np.float32)
@@ -107,8 +82,24 @@ def _match_single_frame(
         try:
             rows_id, cols_id = sp.csgraph.min_weight_full_bipartite_matching(weights, maximize=True)
         except ValueError:
-            _fill_empty(weights)
-            rows_id, cols_id = sp.csgraph.min_weight_full_bipartite_matching(weights, maximize=True)
+            # this is a workaround when there are disconnected components in the graph
+            fill_value = -1.0
+            _fill_empty(weights, fill_value=fill_value)
+            try:
+                rows_id, cols_id = sp.csgraph.min_weight_full_bipartite_matching(weights, maximize=True)
+            except ValueError:
+                # this is a workaround when then a node degree is low and does not allow a full match
+                # with this it falls back into the dense case which is slower but does not require a full match
+                coo_weights = weights.tocoo()
+                dense_weights = np.full(weights.shape, fill_value, dtype=np.float32)
+                dense_weights[coo_weights.row, coo_weights.col] = coo_weights.data
+                rows_id, cols_id = linear_sum_assignment(dense_weights, maximize=True)
+
+            # removing matching from filled values
+            values = weights[rows_id, cols_id]
+            is_filled = np.isclose(values, fill_value)
+            rows_id = rows_id[~is_filled]
+            cols_id = cols_id[~is_filled]
 
         # loading original group ids and filtering by the matches
         _mapped_ref = ref_group[reference_graph_key][rows_id].to_list()
@@ -125,8 +116,7 @@ def _matching_data(
     reference_graph: "BaseGraph",
     input_graph_key: str,
     reference_graph_key: str,
-    optimal_matching: bool = False,
-    min_reference_intersection: float = 0.5,
+    matching: "Matching",
 ) -> dict[str, list[list]]:
     """
     Compute matching data for CTC metrics.
@@ -144,10 +134,8 @@ def _matching_data(
         Key to obtain the track id from the input graph.
     reference_graph_key : str
         Key to obtain the track id from the reference graph.
-    optimal_matching : bool, optional
-        Whether to solve the optimal matching.
-    min_reference_intersection : float, optional
-        Minimum coverage of a reference mask to be considered as a possible match.
+    matching : Matching
+        The matching strategy to use.
 
     Returns
     -------
@@ -163,13 +151,20 @@ def _matching_data(
 
     n_workers = get_options().n_workers
 
+    # Get required attributes from the matching strategy
+    required_attrs = matching.get_required_attrs(attr_keys=reference_graph.node_attr_keys())
+
+    # Check if we need to serialize masks for multiprocessing
+    use_mask_serialization = n_workers > 1 and DEFAULT_ATTR_KEYS.MASK in required_attrs
+
     # computing unique labels for each graph
     for name, graph, tracklet_id_key in [
         ("ref", reference_graph, reference_graph_key),
         ("comp", input_graph, input_graph_key),
     ]:
-        nodes_df = graph.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.T, tracklet_id_key, DEFAULT_ATTR_KEYS.MASK])
-        if n_workers > 1:
+        attr_keys = [DEFAULT_ATTR_KEYS.T, tracklet_id_key, *required_attrs]
+        nodes_df = graph.node_attrs(attr_keys=attr_keys)
+        if use_mask_serialization:
             # required by multiprocessing
             nodes_df = column_to_bytes(nodes_df, DEFAULT_ATTR_KEYS.MASK)
         labels = {}
@@ -197,18 +192,17 @@ def _matching_data(
 
     mapped_ref = []
     mapped_comp = []
-    ious = []
+    scores = []
 
     match_func = partial(
         _match_single_frame,
         groups_by_time=groups_by_time,
         reference_graph_key=reference_graph_key,
         input_graph_key=input_graph_key,
-        optimal_matching=optimal_matching,
-        min_reference_intersection=min_reference_intersection,
+        matching=matching,
     )
 
-    for _mapped_ref, _mapped_comp, _ious in multiprocessing_apply(
+    for _mapped_ref, _mapped_comp, _weights in multiprocessing_apply(
         func=match_func,
         sequence=range(n_time_points),
         desc="Matching nodes between graphs",
@@ -216,11 +210,11 @@ def _matching_data(
     ):
         mapped_ref.append(_mapped_ref)
         mapped_comp.append(_mapped_comp)
-        ious.append(_ious)
+        scores.append(_weights)
 
     result["mapped_ref"] = mapped_ref
     result["mapped_comp"] = mapped_comp
-    result["ious"] = ious
+    result["scores"] = scores
 
     return result
 
@@ -262,10 +256,17 @@ def compute_ctc_metrics_data(
             - ious: A list of lists containing the intersection over union values
                     between mapped reference and computed masks.
     """
+    from tracksdata.metrics._matching import MaskMatching
+
     input_tracks = compressed_tracks_table(input_graph)
     reference_tracks = compressed_tracks_table(reference_graph)
 
-    matching_data = _matching_data(input_graph, reference_graph, input_tracklet_id_key, reference_tracklet_id_key)
+    # Use default mask matching for CTC metrics
+    matching = MaskMatching(optimal=False)
+    matching_data = _matching_data(
+        input_graph, reference_graph, input_tracklet_id_key, reference_tracklet_id_key, matching
+    )
+    matching_data["ious"] = matching_data.pop("scores")
 
     return input_tracks, reference_tracks, matching_data
 
@@ -328,14 +329,14 @@ def evaluate_ctc_metrics(
     if "SEG" in metrics:
         LOG.warning("IMPORTANT! 'SEG' metric results are based on TRA masks, not the SEG masks.")
 
-    if input_graph.num_nodes == 0:
+    if input_graph.num_nodes() == 0:
         LOG.warning("Input graph has no nodes, returning -1.0 for all metrics.")
         return dict.fromkeys(metrics, -1.0)
 
-    if input_reset or input_tracklet_id_key not in input_graph.node_attr_keys:
+    if input_reset or input_tracklet_id_key not in input_graph.node_attr_keys():
         input_graph.assign_tracklet_ids(input_tracklet_id_key, reset=input_reset)
 
-    if reference_reset or reference_tracklet_id_key not in reference_graph.node_attr_keys:
+    if reference_reset or reference_tracklet_id_key not in reference_graph.node_attr_keys():
         reference_graph.assign_tracklet_ids(reference_tracklet_id_key, reset=reference_reset)
 
     input_tracks, reference_tracks, matching_data = compute_ctc_metrics_data(

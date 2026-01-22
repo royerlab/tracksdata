@@ -44,7 +44,8 @@ class DistanceEdges(BaseEdgesOperator):
         The attribute key to store the distance values in the edges.
     attr_keys : Sequence[str] | None, optional
         The node attribute keys to use for distance calculation. If None,
-        defaults to ["z", "y", "x"] if "z" exists, otherwise ["y", "x"].
+        defaults to [DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
+        if DEFAULT_ATTR_KEYS.Z exists, otherwise [DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X].
 
     Attributes
     ----------
@@ -65,7 +66,7 @@ class DistanceEdges(BaseEdgesOperator):
         The key used to store distance values in edges.
     attr_keys : Sequence[str] | None
         The attribute keys to use for the distance calculation.
-        When None, "z", "y", "x" are used.
+        When None, DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X are used.
     show_progress : bool
         Whether to print progress of the edges addition.
 
@@ -123,7 +124,7 @@ class DistanceEdges(BaseEdgesOperator):
         """
         Initialize the edge attributes for the graph.
         """
-        if self.output_key not in graph.edge_attr_keys:
+        if self.output_key not in graph.edge_attr_keys():
             graph.add_edge_attr_key(self.output_key, default_value=-99999.0)
 
     def _get_spatial_attr_keys(self, graph: BaseGraph) -> list[str]:
@@ -141,12 +142,14 @@ class DistanceEdges(BaseEdgesOperator):
             List of attribute keys to use for spatial coordinates.
         """
         if self.attr_keys is None:
-            if "z" in graph.node_attr_keys:
-                return ["z", "y", "x"]
+            if DEFAULT_ATTR_KEYS.Z in graph.node_attr_keys():
+                attr_keys = [DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
             else:
-                return ["y", "x"]
+                attr_keys = [DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
         else:
-            return list(self.attr_keys)
+            attr_keys = list(self.attr_keys)
+
+        return attr_keys
 
     def _build_kdtree_data(
         self, graph: BaseGraph, time_point: int, attr_keys: Sequence[str]

@@ -11,11 +11,10 @@ from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.graph._mapped_graph_mixin import MappedGraphMixin
 from tracksdata.graph._rustworkx_graph import IndexedRXGraph, RustWorkXGraph, RXFilter
 from tracksdata.graph.filters._indexed_filter import IndexRXFilter
-from tracksdata.utils._logging import LOG
 from tracksdata.utils._signal import is_signal_on
 
 
-class GraphView(RustWorkXGraph, MappedGraphMixin):
+class GraphView(MappedGraphMixin, RustWorkXGraph):
     """
     A filtered view of a graph that maintains bidirectional mapping to the root graph.
 
@@ -116,9 +115,17 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
         # use parent graph overlaps
         self._overlaps = None
 
-    @property
     def supports_custom_indices(self) -> bool:
-        return self._root.supports_custom_indices
+        return self._root.supports_custom_indices()
+
+    def __getstate__(self) -> dict[str, Any]:
+        data = MappedGraphMixin.__getstate__(self)
+        del data["_edge_map_from_root"]
+        return data
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        MappedGraphMixin.__setstate__(self, state)
+        self._edge_map_from_root = self._edge_map_to_root.inverse
 
     @property
     def sync(self) -> bool:
@@ -222,13 +229,11 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
             include_sources=include_sources,
         )
 
-    @property
     def node_attr_keys(self) -> list[str]:
-        return self._root.node_attr_keys if self._node_attr_keys is None else self._node_attr_keys
+        return self._root.node_attr_keys() if self._node_attr_keys is None else self._node_attr_keys
 
-    @property
     def edge_attr_keys(self) -> list[str]:
-        return self._root.edge_attr_keys if self._edge_attr_keys is None else self._edge_attr_keys
+        return self._root.edge_attr_keys() if self._edge_attr_keys is None else self._edge_attr_keys
 
     def add_node_attr_key(self, key: str, default_value: Any) -> None:
         self._root.add_node_attr_key(key, default_value)
@@ -243,6 +248,18 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
             else:
                 self._out_of_sync = True
 
+    def remove_node_attr_key(self, key: str) -> None:
+        self._root.remove_node_attr_key(key)
+        if self._node_attr_keys is not None and key in self._node_attr_keys:
+            self._node_attr_keys.remove(key)
+
+        if not self._is_root_rx_graph:
+            if self.sync:
+                for node_id in self.rx_graph.node_indices():
+                    self.rx_graph[node_id].pop(key, None)
+            else:
+                self._out_of_sync = True
+
     def add_edge_attr_key(self, key: str, default_value: Any) -> None:
         self._root.add_edge_attr_key(key, default_value)
         if self._edge_attr_keys is not None:
@@ -252,6 +269,18 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
             if self.sync:
                 for _, _, edge_attr in self.rx_graph.weighted_edge_list():
                     edge_attr[key] = default_value
+            else:
+                self._out_of_sync = True
+
+    def remove_edge_attr_key(self, key: str) -> None:
+        self._root.remove_edge_attr_key(key)
+        if self._edge_attr_keys is not None and key in self._edge_attr_keys:
+            self._edge_attr_keys.remove(key)
+        # because attributes are passed by reference, we need don't need if both are rustworkx graphs
+        if not self._is_root_rx_graph:
+            if self.sync:
+                for edge_attr in self.rx_graph.edges():
+                    edge_attr.pop(key, None)
             else:
                 self._out_of_sync = True
 
@@ -704,25 +733,6 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
         node_map = {k: self._map_to_external(v) for k, v in node_map.items()}
         return rx_graph, node_map
 
-    def has_edge(self, source_id: int, target_id: int) -> bool:
-        """
-        Check if the graph has an edge between two nodes.
-        """
-
-        try:
-            source_id = self._map_to_local(source_id)
-        except KeyError:
-            LOG.warning(f"`source_id` {source_id} not found in index map.")
-            return False
-
-        try:
-            target_id = self._map_to_local(target_id)
-        except KeyError:
-            LOG.warning(f"`target_id` {target_id} not found in index map.")
-            return False
-
-        return self.rx_graph.has_edge(source_id, target_id)
-
     def edge_id(self, source_id: int, target_id: int) -> int:
         """
         Return the edge id between two nodes.
@@ -745,9 +755,8 @@ class GraphView(RustWorkXGraph, MappedGraphMixin):
             "Use `detach` to create a new reference-less graph with the same nodes and edges."
         )
 
-    @property
     def metadata(self) -> dict[str, Any]:
-        return self._root.metadata
+        return self._root.metadata()
 
     def update_metadata(self, **kwargs) -> None:
         self._root.update_metadata(**kwargs)

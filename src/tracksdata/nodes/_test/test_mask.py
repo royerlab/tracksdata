@@ -14,6 +14,18 @@ def test_mask_init() -> None:
     assert np.array_equal(mask._bbox, bbox)
 
 
+def test_mask_regionprops_spacing_aware() -> None:
+    """Regionprops should account for spacing when provided."""
+    mask_array = np.array([[False, True], [True, False]], dtype=bool)
+    bbox = np.array([0, 0, 2, 2])
+    spacing = np.array([2.0, 3.0])  # y-spacing=2.0, x-spacing=3.0
+
+    props = Mask(mask_array, bbox).regionprops(spacing=spacing)
+
+    assert props.area == 12  # area (2) should be scaled by spacing (2*3=6)
+    np.testing.assert_allclose(props.centroid, np.array([1.0, 1.5]))
+
+
 def test_mask_regionprops_bbox_aware() -> None:
     """Regionprops should return absolute coordinates using the bbox offset."""
     mask_array = np.array([[False, True], [True, False]], dtype=bool)
