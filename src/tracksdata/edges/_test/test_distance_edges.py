@@ -390,6 +390,8 @@ def test_distance_edges_neighbors_per_frame_true() -> None:
     operator.add_edges(graph)
 
     edges_df = graph.edge_attrs()
+    assert len(edges_df) == 4 + 2 + 2  # 4 edges from node_2 and 2 edges from node_1a, node_1b
+
     t2_edges = edges_df.filter(edges_df[DEFAULT_ATTR_KEYS.EDGE_TARGET] == node_2)
 
     # Should have 4 edges (2 from t=0, 2 from t=1)
