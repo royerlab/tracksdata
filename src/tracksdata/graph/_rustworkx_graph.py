@@ -52,14 +52,28 @@ def _pop_time_eq(
     return out_attrs, time
 
 
+def _maybe_fill_null(s: pl.Series, schema: AttrSchema) -> pl.Series:
+    if s.has_nulls():
+        if isinstance(schema.default_value, np.ndarray):
+            value = schema.default_value.tolist()
+        elif schema.dtype == pl.Object:
+            value = pl.lit(schema.default_value, allow_object=True)
+        else:
+            value = schema.default_value
+        s = s.fill_null(value)
+    return s
+
+
 def _create_filter_func(
     attr_comps: Sequence[AttrComparison],
+    schema: dict[str, AttrSchema],
 ) -> Callable[[dict[str, Any]], bool]:
     LOG.info(f"Creating filter function for {attr_comps}")
 
     def _filter(attrs: dict[str, Any]) -> bool:
         for attr_op in attr_comps:
-            if not attr_op.op(attrs[str(attr_op.column)], attr_op.other):
+            value = attrs.get(attr_op.column, schema[attr_op.column].default_value)
+            if not attr_op.op(value, attr_op.other):
                 return False
         return True
 
@@ -138,7 +152,7 @@ class RXFilter(BaseFilter):
     def _edge_attrs(self) -> pl.DataFrame:
         node_ids = self._current_node_ids()
 
-        _filter_func = _create_filter_func(self._edge_attr_comps)
+        _filter_func = _create_filter_func(self._edge_attr_comps, self._graph._edge_attr_schemas())
         neigh_funcs = [self._graph.rx_graph.out_edges]
 
         if self._include_sources:
@@ -167,12 +181,22 @@ class RXFilter(BaseFilter):
                         sources.append(src)
                         targets.append(tgt)
                         for k in data.keys():
-                            data[k].append(attr[k])
+                            data[k].append(attr.get(k, None))
 
-        df = pl.DataFrame(data).with_columns(
-            pl.Series(sources, dtype=pl.Int64).alias(DEFAULT_ATTR_KEYS.EDGE_SOURCE),
-            pl.Series(targets, dtype=pl.Int64).alias(DEFAULT_ATTR_KEYS.EDGE_TARGET),
+        for k in data.keys():
+            schema = self._graph._edge_attr_schemas()[k]
+            s = pl.Series(name=k, values=data[k], dtype=schema.dtype)
+            s = _maybe_fill_null(s, schema)
+            data[k] = s
+
+        data[DEFAULT_ATTR_KEYS.EDGE_SOURCE] = pl.Series(
+            name=DEFAULT_ATTR_KEYS.EDGE_SOURCE, values=sources, dtype=pl.Int64
         )
+        data[DEFAULT_ATTR_KEYS.EDGE_TARGET] = pl.Series(
+            name=DEFAULT_ATTR_KEYS.EDGE_TARGET, values=targets, dtype=pl.Int64
+        )
+
+        df = pl.DataFrame(data)
         return df
 
     @cache_method
@@ -229,14 +253,14 @@ class RXFilter(BaseFilter):
 
         rx_graph, node_map = self._graph._rx_subgraph_with_nodemap(node_ids)
         if self._edge_attr_comps:
-            _filter_func = _create_filter_func(self._edge_attr_comps)
+            _filter_func = _create_filter_func(self._edge_attr_comps, self._graph._edge_attr_schemas())
             for src, tgt, attr in rx_graph.weighted_edge_list():
                 if not _filter_func(attr):
                     rx_graph.remove_edge(src, tgt)
 
         # Ensure the time key is in the node attributes
         if node_attr_keys is not None:
-            node_attr_keys = [DEFAULT_ATTR_KEYS.T, *node_attr_keys]
+            node_attr_keys = [DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.T, *node_attr_keys]
             node_attr_keys = list(dict.fromkeys(node_attr_keys))
 
         graph_view = GraphView(
@@ -318,19 +342,22 @@ class RustWorkXGraph(BaseGraph):
         super().__init__()
 
         self._time_to_nodes: dict[int, list[int]] = {}
-        self._node_attr_schemas: dict[str, AttrSchema] = {}
-        self._edge_attr_schemas: dict[str, AttrSchema] = {}
+        self.__node_attr_schemas: dict[str, AttrSchema] = {}
+        self.__edge_attr_schemas: dict[str, AttrSchema] = {}
         self._overlaps: list[list[int, 2]] = []
 
         # Add default node attributes with inferred schemas
-        self._node_attr_schemas[DEFAULT_ATTR_KEYS.NODE_ID] = AttrSchema(
-            key=DEFAULT_ATTR_KEYS.NODE_ID,
-            dtype=pl.Int64,
-        )
-        self._node_attr_schemas[DEFAULT_ATTR_KEYS.T] = AttrSchema(
-            key=DEFAULT_ATTR_KEYS.T,
-            dtype=pl.Int64,
-        )
+        for key in [DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.T]:
+            self.__node_attr_schemas[key] = AttrSchema(
+                key=key,
+                dtype=pl.Int64,
+            )
+
+        for key in [DEFAULT_ATTR_KEYS.EDGE_ID, DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET]:
+            self.__edge_attr_schemas[key] = AttrSchema(
+                key=key,
+                dtype=pl.Int64,
+            )
 
         if rx_graph is None:
             self._graph = rx.PyDiGraph(attrs={})
@@ -376,7 +403,7 @@ class RustWorkXGraph(BaseGraph):
                     except (ValueError, TypeError):
                         # If polars can't infer dtype (e.g., for complex objects), use Object
                         dtype = pl.Object
-                    self._node_attr_schemas[key] = AttrSchema(key=key, dtype=dtype)
+                    self.__node_attr_schemas[key] = AttrSchema(key=key, dtype=dtype)
 
             # Process edges: set edge IDs and infer schemas
             edge_idx_map = self._graph.edge_index_map()
@@ -398,7 +425,13 @@ class RustWorkXGraph(BaseGraph):
                     except (ValueError, TypeError):
                         # If polars can't infer dtype (e.g., for complex objects), use Object
                         dtype = pl.Object
-                    self._edge_attr_schemas[key] = AttrSchema(key=key, dtype=dtype)
+                    self.__edge_attr_schemas[key] = AttrSchema(key=key, dtype=dtype)
+
+    def _node_attr_schemas(self) -> dict[str, AttrSchema]:
+        return self.__node_attr_schemas
+
+    def _edge_attr_schemas(self) -> dict[str, AttrSchema]:
+        return self.__edge_attr_schemas
 
     @property
     def rx_graph(self) -> rx.PyDiGraph:
@@ -870,7 +903,7 @@ class RustWorkXGraph(BaseGraph):
             # subgraph of selected nodes
             rx_graph, node_map = rx_graph.subgraph_with_nodemap(selected_nodes)
 
-        _filter_func = _create_filter_func(attrs)
+        _filter_func = _create_filter_func(attrs, self._node_attr_schemas())
 
         if node_map is None:
             return list(rx_graph.filter_nodes(_filter_func))
@@ -895,17 +928,36 @@ class RustWorkXGraph(BaseGraph):
         """
         return list(self._time_to_nodes.keys())
 
-    def node_attr_keys(self) -> list[str]:
+    def node_attr_keys(self, return_ids: bool = False) -> list[str]:
         """
         Get the keys of the attributes of the nodes.
-        """
-        return list(self._node_attr_schemas.keys())
 
-    def edge_attr_keys(self) -> list[str]:
+        Parameters
+        ----------
+        return_ids : bool, optional
+            Whether to include NODE_ID in the returned keys. Defaults to False.
+            If True, NODE_ID will be included in the list.
+        """
+        keys = list(self._node_attr_schemas().keys())
+        if not return_ids and DEFAULT_ATTR_KEYS.NODE_ID in keys:
+            keys.remove(DEFAULT_ATTR_KEYS.NODE_ID)
+        return keys
+
+    def edge_attr_keys(self, return_ids: bool = False) -> list[str]:
         """
         Get the keys of the attributes of the edges.
+
+        Parameters
+        ----------
+        return_ids : bool, optional
+            Whether to include EDGE_ID, EDGE_SOURCE, and EDGE_TARGET in the returned keys.
+            Defaults to False. If True, these ID fields will be included in the list.
         """
-        return list(self._edge_attr_schemas.keys())
+        keys = list(self.__edge_attr_schemas.keys())
+        if not return_ids:
+            for id_key in [DEFAULT_ATTR_KEYS.EDGE_ID, DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET]:
+                keys.remove(id_key)
+        return keys
 
     def add_node_attr_key(
         self,
@@ -928,15 +980,10 @@ class RustWorkXGraph(BaseGraph):
             If None, will be inferred from dtype.
         """
         # Process arguments and create validated schema
-        schema = process_attr_key_args(key_or_schema, dtype, default_value, self._node_attr_schemas)
+        schema = process_attr_key_args(key_or_schema, dtype, default_value, self.__node_attr_schemas)
 
         # Store schema
-        self._node_attr_schemas[schema.key] = schema
-
-        # Add to all existing nodes
-        rx_graph = self.rx_graph
-        for node_id in rx_graph.node_indices():
-            rx_graph[node_id][schema.key] = schema.default_value
+        self.__node_attr_schemas[schema.key] = schema
 
     def remove_node_attr_key(self, key: str) -> None:
         """
@@ -948,7 +995,7 @@ class RustWorkXGraph(BaseGraph):
         if key in (DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.T):
             raise ValueError(f"Cannot remove required node attribute key {key}")
 
-        del self._node_attr_schemas[key]
+        del self.__node_attr_schemas[key]
         for node_attr in self.rx_graph.nodes():
             node_attr.pop(key, None)
 
@@ -973,14 +1020,10 @@ class RustWorkXGraph(BaseGraph):
             If None, will be inferred from dtype.
         """
         # Process arguments and create validated schema
-        schema = process_attr_key_args(key_or_schema, dtype, default_value, self._edge_attr_schemas)
+        schema = process_attr_key_args(key_or_schema, dtype, default_value, self.__edge_attr_schemas)
 
         # Store schema
-        self._edge_attr_schemas[schema.key] = schema
-
-        # Add to all existing edges
-        for edge_attr in self.rx_graph.edges():
-            edge_attr[schema.key] = schema.default_value
+        self.__edge_attr_schemas[schema.key] = schema
 
     def remove_edge_attr_key(self, key: str) -> None:
         """
@@ -989,7 +1032,7 @@ class RustWorkXGraph(BaseGraph):
         if key not in self.edge_attr_keys():
             raise ValueError(f"Edge attribute key {key} does not exist")
 
-        del self._edge_attr_schemas[key]
+        del self.__edge_attr_schemas[key]
         for edge_attr in self.rx_graph.edges():
             edge_attr.pop(key, None)
 
@@ -1012,7 +1055,7 @@ class RustWorkXGraph(BaseGraph):
             The attribute keys to get.
             If None, all the attributes of the first node are used.
         unpack : bool
-            Whether to unpack array attributesinto multiple scalar attributes.
+            Whether to unpack array attributes into multiple scalar attributes.
 
         Returns
         -------
@@ -1025,13 +1068,17 @@ class RustWorkXGraph(BaseGraph):
             node_ids = list(rx_graph.node_indices())
 
         if attr_keys is None:
-            attr_keys = self.node_attr_keys()
+            attr_keys = self.node_attr_keys(return_ids=True)
 
         if isinstance(attr_keys, str):
             attr_keys = [attr_keys]
 
         if len(node_ids) == 0:
-            return pl.DataFrame({key: [] for key in attr_keys})
+            node_attr_schemas = self._node_attr_schemas()
+            return pl.DataFrame(
+                {key: [] for key in attr_keys},
+                schema={key: node_attr_schemas[key].dtype for key in attr_keys},
+            )
 
         # making them unique
         attr_keys = list(dict.fromkeys(attr_keys))
@@ -1040,17 +1087,24 @@ class RustWorkXGraph(BaseGraph):
         columns = {key: [] for key in attr_keys}
 
         if DEFAULT_ATTR_KEYS.NODE_ID in attr_keys:
-            columns[DEFAULT_ATTR_KEYS.NODE_ID] = np.asarray(node_ids, dtype=int)
+            columns[DEFAULT_ATTR_KEYS.NODE_ID] = pl.Series(
+                name=DEFAULT_ATTR_KEYS.NODE_ID,
+                values=node_ids,
+                dtype=pl.Int64,
+            )
             attr_keys.remove(DEFAULT_ATTR_KEYS.NODE_ID)
 
         # Build columns in a vectorized way
         for node_id in node_ids:
             node_data = rx_graph[node_id]
             for key in attr_keys:
-                columns[key].append(node_data[key])
+                columns[key].append(node_data.get(key))
 
         for key in attr_keys:
-            columns[key] = np.asarray(columns[key])
+            schema = self._node_attr_schemas()[key]
+            s = pl.Series(name=key, values=columns[key], dtype=schema.dtype)
+            s = _maybe_fill_null(s, schema)
+            columns[key] = s
 
         # Create DataFrame and set node_id as index in one shot
         df = pl.DataFrame(columns)
@@ -1115,12 +1169,16 @@ class RustWorkXGraph(BaseGraph):
 
         for row in data:
             for key in attr_keys:
-                columns[key].append(row[key])
+                columns[key].append(row.get(key))
 
         columns[DEFAULT_ATTR_KEYS.EDGE_SOURCE] = source
         columns[DEFAULT_ATTR_KEYS.EDGE_TARGET] = target
 
-        columns = {k: np.asarray(v) for k, v in columns.items()}
+        for key in attr_keys:
+            schema = self._edge_attr_schemas()[key]
+            s = pl.Series(name=key, values=columns[key], dtype=schema.dtype)
+            s = _maybe_fill_null(s, schema)
+            columns[key] = s
 
         df = pl.DataFrame(columns)
         if unpack:
@@ -1235,7 +1293,7 @@ class RustWorkXGraph(BaseGraph):
         else:
             if output_key not in self.node_attr_keys():
                 previous_id_df = None
-                self.add_node_attr_key(output_key, -1)
+                self.add_node_attr_key(output_key, dtype=pl.Int64, default_value=-1)
                 if tracklet_id_offset is None:
                     tracklet_id_offset = 1
             elif reset:

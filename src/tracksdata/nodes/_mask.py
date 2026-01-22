@@ -518,4 +518,4 @@ class MaskDiskAttrs(GenericFuncNodeAttrs):
         Validate that the output key exists in the graph.
         """
         if self.output_key not in graph.node_attr_keys():
-            graph.add_node_attr_key(self.output_key, pl.Array(pl.Int64, 2 * len(self._image_shape)))
+            graph.add_node_attr_key(self.output_key, pl.Object)

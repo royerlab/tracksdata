@@ -113,8 +113,28 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         self._node_attr_keys = node_attr_keys
         self._edge_attr_keys = edge_attr_keys
 
+        # add default keys to the node and edge attr keys
+        if self._node_attr_keys is not None:
+            self._node_attr_keys = [DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.T, *self._node_attr_keys]
+            self._node_attr_keys = list(dict.fromkeys(self._node_attr_keys))
+
+        if self._edge_attr_keys is not None:
+            self._edge_attr_keys = [
+                DEFAULT_ATTR_KEYS.EDGE_ID,
+                DEFAULT_ATTR_KEYS.EDGE_SOURCE,
+                DEFAULT_ATTR_KEYS.EDGE_TARGET,
+                *self._edge_attr_keys,
+            ]
+            self._edge_attr_keys = list(dict.fromkeys(self._edge_attr_keys))
+
         # use parent graph overlaps
         self._overlaps = None
+
+    def _node_attr_schemas(self) -> dict[str, AttrSchema]:
+        return self._root._node_attr_schemas()
+
+    def _edge_attr_schemas(self) -> dict[str, AttrSchema]:
+        return self._root._edge_attr_schemas()
 
     def supports_custom_indices(self) -> bool:
         return self._root.supports_custom_indices()
@@ -230,11 +250,48 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
             include_sources=include_sources,
         )
 
-    def node_attr_keys(self) -> list[str]:
-        return self._root.node_attr_keys() if self._node_attr_keys is None else self._node_attr_keys
+    def node_attr_keys(self, return_ids: bool = False) -> list[str]:
+        """
+        Get the keys of the attributes of the nodes.
 
-    def edge_attr_keys(self) -> list[str]:
-        return self._root.edge_attr_keys() if self._edge_attr_keys is None else self._edge_attr_keys
+        Parameters
+        ----------
+        return_ids : bool, optional
+            Whether to include NODE_ID in the returned keys. Defaults to False.
+            If True, NODE_ID will be included in the list.
+        """
+        if self._node_attr_keys is None:
+            return self._root.node_attr_keys(return_ids=return_ids)
+        else:
+            keys = self._node_attr_keys.copy()
+            if not return_ids:
+                try:
+                    keys.remove(DEFAULT_ATTR_KEYS.NODE_ID)
+                except ValueError:
+                    pass
+            return keys
+
+    def edge_attr_keys(self, return_ids: bool = False) -> list[str]:
+        """
+        Get the keys of the attributes of the edges.
+
+        Parameters
+        ----------
+        return_ids : bool, optional
+            Whether to include EDGE_ID, EDGE_SOURCE, and EDGE_TARGET in the returned keys.
+            Defaults to False. If True, these ID fields will be included in the list.
+        """
+        if self._edge_attr_keys is None:
+            return self._root.edge_attr_keys(return_ids=return_ids)
+        else:
+            keys = self._edge_attr_keys.copy()
+            if not return_ids:
+                for k in [DEFAULT_ATTR_KEYS.EDGE_ID, DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET]:
+                    try:
+                        keys.remove(k)
+                    except ValueError:
+                        pass
+            return keys
 
     def add_node_attr_key(
         self,
@@ -258,7 +315,7 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         if not self._is_root_rx_graph:
             if self.sync:
                 # Get the schema from root to get the actual default value used
-                schema = self._root._node_attr_schemas[key]
+                schema = self._root._node_attr_schemas()[key]
                 # Apply to local rx_graph
                 rx_graph = self.rx_graph
                 for node_id in rx_graph.node_indices():
@@ -300,7 +357,7 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         if not self._is_root_rx_graph:
             if self.sync:
                 # Get the schema from root to get the actual default value used
-                schema = self._root._edge_attr_schemas[key]
+                schema = self._root._edge_attr_schemas()[key]
                 # Apply to local rx_graph
                 for _, _, edge_attr in self.rx_graph.weighted_edge_list():
                     edge_attr[key] = schema.default_value
