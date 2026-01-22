@@ -34,9 +34,12 @@ class DistanceEdges(BaseEdgesOperator):
         For each node at time t, edges will be created to the closest
         n_neighbors nodes at time t-1 to t-delta_t.
     neighbors_per_frame : bool, default False
-        Whether to consider the neighbors in the current frame as well as the previous frame.
-        If True, `n_neighbors` is the number of neighbors per frame.
-        If False, `n_neighbors` is the number of neighbors in all frames (from t-delta_t to t).
+        Whether to consider the `n_neighbors` as `per_frame` or `total`.
+        If True, `n_neighbors` is the number of neighbors per frame, meaning that
+        for each node at time t, edges will be created to the closest
+        n_neighbors per adjacent frame.
+        If False, `n_neighbors` is the number of neighbors in all frames (from t-delta_t to t)
+        considering all adjacent frames together.
     output_key : str, default DEFAULT_ATTR_KEYS.EDGE_WEIGHT
         The attribute key to store the distance values in the edges.
     attr_keys : Sequence[str] | None, optional
