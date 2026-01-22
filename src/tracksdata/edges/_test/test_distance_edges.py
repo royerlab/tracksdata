@@ -472,4 +472,4 @@ def test_distance_edges_neighbors_per_frame_single_delta_t() -> None:
     operator_true.add_edges(graph_copy)
 
     # Both should produce the same number of edges for delta_t=1
-    assert graph.num_edges == graph_copy.num_edges
+    assert graph.num_edges() == graph_copy.num_edges()
