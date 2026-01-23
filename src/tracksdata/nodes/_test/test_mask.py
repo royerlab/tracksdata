@@ -376,6 +376,7 @@ def test_mask_from_coordinates_2d_basic() -> None:
     # Should be a disk of radius 2, shape (5,5), centered at (5,5)
     assert mask.mask.shape == (5, 5)
     assert mask.mask[2, 2]  # center pixel is True
+    assert mask.dtype == bool
     np.testing.assert_array_equal(mask.bbox, [3, 3, 8, 8])
 
 

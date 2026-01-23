@@ -26,10 +26,10 @@ def _nd_sphere(
     """
 
     if ndim == 2:
-        return morph.disk(radius)
+        return morph.disk(radius).astype(bool)
 
     if ndim == 3:
-        return morph.ball(radius)
+        return morph.ball(radius).astype(bool)
 
     raise ValueError(f"Spherical is only implemented for 2D and 3D, got ndim={ndim}")
 
