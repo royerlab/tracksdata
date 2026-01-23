@@ -53,7 +53,7 @@ def _pop_time_eq(
 
 
 def _maybe_fill_null(s: pl.Series, schema: AttrSchema) -> pl.Series:
-    if s.has_nulls():
+    if s.has_nulls() and schema.default_value is not None:
         if isinstance(schema.default_value, np.ndarray):
             value = schema.default_value.tolist()
         elif schema.dtype == pl.Object:
