@@ -725,7 +725,7 @@ class SQLGraph(BaseGraph):
             node[DEFAULT_ATTR_KEYS.NODE_ID] = node_id
             node_ids.append(node_id)
 
-        self._chunked_sa_write(Session.bulk_insert_mappings, self.Node, nodes)
+        self._chunked_sa_write(Session.bulk_insert_mappings, nodes, self.Node)
 
         if is_signal_on(self.node_added):
             for node_id in node_ids:
@@ -884,7 +884,7 @@ class SQLGraph(BaseGraph):
                 return list(result.scalars().all())
 
         else:
-            self._chunked_sa_write(Session.bulk_insert_mappings, self.Edge, edges)
+            self._chunked_sa_write(Session.bulk_insert_mappings, edges, self.Edge)
             return None
 
     def add_overlap(
@@ -938,7 +938,7 @@ class SQLGraph(BaseGraph):
             overlaps = overlaps.tolist()
 
         overlaps = [{"source_id": source_id, "target_id": target_id} for source_id, target_id in overlaps]
-        self._chunked_sa_write(Session.bulk_insert_mappings, self.Overlap, overlaps)
+        self._chunked_sa_write(Session.bulk_insert_mappings, overlaps, self.Overlap)
 
     def overlaps(
         self,
@@ -1635,13 +1635,13 @@ class SQLGraph(BaseGraph):
         LOG.info("update %s table with %d rows", table_class.__table__, len(update_data))
         LOG.info("update data sample: %s", update_data[:2])
 
-        self._chunked_sa_write(Session.bulk_update_mappings, table_class, update_data)
+        self._chunked_sa_write(Session.bulk_update_mappings, update_data, table_class)
 
     def _chunked_sa_write(
         self,
         session_op: Callable[[Session, type[DeclarativeBase], list[dict[str, Any]]], None],
-        table_class: type[DeclarativeBase],
         data: list[dict[str, Any]],
+        table_class: type[DeclarativeBase],
     ) -> None:
         if len(data) == 0:
             return
