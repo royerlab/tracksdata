@@ -529,15 +529,15 @@ class SQLGraph(BaseGraph):
 
         class Edge(Base):
             __tablename__ = "Edge"
-            edge_id = sa.Column(sa.Integer, primary_key=True, unique=True, autoincrement=True)
-            source_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"), index=True)
-            target_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"), index=True)
+            edge_id = sa.Column(sa.Integer, sa.Identity(always=True), primary_key=True, unique=True)
+            source_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"), index=True, nullable=False)
+            target_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"), index=True, nullable=False)
 
         class Overlap(Base):
             __tablename__ = "Overlap"
-            overlap_id = sa.Column(sa.Integer, primary_key=True, unique=True, autoincrement=True)
-            source_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"), index=True)
-            target_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"), index=True)
+            overlap_id = sa.Column(sa.Integer, sa.Identity(always=True), primary_key=True, unique=True)
+            source_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"), index=True, nullable=False)
+            target_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"), index=True, nullable=False)
 
         class Metadata(Base):
             __tablename__ = "Metadata"

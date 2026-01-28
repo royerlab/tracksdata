@@ -342,16 +342,19 @@ class RustWorkXGraph(BaseGraph):
         self._overlaps: list[list[int, 2]] = []
 
         # Add default node attributes with inferred schemas
-        for key in [DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.T]:
-            self.__node_attr_schemas[key] = AttrSchema(
-                key=key,
-                dtype=pl.Int64,
-            )
+        self.__node_attr_schemas[DEFAULT_ATTR_KEYS.T] = AttrSchema(
+            key=DEFAULT_ATTR_KEYS.T,
+            dtype=pl.Int32,
+        )
+        self.__node_attr_schemas[DEFAULT_ATTR_KEYS.NODE_ID] = AttrSchema(
+            key=DEFAULT_ATTR_KEYS.NODE_ID,
+            dtype=pl.Int64,
+        )
 
         for key in [DEFAULT_ATTR_KEYS.EDGE_ID, DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET]:
             self.__edge_attr_schemas[key] = AttrSchema(
                 key=key,
-                dtype=pl.Int64,
+                dtype=pl.Int32 if key == DEFAULT_ATTR_KEYS.EDGE_ID else pl.Int64,
             )
 
         if rx_graph is None:

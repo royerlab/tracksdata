@@ -1188,11 +1188,10 @@ class BaseGraph(abc.ABC):
         graph = cls(**kwargs)
         graph.update_metadata(**other.metadata())
 
-        for col in node_attrs.columns:
-            if col != DEFAULT_ATTR_KEYS.T:
-                # Use the dtype from the source DataFrame
-                dtype = node_attrs[col].dtype
-                graph.add_node_attr_key(col, dtype)
+        current_node_attr_schemas = graph._node_attr_schemas()
+        for k, v in other._node_attr_schemas().items():
+            if k not in current_node_attr_schemas:
+                graph.add_node_attr_key(k, v.dtype, v.default_value)
 
         if graph.supports_custom_indices():
             new_node_ids = graph.bulk_add_nodes(
@@ -1214,11 +1213,11 @@ class BaseGraph(abc.ABC):
         edge_attrs = other.edge_attrs()
         edge_attrs = edge_attrs.drop(DEFAULT_ATTR_KEYS.EDGE_ID)
 
-        for col in edge_attrs.columns:
-            if col not in [DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET]:
-                # Use the dtype from the source DataFrame
-                dtype = edge_attrs[col].dtype
-                graph.add_edge_attr_key(col, dtype)
+        current_edge_attr_schemas = graph._edge_attr_schemas()
+        for k, v in other._edge_attr_schemas().items():
+            if k not in current_edge_attr_schemas:
+                print(f"Adding edge attribute key: {k} with dtype: {v.dtype} and default value: {v.default_value}")
+                graph.add_edge_attr_key(k, v.dtype, v.default_value)
 
         edge_attrs = edge_attrs.with_columns(
             edge_attrs[col].map_elements(node_map.get, return_dtype=pl.Int64).alias(col)

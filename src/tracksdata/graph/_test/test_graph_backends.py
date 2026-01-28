@@ -1362,7 +1362,7 @@ def test_from_other_with_edges(
     graph_backend.update_metadata(special_key="special_value")
 
     graph_backend.add_node_attr_key("x", dtype=pl.Float64)
-    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=-1)
     graph_backend.add_edge_attr_key("type", dtype=pl.String, default_value="forward")
 
     node1 = graph_backend.add_node({"t": 0, "x": 1.0})
@@ -1387,6 +1387,12 @@ def test_from_other_with_edges(
     assert set(new_graph.edge_attr_keys()) == set(graph_backend.edge_attr_keys())
 
     assert new_graph.metadata() == graph_backend.metadata()
+
+    assert new_graph._node_attr_schemas() == graph_backend._node_attr_schemas()
+    assert new_graph._edge_attr_schemas() == graph_backend._edge_attr_schemas()
+
+    assert dict(new_graph.node_attrs().schema) == dict(graph_backend.node_attrs().schema)
+    assert dict(new_graph.edge_attrs().schema) == dict(graph_backend.edge_attrs().schema)
 
     # Verify edge attributes are copied correctly
     source_edges = graph_backend.edge_attrs(attr_keys=["weight", "type"])
