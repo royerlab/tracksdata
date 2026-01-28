@@ -374,8 +374,8 @@ def test_subgraph_with_node_and_edge_attr_filters(graph_backend: BaseGraph) -> N
 
 def test_subgraph_with_node_ids_and_filters(graph_backend: BaseGraph) -> None:
     """Test subgraph with node IDs and filters."""
-    graph_backend.add_node_attr_key("x", pl.Float64)
-    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
+    graph_backend.add_node_attr_key("x", pl.Float32)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float32)
 
     node0 = graph_backend.add_node({"t": 0, "x": 1.0})
     node1 = graph_backend.add_node({"t": 1, "x": 2.0})
@@ -405,6 +405,8 @@ def test_subgraph_with_node_ids_and_filters(graph_backend: BaseGraph) -> None:
 
     subgraph_edge_ids = subgraph.edge_ids()
     assert len(subgraph_edge_ids) == 0
+
+    assert subgraph.node_attrs().schema == graph_backend.node_attrs().schema
 
 
 @pytest.mark.parametrize(
