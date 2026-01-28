@@ -1,7 +1,7 @@
 import binascii
 from collections.abc import Callable, Sequence
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import cloudpickle
 import numpy as np
@@ -11,6 +11,7 @@ import sqlalchemy as sa
 from polars._typing import SchemaDict
 from polars.datatypes.convert import numpy_char_code_to_dtype
 from sqlalchemy.orm import DeclarativeBase, Session, aliased, load_only
+from sqlalchemy.orm.query import Query
 from sqlalchemy.sql.type_api import TypeEngine
 
 from tracksdata.attrs import AttrComparison, split_attr_comps
@@ -24,6 +25,9 @@ from tracksdata.utils._signal import is_signal_on
 
 if TYPE_CHECKING:
     from tracksdata.graph._graph_view import GraphView
+
+
+T = TypeVar("T")
 
 
 def _is_builtin(obj: Any) -> bool:
@@ -1037,14 +1041,19 @@ class SQLGraph(BaseGraph):
 
             query = session.query(getattr(self.Edge, node_key), *node_columns)
             query = query.join(self.Edge, getattr(self.Edge, neighbor_key) == self.Node.node_id)
-            if filter_node_ids is not None:
-                query = query.filter(getattr(self.Edge, node_key).in_(filter_node_ids))
-
-            node_df = pl.read_database(
-                query.statement,
-                connection=session.connection(),
-                schema_overrides=self._polars_schema_override(self.Node),
-            )
+            if filter_node_ids is None or len(filter_node_ids) == 0:
+                node_df = pl.read_database(
+                    query.statement,
+                    connection=session.connection(),
+                    schema_overrides=self._polars_schema_override(self.Node),
+                )
+            else:
+                node_df = self._chunked_sa_read(
+                    session,
+                    lambda x: query.filter(getattr(self.Edge, node_key).in_(x)),
+                    filter_node_ids,
+                    self.Node,
+                )
             node_df = unpickle_bytes_columns(node_df)
             node_df = self._cast_array_columns(self.Node, node_df)
 
@@ -1653,6 +1662,55 @@ class SQLGraph(BaseGraph):
             for i in range(0, len(data), chunk_size):
                 session_op(session, table_class, data[i : i + chunk_size])
             session.commit()
+
+    def _chunked_sa_read(
+        self,
+        session: Session,
+        query_filter_op: Callable[[T], Query],
+        data: list[T],
+        table_class: type[DeclarativeBase],
+    ) -> pl.DataFrame:
+        """
+        Apply a query filter in chunks and concatenate the results.
+
+        Parameters
+        ----------
+        session : Session
+            The SQLAlchemy session.
+        query_filter_op : Callable[[T], Query]
+            The function to apply a query filter to the data. It must return a SQLAlchemy Query object.
+        data : list[T]
+            List of data to passed into the query_filter_op function.
+        table_class : type[DeclarativeBase]
+            The SQLAlchemy table class.
+
+        Examples
+        --------
+        ```python
+        data = [1, 2, 3, 4, 5]
+        query_filter_op = lambda x: query.filter(x.id.in_(data))
+        data_df = self._chunked_sa_read(session, query_filter_op, data, Node)
+        ```
+
+        Returns
+        -------
+        pl.DataFrame
+            The data as a Polars DataFrame.
+        """
+        if len(data) == 0:
+            raise ValueError("Data is empty")
+
+        chunk_size = max(1, self._sql_chunk_size())
+        chunks = []
+        for i in range(0, len(data), chunk_size):
+            query = query_filter_op(data[i : i + chunk_size])
+            data_df = pl.read_database(
+                query.statement,
+                connection=session.connection(),
+                schema_overrides=self._polars_schema_override(table_class),
+            )
+            chunks.append(data_df)
+        return pl.concat(chunks)
 
     def update_node_attrs(
         self,
