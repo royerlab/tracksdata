@@ -406,7 +406,11 @@ def test_subgraph_with_node_ids_and_filters(graph_backend: BaseGraph) -> None:
     subgraph_edge_ids = subgraph.edge_ids()
     assert len(subgraph_edge_ids) == 0
 
-    assert subgraph.node_attrs().schema == graph_backend.node_attrs().schema
+    assert subgraph._node_attr_schemas() == graph_backend._node_attr_schemas()
+    assert subgraph._edge_attr_schemas() == graph_backend._edge_attr_schemas()
+
+    assert dict(subgraph.node_attrs().schema) == dict(graph_backend.node_attrs().schema)
+    assert dict(subgraph.edge_attrs().schema) == dict(graph_backend.edge_attrs().schema)
 
 
 @pytest.mark.parametrize(

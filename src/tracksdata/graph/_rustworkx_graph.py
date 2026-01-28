@@ -1068,12 +1068,11 @@ class RustWorkXGraph(BaseGraph):
         if isinstance(attr_keys, str):
             attr_keys = [attr_keys]
 
+        node_attr_schemas = self._node_attr_schemas()
+        pl_schema = {k: node_attr_schemas[k].dtype for k in attr_keys}
+
         if len(node_ids) == 0:
-            node_attr_schemas = self._node_attr_schemas()
-            return pl.DataFrame(
-                {key: [] for key in attr_keys},
-                schema={key: node_attr_schemas[key].dtype for key in attr_keys},
-            )
+            return pl.DataFrame({key: [] for key in attr_keys}, schema=pl_schema)
 
         # making them unique
         attr_keys = list(dict.fromkeys(attr_keys))
@@ -1096,7 +1095,7 @@ class RustWorkXGraph(BaseGraph):
                 columns[key].append(node_data.get(key))
 
         for key in attr_keys:
-            schema = self._node_attr_schemas()[key]
+            schema = node_attr_schemas[key]
             s = pl.Series(name=key, values=columns[key], dtype=schema.dtype)
             s = _maybe_fill_null(s, schema)
             columns[key] = s
