@@ -2497,7 +2497,7 @@ def test_pickle_roundtrip(graph_backend: BaseGraph) -> None:
 
 
 @pytest.mark.slow
-def test_sql_graph_huge_update() -> None:
+def test_sql_graph_huge_dataset() -> None:
     # test is only executed if `--slow` is passed to pytest
     graph = SQLGraph("sqlite", ":memory:")
 
@@ -2518,6 +2518,9 @@ def test_sql_graph_huge_update() -> None:
         attrs={"x": 1.0},
         node_ids=graph.node_ids(),
     )
+
+    # testing if successors works with huge dataset
+    graph.successors(graph.node_ids())
 
 
 def test_to_traccuracy_graph(graph_backend: BaseGraph) -> None:
