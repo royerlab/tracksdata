@@ -112,8 +112,8 @@ def test_apply_tiled_default_attrs(sample_graph: RustWorkXGraph) -> None:
 def test_apply_tiled_2d_tiling() -> None:
     """Test apply_tiled with 2D spatial coordinates."""
     graph = RustWorkXGraph()
-    graph.add_node_attr_key("y", dtype=pl.Int64)
-    graph.add_node_attr_key("x", dtype=pl.Int64)
+    graph.add_node_attr_key("y", dtype=pl.Float64)
+    graph.add_node_attr_key("x", dtype=pl.Float64)
 
     for y in [5, 11, 14]:
         for x in [10, 30]:
@@ -192,6 +192,9 @@ def test_apply_tile_scale_invariance() -> None:
 
     for scale in scales:
         graph = RustWorkXGraph()
+        # hack: updating schema
+        graph._node_attr_schemas()["t"].dtype = pl.Float64
+
         for p in pos:
             graph.add_node({"t": p * scale})
 

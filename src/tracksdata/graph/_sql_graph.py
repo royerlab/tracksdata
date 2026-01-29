@@ -297,14 +297,14 @@ class SQLFilter(BaseFilter):
         # Give the node_attr_keys as a list, since otherwise the SQL results return the
         # Ensure the time key is in the node attributes
         if node_attr_keys is not None:
-            node_attr_keys = [DEFAULT_ATTR_KEYS.T, *node_attr_keys]
+            node_attr_keys = [DEFAULT_ATTR_KEYS.T, DEFAULT_ATTR_KEYS.NODE_ID, *node_attr_keys]
         else:
-            node_attr_keys = [DEFAULT_ATTR_KEYS.T, *self._graph.node_attr_keys()]
+            node_attr_keys = [DEFAULT_ATTR_KEYS.T, *self._graph.node_attr_keys(return_ids=True)]
 
         node_attr_keys = list(dict.fromkeys(node_attr_keys))
 
         if edge_attr_keys is None:
-            edge_attr_keys = self._graph.edge_attr_keys().copy()
+            edge_attr_keys = self._graph.edge_attr_keys(return_ids=True).copy()
 
         node_query = self._query_from_attr_keys(
             query=self._node_query,
@@ -469,8 +469,8 @@ class SQLGraph(BaseGraph):
 
         # Create unique classes for this instance
         self._define_schema(overwrite=overwrite)
-        self._node_attr_schemas: dict[str, AttrSchema] = {}
-        self._edge_attr_schemas: dict[str, AttrSchema] = {}
+        self.__node_attr_schemas: dict[str, AttrSchema] = {}
+        self.__edge_attr_schemas: dict[str, AttrSchema] = {}
 
         if overwrite:
             self.Base.metadata.drop_all(self._engine)
@@ -529,15 +529,15 @@ class SQLGraph(BaseGraph):
 
         class Edge(Base):
             __tablename__ = "Edge"
-            edge_id = sa.Column(sa.Integer, primary_key=True, unique=True, autoincrement=True)
-            source_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"), index=True)
-            target_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"), index=True)
+            edge_id = sa.Column(sa.Integer, sa.Identity(always=True), primary_key=True, unique=True)
+            source_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"), index=True, nullable=False)
+            target_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"), index=True, nullable=False)
 
         class Overlap(Base):
             __tablename__ = "Overlap"
-            overlap_id = sa.Column(sa.Integer, primary_key=True, unique=True, autoincrement=True)
-            source_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"), index=True)
-            target_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"), index=True)
+            overlap_id = sa.Column(sa.Integer, sa.Identity(always=True), primary_key=True, unique=True)
+            source_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"), index=True, nullable=False)
+            target_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"), index=True, nullable=False)
 
         class Metadata(Base):
             __tablename__ = "Metadata"
@@ -558,12 +558,12 @@ class SQLGraph(BaseGraph):
         """
         # Initialize node schemas from Node table columns
         for column_name in self.Node.__table__.columns.keys():
-            if column_name not in self._node_attr_schemas:
+            if column_name not in self.__node_attr_schemas:
                 column = self.Node.__table__.columns[column_name]
                 # Infer polars dtype from SQLAlchemy type
                 pl_dtype = sqlalchemy_type_to_polars_dtype(column.type)
                 # AttrSchema.__post_init__ will infer the default_value
-                self._node_attr_schemas[column_name] = AttrSchema(
+                self.__node_attr_schemas[column_name] = AttrSchema(
                     key=column_name,
                     dtype=pl_dtype,
                 )
@@ -571,14 +571,12 @@ class SQLGraph(BaseGraph):
         # Initialize edge schemas from Edge table columns
         for column_name in self.Edge.__table__.columns.keys():
             # Skip internal edge columns
-            if column_name in [DEFAULT_ATTR_KEYS.EDGE_ID, DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET]:
-                continue
-            if column_name not in self._edge_attr_schemas:
+            if column_name not in self.__edge_attr_schemas:
                 column = self.Edge.__table__.columns[column_name]
                 # Infer polars dtype from SQLAlchemy type
                 pl_dtype = sqlalchemy_type_to_polars_dtype(column.type)
                 # AttrSchema.__post_init__ will infer the default_value
-                self._edge_attr_schemas[column_name] = AttrSchema(
+                self.__edge_attr_schemas[column_name] = AttrSchema(
                     key=column_name,
                     dtype=pl_dtype,
                 )
@@ -591,19 +589,23 @@ class SQLGraph(BaseGraph):
     def _polars_schema_override(self, table_class: type[DeclarativeBase]) -> SchemaDict:
         # Get the appropriate schema dict based on table class
         if table_class.__tablename__ == self.Node.__tablename__:
-            schemas = self._node_attr_schemas
+            schemas = self._node_attr_schemas()
         else:
-            schemas = self._edge_attr_schemas
+            schemas = self._edge_attr_schemas()
 
         # Return schema overrides for special types that need explicit casting
-        return {key: schema.dtype for key, schema in schemas.items() if schema.dtype == pl.Boolean}
+        return {
+            key: schema.dtype
+            for key, schema in schemas.items()
+            if not (schema.dtype == pl.Object or isinstance(schema.dtype, pl.Array | pl.List))
+        }
 
     def _cast_array_columns(self, table_class: type[DeclarativeBase], df: pl.DataFrame) -> pl.DataFrame:
         # Get the appropriate schema dict based on table class
         if table_class.__tablename__ == self.Node.__tablename__:
-            schemas = self._node_attr_schemas
+            schemas = self._node_attr_schemas()
         else:
-            schemas = self._edge_attr_schemas
+            schemas = self._edge_attr_schemas()
 
         # Cast array columns (stored as blobs in database)
         df = df.with_columns(
@@ -1332,14 +1334,42 @@ class SQLGraph(BaseGraph):
 
         return edges_df
 
-    def node_attr_keys(self) -> list[str]:
+    def _node_attr_schemas(self) -> dict[str, AttrSchema]:
+        return self.__node_attr_schemas
+
+    def _edge_attr_schemas(self) -> dict[str, AttrSchema]:
+        return self.__edge_attr_schemas
+
+    def node_attr_keys(self, return_ids: bool = False) -> list[str]:
+        """
+        Get the keys of the attributes of the nodes.
+
+        Parameters
+        ----------
+        return_ids : bool, optional
+            Whether to include NODE_ID in the returned keys. Defaults to False.
+            If True, NODE_ID will be included in the list.
+        """
         keys = list(self.Node.__table__.columns.keys())
+        if not return_ids and DEFAULT_ATTR_KEYS.NODE_ID in keys:
+            keys.remove(DEFAULT_ATTR_KEYS.NODE_ID)
         return keys
 
-    def edge_attr_keys(self) -> list[str]:
+    def edge_attr_keys(self, return_ids: bool = False) -> list[str]:
+        """
+        Get the keys of the attributes of the edges.
+
+        Parameters
+        ----------
+        return_ids : bool, optional
+            Whether to include EDGE_ID, EDGE_SOURCE, and EDGE_TARGET in the returned keys.
+            Defaults to False. If True, these ID fields will be included in the list.
+        """
         keys = list(self.Edge.__table__.columns.keys())
-        for k in [DEFAULT_ATTR_KEYS.EDGE_ID, DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET]:
-            keys.remove(k)
+        if not return_ids:
+            for id_key in [DEFAULT_ATTR_KEYS.EDGE_ID, DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET]:
+                if id_key in keys:
+                    keys.remove(id_key)
         return keys
 
     def _resolve_attr_keys(
@@ -1588,10 +1618,10 @@ class SQLGraph(BaseGraph):
         default_value: Any = None,
     ) -> None:
         # Process arguments and create validated schema
-        schema = process_attr_key_args(key_or_schema, dtype, default_value, self._node_attr_schemas)
+        schema = process_attr_key_args(key_or_schema, dtype, default_value, self.__node_attr_schemas)
 
         # Store schema
-        self._node_attr_schemas[schema.key] = schema
+        self.__node_attr_schemas[schema.key] = schema
 
         # Add column to database
         self._add_new_column(self.Node, schema)
@@ -1604,7 +1634,7 @@ class SQLGraph(BaseGraph):
             raise ValueError(f"Cannot remove required node attribute key {key}")
 
         self._drop_column(self.Node, key)
-        self._node_attr_schemas.pop(key, None)
+        self.__node_attr_schemas.pop(key, None)
 
     def add_edge_attr_key(
         self,
@@ -1613,10 +1643,10 @@ class SQLGraph(BaseGraph):
         default_value: Any = None,
     ) -> None:
         # Process arguments and create validated schema
-        schema = process_attr_key_args(key_or_schema, dtype, default_value, self._edge_attr_schemas)
+        schema = process_attr_key_args(key_or_schema, dtype, default_value, self.__edge_attr_schemas)
 
         # Store schema
-        self._edge_attr_schemas[schema.key] = schema
+        self.__edge_attr_schemas[schema.key] = schema
 
         # Add column to database
         self._add_new_column(self.Edge, schema)
@@ -1626,7 +1656,7 @@ class SQLGraph(BaseGraph):
             raise ValueError(f"Edge attribute key {key} does not exist")
 
         self._drop_column(self.Edge, key)
-        self._edge_attr_schemas.pop(key, None)
+        self.__edge_attr_schemas.pop(key, None)
 
     def num_edges(self) -> int:
         with Session(self._engine) as session:

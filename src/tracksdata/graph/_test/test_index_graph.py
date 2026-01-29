@@ -23,7 +23,8 @@ def test_index_rx_graph_with_mapping() -> None:
     )
 
     assert graph.node_ids() == [1, 5_000, 3]
-    assert set(graph.node_attr_keys()) == {DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.T, "a"}
+    assert set(graph.node_attr_keys()) == {DEFAULT_ATTR_KEYS.T, "a"}
+    assert set(graph.node_attr_keys(return_ids=True)) == {DEFAULT_ATTR_KEYS.T, "a", DEFAULT_ATTR_KEYS.NODE_ID}
 
 
 def test_duplicate_index_map() -> None:

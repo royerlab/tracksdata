@@ -59,7 +59,7 @@ class IndexRXFilter(RXFilter):
 
         rx_graph, node_map = self._graph._rx_subgraph_with_nodemap(node_ids)
         if self._edge_attr_comps:
-            _filter_func = _create_filter_func(self._edge_attr_comps)
+            _filter_func = _create_filter_func(self._edge_attr_comps, self._graph._edge_attr_schemas())
             for src, tgt, attr in rx_graph.weighted_edge_list():
                 if not _filter_func(attr):
                     rx_graph.remove_edge(src, tgt)
@@ -67,11 +67,6 @@ class IndexRXFilter(RXFilter):
         root = self._graph
         if hasattr(self._graph, "_root"):
             root = self._graph._root
-
-        # Ensure the time key is in the node attributes
-        if node_attr_keys is not None:
-            node_attr_keys = [DEFAULT_ATTR_KEYS.T, *node_attr_keys]
-            node_attr_keys = list(dict.fromkeys(node_attr_keys))
 
         graph_view = GraphView(
             rx_graph,

@@ -320,8 +320,8 @@ def test_distance_edges_neighbors_per_frame_false() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
+    graph.add_node_attr_key("x", pl.Float64, 0.0)
+    graph.add_node_attr_key("y", pl.Float64, 0.0)
 
     # Add nodes at t=0, t=1, t=2
     # At t=0: two nodes close to origin
@@ -363,8 +363,8 @@ def test_distance_edges_neighbors_per_frame_true() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
+    graph.add_node_attr_key("x", pl.Float64, 0.0)
+    graph.add_node_attr_key("y", pl.Float64, 0.0)
 
     # Add nodes at t=0, t=1, t=2
     # At t=0: two nodes close to origin
@@ -408,8 +408,8 @@ def test_distance_edges_neighbors_per_frame_with_distance_threshold() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
+    graph.add_node_attr_key("x", pl.Float64, 0.0)
+    graph.add_node_attr_key("y", pl.Float64, 0.0)
 
     # Add nodes at t=0 (far away), t=1 (close), t=2
     # At t=0: nodes very far from where t=2 node will be
@@ -444,8 +444,8 @@ def test_distance_edges_neighbors_per_frame_single_delta_t() -> None:
     graph = RustWorkXGraph()
 
     # Register attribute keys
-    graph.add_node_attr_key("x", 0.0)
-    graph.add_node_attr_key("y", 0.0)
+    graph.add_node_attr_key("x", pl.Float64, 0.0)
+    graph.add_node_attr_key("y", pl.Float64, 0.0)
 
     # Add nodes at t=0 and t=1
     for i in range(3):

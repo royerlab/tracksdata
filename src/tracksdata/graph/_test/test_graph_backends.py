@@ -374,8 +374,8 @@ def test_subgraph_with_node_and_edge_attr_filters(graph_backend: BaseGraph) -> N
 
 def test_subgraph_with_node_ids_and_filters(graph_backend: BaseGraph) -> None:
     """Test subgraph with node IDs and filters."""
-    graph_backend.add_node_attr_key("x", pl.Float64)
-    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
+    graph_backend.add_node_attr_key("x", pl.Float32)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float32)
 
     node0 = graph_backend.add_node({"t": 0, "x": 1.0})
     node1 = graph_backend.add_node({"t": 1, "x": 2.0})
@@ -405,6 +405,12 @@ def test_subgraph_with_node_ids_and_filters(graph_backend: BaseGraph) -> None:
 
     subgraph_edge_ids = subgraph.edge_ids()
     assert len(subgraph_edge_ids) == 0
+
+    assert subgraph._node_attr_schemas() == graph_backend._node_attr_schemas()
+    assert subgraph._edge_attr_schemas() == graph_backend._edge_attr_schemas()
+
+    assert dict(subgraph.node_attrs().schema) == dict(graph_backend.node_attrs().schema)
+    assert dict(subgraph.edge_attrs().schema) == dict(graph_backend.edge_attrs().schema)
 
 
 @pytest.mark.parametrize(
@@ -1356,7 +1362,7 @@ def test_from_other_with_edges(
     graph_backend.update_metadata(special_key="special_value")
 
     graph_backend.add_node_attr_key("x", dtype=pl.Float64)
-    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=-1)
     graph_backend.add_edge_attr_key("type", dtype=pl.String, default_value="forward")
 
     node1 = graph_backend.add_node({"t": 0, "x": 1.0})
@@ -1381,6 +1387,12 @@ def test_from_other_with_edges(
     assert set(new_graph.edge_attr_keys()) == set(graph_backend.edge_attr_keys())
 
     assert new_graph.metadata() == graph_backend.metadata()
+
+    assert new_graph._node_attr_schemas() == graph_backend._node_attr_schemas()
+    assert new_graph._edge_attr_schemas() == graph_backend._edge_attr_schemas()
+
+    assert dict(new_graph.node_attrs().schema) == dict(graph_backend.node_attrs().schema)
+    assert dict(new_graph.edge_attrs().schema) == dict(graph_backend.edge_attrs().schema)
 
     # Verify edge attributes are copied correctly
     source_edges = graph_backend.edge_attrs(attr_keys=["weight", "type"])
@@ -2288,7 +2300,7 @@ def _fill_mock_geff_graph(graph_backend: BaseGraph) -> None:
     )
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACKLET_ID, pl.Int64)
-    graph_backend.add_node_attr_key("ndfeature", pl.Object)
+    graph_backend.add_node_attr_key("ndfeature", pl.Array(pl.Float64, (3, 1)))
 
     graph_backend.add_edge_attr_key("weight", pl.Float64)
 

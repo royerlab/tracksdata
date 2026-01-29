@@ -22,18 +22,19 @@ class TestRustWorkXGraphDtype:
         graph.add_node_attr_key("name", pl.String)
 
         # Verify schemas are stored
-        assert "count" in graph._node_attr_schemas
-        assert graph._node_attr_schemas["count"].dtype == pl.UInt32
-        assert graph._node_attr_schemas["count"].default_value == 0
+        schemas = graph._node_attr_schemas()
+        assert "count" in schemas
+        assert schemas["count"].dtype == pl.UInt32
+        assert schemas["count"].default_value == 0
 
-        assert graph._node_attr_schemas["score"].dtype == pl.Float64
-        assert graph._node_attr_schemas["score"].default_value == -1.0
+        assert schemas["score"].dtype == pl.Float64
+        assert schemas["score"].default_value == -1.0
 
-        assert graph._node_attr_schemas["flag"].dtype == pl.Boolean
-        assert graph._node_attr_schemas["flag"].default_value is False
+        assert schemas["flag"].dtype == pl.Boolean
+        assert schemas["flag"].default_value is False
 
-        assert graph._node_attr_schemas["name"].dtype == pl.String
-        assert graph._node_attr_schemas["name"].default_value == ""
+        assert schemas["name"].dtype == pl.String
+        assert schemas["name"].default_value == ""
 
     def test_add_node_attr_key_with_dtype_and_default(self):
         """Test adding node attribute with both dtype and default value."""
@@ -41,8 +42,9 @@ class TestRustWorkXGraphDtype:
 
         graph.add_node_attr_key("score", pl.Float64, default_value=0.0)
 
-        assert graph._node_attr_schemas["score"].dtype == pl.Float64
-        assert graph._node_attr_schemas["score"].default_value == 0.0
+        schemas = graph._node_attr_schemas()
+        assert schemas["score"].dtype == pl.Float64
+        assert schemas["score"].default_value == 0.0
 
     def test_add_node_attr_key_with_array_dtype(self):
         """Test adding node attribute with array dtype (zeros default)."""
@@ -50,8 +52,9 @@ class TestRustWorkXGraphDtype:
 
         graph.add_node_attr_key("bbox", pl.Array(pl.Float64, 4))
 
-        assert graph._node_attr_schemas["bbox"].dtype == pl.Array(pl.Float64, 4)
-        default = graph._node_attr_schemas["bbox"].default_value
+        schemas = graph._node_attr_schemas()
+        assert schemas["bbox"].dtype == pl.Array(pl.Float64, 4)
+        default = schemas["bbox"].default_value
         assert isinstance(default, np.ndarray)
         assert default.shape == (4,)
         assert default.dtype == np.float64
@@ -62,8 +65,9 @@ class TestRustWorkXGraphDtype:
         graph = RustWorkXGraph()
         graph.add_node_attr_key("something", pl.Array(pl.Float64, (5, 3, 2)))
 
-        assert graph._node_attr_schemas["something"].dtype == pl.Array(pl.Float64, (5, 3, 2))
-        default = graph._node_attr_schemas["something"].default_value
+        schemas = graph._node_attr_schemas()
+        assert schemas["something"].dtype == pl.Array(pl.Float64, (5, 3, 2))
+        default = schemas["something"].default_value
 
         assert isinstance(default, np.ndarray)
         assert default.shape == (5, 3, 2)
@@ -77,9 +81,10 @@ class TestRustWorkXGraphDtype:
         schema = AttrSchema(key="intensity", dtype=pl.Float64)
         graph.add_node_attr_key(schema)
 
-        assert "intensity" in graph._node_attr_schemas
-        assert graph._node_attr_schemas["intensity"].dtype == pl.Float64
-        assert graph._node_attr_schemas["intensity"].default_value == -1.0
+        schemas = graph._node_attr_schemas()
+        assert "intensity" in schemas
+        assert schemas["intensity"].dtype == pl.Float64
+        assert schemas["intensity"].default_value == -1.0
 
     def test_add_node_attr_key_missing_dtype_raises(self):
         """Test that missing dtype raises TypeError."""
@@ -125,9 +130,10 @@ class TestRustWorkXGraphDtype:
 
         graph.add_edge_attr_key("weight", pl.Float64)
 
-        assert "weight" in graph._edge_attr_schemas
-        assert graph._edge_attr_schemas["weight"].dtype == pl.Float64
-        assert graph._edge_attr_schemas["weight"].default_value == -1.0
+        schemas = graph._edge_attr_schemas()
+        assert "weight" in schemas
+        assert schemas["weight"].dtype == pl.Float64
+        assert schemas["weight"].default_value == -1.0
 
     def test_add_edge_attr_key_with_schema(self):
         """Test adding edge attribute using AttrSchema."""
@@ -136,8 +142,9 @@ class TestRustWorkXGraphDtype:
         schema = AttrSchema(key="distance", dtype=pl.Float64, default_value=0.0)
         graph.add_edge_attr_key(schema)
 
-        assert "distance" in graph._edge_attr_schemas
-        assert graph._edge_attr_schemas["distance"].default_value == 0.0
+        schemas = graph._edge_attr_schemas()
+        assert "distance" in schemas
+        assert schemas["distance"].default_value == 0.0
 
     def test_defaults_applied_to_existing_edges(self):
         """Test that defaults are applied to existing edges."""
@@ -163,7 +170,7 @@ class TestRustWorkXGraphDtype:
         graph.add_node_attr_key("score", pl.Float64)
         graph.add_node_attr_key("count", pl.UInt32)
 
-        keys = graph.node_attr_keys()
+        keys = graph.node_attr_keys(return_ids=True)
         assert "node_id" in keys
         assert "t" in keys
         assert "score" in keys
@@ -187,8 +194,9 @@ class TestRustWorkXGraphDtype:
         graph.add_node_attr_key("unsigned", pl.UInt32)
         graph.add_node_attr_key("signed", pl.Int32)
 
-        assert graph._node_attr_schemas["unsigned"].default_value == 0
-        assert graph._node_attr_schemas["signed"].default_value == -1
+        schemas = graph._node_attr_schemas()
+        assert schemas["unsigned"].default_value == 0
+        assert schemas["signed"].default_value == -1
 
     def test_schema_defensive_copy(self):
         """Test that passing AttrSchema creates a defensive copy to prevent mutation."""
@@ -201,7 +209,8 @@ class TestRustWorkXGraphDtype:
         graph.add_node_attr_key(original_schema)
 
         # Verify the schema was stored
-        stored_schema = graph._node_attr_schemas["score"]
+        schemas = graph._node_attr_schemas()
+        stored_schema = schemas["score"]
         assert stored_schema.key == "score"
         assert stored_schema.dtype == pl.Float64
         assert stored_schema.default_value == 1.0
@@ -210,7 +219,8 @@ class TestRustWorkXGraphDtype:
         original_schema.default_value = 999.0
 
         # Verify the stored schema wasn't affected (defensive copy worked)
-        assert graph._node_attr_schemas["score"].default_value == 1.0
+        schemas = graph._node_attr_schemas()
+        assert schemas["score"].default_value == 1.0
         assert stored_schema.default_value == 1.0
 
         # Verify the original was changed
