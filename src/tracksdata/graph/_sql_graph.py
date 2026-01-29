@@ -1,7 +1,7 @@
 import binascii
 from collections.abc import Callable, Sequence
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import cloudpickle
 import numpy as np
@@ -10,6 +10,7 @@ import rustworkx as rx
 import sqlalchemy as sa
 from polars._typing import SchemaDict
 from sqlalchemy.orm import DeclarativeBase, Session, aliased, load_only
+from sqlalchemy.orm.query import Query
 from sqlalchemy.sql.type_api import TypeEngine
 
 from tracksdata.attrs import AttrComparison, split_attr_comps
@@ -29,6 +30,9 @@ from tracksdata.utils._signal import is_signal_on
 
 if TYPE_CHECKING:
     from tracksdata.graph._graph_view import GraphView
+
+
+T = TypeVar("T")
 
 
 def _is_builtin(obj: Any) -> bool:
@@ -776,7 +780,7 @@ class SQLGraph(BaseGraph):
             node[DEFAULT_ATTR_KEYS.NODE_ID] = node_id
             node_ids.append(node_id)
 
-        self._chunked_sa_operation(Session.bulk_insert_mappings, self.Node, nodes)
+        self._chunked_sa_write(Session.bulk_insert_mappings, nodes, self.Node)
 
         if is_signal_on(self.node_added):
             for node_id in node_ids:
@@ -935,7 +939,7 @@ class SQLGraph(BaseGraph):
                 return list(result.scalars().all())
 
         else:
-            self._chunked_sa_operation(Session.bulk_insert_mappings, self.Edge, edges)
+            self._chunked_sa_write(Session.bulk_insert_mappings, edges, self.Edge)
             return None
 
     def add_overlap(
@@ -989,7 +993,7 @@ class SQLGraph(BaseGraph):
             overlaps = overlaps.tolist()
 
         overlaps = [{"source_id": source_id, "target_id": target_id} for source_id, target_id in overlaps]
-        self._chunked_sa_operation(Session.bulk_insert_mappings, self.Overlap, overlaps)
+        self._chunked_sa_write(Session.bulk_insert_mappings, overlaps, self.Overlap)
 
     def overlaps(
         self,
@@ -1088,14 +1092,19 @@ class SQLGraph(BaseGraph):
 
             query = session.query(getattr(self.Edge, node_key), *node_columns)
             query = query.join(self.Edge, getattr(self.Edge, neighbor_key) == self.Node.node_id)
-            if filter_node_ids is not None:
-                query = query.filter(getattr(self.Edge, node_key).in_(filter_node_ids))
-
-            node_df = pl.read_database(
-                query.statement,
-                connection=session.connection(),
-                schema_overrides=self._polars_schema_override(self.Node),
-            )
+            if filter_node_ids is None or len(filter_node_ids) == 0:
+                node_df = pl.read_database(
+                    query.statement,
+                    connection=session.connection(),
+                    schema_overrides=self._polars_schema_override(self.Node),
+                )
+            else:
+                node_df = self._chunked_sa_read(
+                    session,
+                    lambda x: query.filter(getattr(self.Edge, node_key).in_(x)),
+                    filter_node_ids,
+                    self.Node,
+                )
             node_df = unpickle_bytes_columns(node_df)
             node_df = self._cast_array_columns(self.Node, node_df)
 
@@ -1697,13 +1706,13 @@ class SQLGraph(BaseGraph):
         LOG.info("update %s table with %d rows", table_class.__table__, len(update_data))
         LOG.info("update data sample: %s", update_data[:2])
 
-        self._chunked_sa_operation(Session.bulk_update_mappings, table_class, update_data)
+        self._chunked_sa_write(Session.bulk_update_mappings, update_data, table_class)
 
-    def _chunked_sa_operation(
+    def _chunked_sa_write(
         self,
         session_op: Callable[[Session, type[DeclarativeBase], list[dict[str, Any]]], None],
-        table_class: type[DeclarativeBase],
         data: list[dict[str, Any]],
+        table_class: type[DeclarativeBase],
     ) -> None:
         if len(data) == 0:
             return
@@ -1715,6 +1724,55 @@ class SQLGraph(BaseGraph):
             for i in range(0, len(data), chunk_size):
                 session_op(session, table_class, data[i : i + chunk_size])
             session.commit()
+
+    def _chunked_sa_read(
+        self,
+        session: Session,
+        query_filter_op: Callable[[T], Query],
+        data: list[T],
+        table_class: type[DeclarativeBase],
+    ) -> pl.DataFrame:
+        """
+        Apply a query filter in chunks and concatenate the results.
+
+        Parameters
+        ----------
+        session : Session
+            The SQLAlchemy session.
+        query_filter_op : Callable[[T], Query]
+            The function to apply a query filter to the data. It must return a SQLAlchemy Query object.
+        data : list[T]
+            List of data to passed into the query_filter_op function.
+        table_class : type[DeclarativeBase]
+            The SQLAlchemy table class.
+
+        Examples
+        --------
+        ```python
+        data = [1, 2, 3, 4, 5]
+        query_filter_op = lambda x: query.filter(x.id.in_(data))
+        data_df = self._chunked_sa_read(session, query_filter_op, data, Node)
+        ```
+
+        Returns
+        -------
+        pl.DataFrame
+            The data as a Polars DataFrame.
+        """
+        if len(data) == 0:
+            raise ValueError("Data is empty")
+
+        chunk_size = max(1, self._sql_chunk_size())
+        chunks = []
+        for i in range(0, len(data), chunk_size):
+            query = query_filter_op(data[i : i + chunk_size])
+            data_df = pl.read_database(
+                query.statement,
+                connection=session.connection(),
+                schema_overrides=self._polars_schema_override(table_class),
+            )
+            chunks.append(data_df)
+        return pl.concat(chunks)
 
     def update_node_attrs(
         self,
