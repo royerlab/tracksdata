@@ -452,11 +452,11 @@ class RustWorkXGraph(BaseGraph):
         if validate_keys:
             self._validate_attributes(attrs, self.node_attr_keys(), "node")
 
-            if "t" not in attrs:
-                raise ValueError(f"Node attributes must have a 't' key. Got {attrs.keys()}")
+            if DEFAULT_ATTR_KEYS.T not in attrs:
+                raise ValueError(f"Node attributes must have a '{DEFAULT_ATTR_KEYS.T}' key. Got {attrs.keys()}")
 
         node_id = self.rx_graph.add_node(attrs)
-        self._time_to_nodes.setdefault(attrs["t"], []).append(node_id)
+        self._time_to_nodes.setdefault(attrs[DEFAULT_ATTR_KEYS.T], []).append(node_id)
         self.node_added.emit_fast(node_id)
         return node_id
 
@@ -484,7 +484,7 @@ class RustWorkXGraph(BaseGraph):
 
         node_indices = list(self.rx_graph.add_nodes_from(nodes))
         for node, index in zip(nodes, node_indices, strict=True):
-            self._time_to_nodes.setdefault(node["t"], []).append(index)
+            self._time_to_nodes.setdefault(node[DEFAULT_ATTR_KEYS.T], []).append(index)
 
         # checking if it has connections to reduce overhead
         if is_signal_on(self.node_added):
@@ -516,7 +516,7 @@ class RustWorkXGraph(BaseGraph):
         self.node_removed.emit_fast(node_id)
 
         # Get the time value before removing the node
-        t = self.rx_graph[node_id]["t"]
+        t = self.rx_graph[node_id][DEFAULT_ATTR_KEYS.T]
 
         # Remove the node from the graph (this also removes all connected edges)
         self.rx_graph.remove_node(node_id)

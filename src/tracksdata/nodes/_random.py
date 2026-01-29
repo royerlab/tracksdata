@@ -171,4 +171,4 @@ class RandomNodes(BaseNodesOperator):
             size=(n_nodes_at_t, len(self.spatial_cols)),
         ).tolist()
 
-        return [{"t": t, **dict(zip(self.spatial_cols, c, strict=True)), **kwargs} for c in coords]
+        return [{DEFAULT_ATTR_KEYS.T: t, **dict(zip(self.spatial_cols, c, strict=True)), **kwargs} for c in coords]

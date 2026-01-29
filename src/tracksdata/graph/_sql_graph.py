@@ -515,29 +515,46 @@ class SQLGraph(BaseGraph):
             self.Base = Base
             return
 
-        class Node(Base):
-            __tablename__ = "Node"
-
-            # Use node_id as sole primary key for simpler updates
-            node_id = sa.Column(sa.BigInteger, primary_key=True, unique=True)
-
-            # Add t as a regular column
-            # NOTE might want to use as index for fast time-based queries
-            t = sa.Column(sa.Integer, nullable=False)
+        Node = type(
+            "Node",
+            (Base,),
+            {
+                "__tablename__": "Node",
+                # Use node_id as sole primary key for simpler updates
+                DEFAULT_ATTR_KEYS.NODE_ID: sa.Column(sa.BigInteger, primary_key=True, unique=True),
+                # Add t as a regular column
+                # NOTE might want to use as index for fast time-based queries
+                DEFAULT_ATTR_KEYS.T: sa.Column(sa.Integer, nullable=False),
+            },
+        )
 
         node_tb_name = Node.__tablename__
 
-        class Edge(Base):
-            __tablename__ = "Edge"
-            edge_id = sa.Column(sa.Integer, primary_key=True, unique=True, autoincrement=True)
-            source_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"), index=True)
-            target_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"), index=True)
+        Edge = type(
+            "Edge",
+            (Base,),
+            {
+                "__tablename__": "Edge",
+                DEFAULT_ATTR_KEYS.EDGE_ID: sa.Column(sa.Integer, primary_key=True, unique=True, autoincrement=True),
+                DEFAULT_ATTR_KEYS.EDGE_SOURCE: sa.Column(
+                    sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.{DEFAULT_ATTR_KEYS.NODE_ID}"), index=True
+                ),
+                DEFAULT_ATTR_KEYS.EDGE_TARGET: sa.Column(
+                    sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.{DEFAULT_ATTR_KEYS.NODE_ID}"), index=True
+                ),
+            },
+        )
 
         class Overlap(Base):
             __tablename__ = "Overlap"
+
             overlap_id = sa.Column(sa.Integer, primary_key=True, unique=True, autoincrement=True)
-            source_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"), index=True)
-            target_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"), index=True)
+            source_id = sa.Column(
+                sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.{DEFAULT_ATTR_KEYS.NODE_ID}"), index=True
+            )
+            target_id = sa.Column(
+                sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.{DEFAULT_ATTR_KEYS.NODE_ID}"), index=True
+            )
 
         class Metadata(Base):
             __tablename__ = "Metadata"
@@ -621,8 +638,9 @@ class SQLGraph(BaseGraph):
         point and updates the internal cache to ensure newly created nodes
         have unique IDs.
         """
+        t_column = getattr(self.Node, DEFAULT_ATTR_KEYS.T)
         with Session(self._engine) as session:
-            stmt = sa.select(self.Node.t, sa.func.max(self.Node.node_id)).group_by(self.Node.t)
+            stmt = sa.select(t_column, sa.func.max(getattr(self.Node, DEFAULT_ATTR_KEYS.NODE_ID))).group_by(t_column)
             self._max_id_per_time = {int(time): int(max_id) for time, max_id in session.execute(stmt).all()}
 
     def filter(
@@ -688,10 +706,10 @@ class SQLGraph(BaseGraph):
         if validate_keys:
             self._validate_attributes(attrs, self.node_attr_keys(), "node")
 
-            if "t" not in attrs:
-                raise ValueError(f"Node attributes must have a 't' key. Got {attrs.keys()}")
+            if DEFAULT_ATTR_KEYS.T not in attrs:
+                raise ValueError(f"Node attributes must have a '{DEFAULT_ATTR_KEYS.T}' key. Got {attrs.keys()}")
 
-        time = attrs["t"]
+        time = attrs[DEFAULT_ATTR_KEYS.T]
 
         if index is None:
             default_node_id = (time * self.node_id_time_multiplier) - 1
@@ -763,7 +781,7 @@ class SQLGraph(BaseGraph):
 
         node_ids = []
         for i, node in enumerate(nodes):
-            time = node["t"]
+            time = node[DEFAULT_ATTR_KEYS.T]
 
             if indices is None:
                 default_node_id = (time * self.node_id_time_multiplier) - 1
@@ -1722,8 +1740,8 @@ class SQLGraph(BaseGraph):
         attrs: dict[str, Any],
         node_ids: Sequence[int] | None = None,
     ) -> None:
-        if "t" in attrs:
-            raise ValueError("Node attribute 't' cannot be updated.")
+        if DEFAULT_ATTR_KEYS.T in attrs:
+            raise ValueError(f"Node attribute '{DEFAULT_ATTR_KEYS.T}' cannot be updated.")
 
         self._update_table(self.Node, node_ids, DEFAULT_ATTR_KEYS.NODE_ID, attrs)
 

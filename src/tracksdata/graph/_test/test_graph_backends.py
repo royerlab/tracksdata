@@ -1647,6 +1647,24 @@ def test_summary(graph_backend: BaseGraph) -> None:
     assert "Number of edges" in summary
 
 
+def test_changing_default_attr_keys(graph_backend: BaseGraph) -> None:
+    DEFAULT_ATTR_KEYS.T = "frame"
+    if isinstance(graph_backend, SQLGraph):
+        kwargs = {"drivername": "sqlite", "database": ":memory:"}
+    else:
+        kwargs = {}
+
+    # must be a new graph because `graph_backend` already has a `t` attribute initialized
+    new_graph = type(graph_backend)(**kwargs)
+    new_graph.add_node({"frame": 0})
+    node_attrs = new_graph.node_attrs()
+    assert "frame" in node_attrs.columns
+
+    # this must be undone otherwise other tests will fail
+    DEFAULT_ATTR_KEYS.T = "t"
+    assert DEFAULT_ATTR_KEYS.T == "t"
+
+
 def test_spatial_filter_basic(graph_backend: BaseGraph) -> None:
     graph_backend.add_node_attr_key("x", pl.Float64)
     graph_backend.add_node_attr_key("y", pl.Float64)
