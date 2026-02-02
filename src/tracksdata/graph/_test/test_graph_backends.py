@@ -2002,21 +2002,56 @@ def test_nodes_interface(graph_backend: BaseGraph) -> None:
     node2 = graph_backend.add_node({"t": 1, "x": 0})
     node3 = graph_backend.add_node({"t": 2, "x": -1})
 
-    assert graph_backend[node1]["x"] == 1
-    assert graph_backend[node2]["x"] == 0
-    assert graph_backend[node3]["x"] == -1
+    assert graph_backend.nodes[node1]["x"] == 1
+    assert graph_backend.nodes[node2]["x"] == 0
+    assert graph_backend.nodes[node3]["x"] == -1
 
     graph_backend.add_node_attr_key("y", pl.Int64)
 
-    graph_backend[node2]["y"] = 5
+    graph_backend.nodes[node2]["y"] = 5
 
-    assert graph_backend[node1]["y"] == -1
-    assert graph_backend[node2]["y"] == 5
-    assert graph_backend[node3]["y"] == -1
+    assert graph_backend.nodes[node1]["y"] == -1
+    assert graph_backend.nodes[node2]["y"] == 5
+    assert graph_backend.nodes[node3]["y"] == -1
 
-    assert graph_backend[node1].to_dict() == {"t": 0, "x": 1, "y": -1}
-    assert graph_backend[node2].to_dict() == {"t": 1, "x": 0, "y": 5}
-    assert graph_backend[node3].to_dict() == {"t": 2, "x": -1, "y": -1}
+    assert graph_backend.nodes[node1].to_dict() == {"t": 0, "x": 1, "y": -1}
+    assert graph_backend.nodes[node2].to_dict() == {"t": 1, "x": 0, "y": 5}
+    assert graph_backend.nodes[node3].to_dict() == {"t": 2, "x": -1, "y": -1}
+
+
+def test_edges_interface(graph_backend: BaseGraph) -> None:
+    """Test edge attribute access using graph.edges[edge_id]['attr'] syntax."""
+    graph_backend.add_node_attr_key("x", dtype=pl.Int64, default_value=-1)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_edge_attr_key("score", dtype=pl.Float64, default_value=-1.0)
+
+    # Create nodes and edges
+    node1 = graph_backend.add_node({"t": 0, "x": 1})
+    node2 = graph_backend.add_node({"t": 1, "x": 2})
+    node3 = graph_backend.add_node({"t": 2, "x": 3})
+
+    edge1 = graph_backend.add_edge(node1, node2, {"weight": 0.5, "score": -1.0})
+    edge2 = graph_backend.add_edge(node2, node3, {"weight": 0.8, "score": -1.0})
+
+    # Test getting edge attributes
+    assert graph_backend.edges[edge1]["weight"] == 0.5
+    assert graph_backend.edges[edge2]["weight"] == 0.8
+
+    # Test setting edge attributes
+    graph_backend.edges[edge1]["score"] = 0.95
+    graph_backend.edges[edge2]["score"] = 0.75
+
+    assert graph_backend.edges[edge1]["score"] == 0.95
+    assert graph_backend.edges[edge2]["score"] == 0.75
+
+    # Test to_dict method
+    edge1_dict = graph_backend.edges[edge1].to_dict()
+    assert edge1_dict["weight"] == 0.5
+    assert edge1_dict["score"] == 0.95
+
+    edge2_dict = graph_backend.edges[edge2].to_dict()
+    assert edge2_dict["weight"] == 0.8
+    assert edge2_dict["score"] == 0.75
 
 
 def test_custom_indices(graph_backend: BaseGraph) -> None:
@@ -2368,7 +2403,7 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
     assert set(graph_backend.edge_attr_keys()) == set(geff_graph.edge_attr_keys())
 
     for node_id in geff_graph.node_ids():
-        assert geff_graph[node_id].to_dict() == graph_backend[node_id].to_dict()
+        assert geff_graph.nodes[node_id].to_dict() == graph_backend.nodes[node_id].to_dict()
 
     assert rx.is_isomorphic(
         rx_graph,
