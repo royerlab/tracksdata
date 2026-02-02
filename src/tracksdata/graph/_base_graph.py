@@ -1914,50 +1914,30 @@ class BaseGraph(abc.ABC):
     @property
     def nodes(self) -> "NodesAccessor":
         """
-        Access node attributes using graph.nodes[node_id]['attr'].
+        Access node attributes with dictionary-style syntax.
+
+        Use bracket notation to get or set attributes for a specific node,
+        or call to_dict() to retrieve all attributes as a dictionary.
 
         Returns
         -------
         NodesAccessor
             An accessor for node attributes.
-
-        Examples
-        --------
-        ```python
-        # Get node attribute
-        x_value = graph.nodes[node_id]["x"]
-
-        # Set node attribute
-        graph.nodes[node_id]["x"] = 10.5
-
-        # Get all attributes as dict
-        attrs = graph.nodes[node_id].to_dict()
-        ```
         """
         return NodesAccessor(self)
 
     @property
     def edges(self) -> "EdgesAccessor":
         """
-        Access edge attributes using graph.edges[edge_id]['attr'].
+        Access edge attributes with dictionary-style syntax.
+
+        Use bracket notation to get or set attributes for a specific edge,
+        or call to_dict() to retrieve all attributes as a dictionary.
 
         Returns
         -------
         EdgesAccessor
             An accessor for edge attributes.
-
-        Examples
-        --------
-        ```python
-        # Get edge attribute
-        weight = graph.edges[edge_id]["weight"]
-
-        # Set edge attribute
-        graph.edges[edge_id]["weight"] = 0.8
-
-        # Get all attributes as dict
-        attrs = graph.edges[edge_id].to_dict()
-        ```
         """
         return EdgesAccessor(self)
 
@@ -2013,7 +1993,7 @@ class NodeInterface:
 
 class NodesAccessor:
     """
-    Accessor class for node attributes using graph.nodes[node_id]['attr'] syntax.
+    Accessor class for node attributes with dictionary-style syntax.
 
     Parameters
     ----------
@@ -2045,7 +2025,7 @@ class NodesAccessor:
 
 class EdgesAccessor:
     """
-    Accessor class for edge attributes using graph.edges[edge_id]['attr'] syntax.
+    Accessor class for edge attributes with dictionary-style syntax.
 
     Parameters
     ----------
