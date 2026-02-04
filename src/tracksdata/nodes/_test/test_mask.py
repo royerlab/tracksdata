@@ -67,6 +67,17 @@ def test_mask_regionprops_empty() -> None:
         _ = Mask(mask_array, bbox).regionprops()
 
 
+def test_mask_regionprops_intensity_image() -> None:
+    """Regionprops should handle intensity images."""
+    mask_array = np.array([[False, True], [True, False]], dtype=bool)
+    bbox = np.array([0, 0, 2, 2])
+    intensity_image = np.array([[1, 2], [3, 4]])
+
+    props = Mask(mask_array, bbox).regionprops(intensity_image=intensity_image)
+    assert props.intensity_max == 3  # 4 is outside the mask
+    assert props.intensity_min == 2  # 0 is outside the mask
+
+
 def test_mask_getstate_setstate() -> None:
     """Test Mask serialization and deserialization."""
     mask_array = np.array([[True, False], [False, True]], dtype=bool)
