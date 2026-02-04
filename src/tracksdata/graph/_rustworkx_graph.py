@@ -1235,7 +1235,7 @@ class RustWorkXGraph(BaseGraph):
         else:
             if output_key not in self.node_attr_keys():
                 previous_id_df = None
-                self.add_node_attr_key(output_key, -1)
+                self.add_node_attr_key(output_key, pl.Int64, -1)
                 if tracklet_id_offset is None:
                     tracklet_id_offset = 1
             elif reset:
