@@ -2376,6 +2376,27 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
     )
 
 
+def test_geff_overwrite(graph_backend: BaseGraph, tmp_path: Path) -> None:
+    """Test that to_geff overwrites existing data in the store."""
+    _fill_mock_geff_graph(graph_backend)
+
+    geff_path = tmp_path / "test_overwrite.geff"
+
+    # First write
+    graph_backend.to_geff(geff_store=geff_path)
+
+    # Try to write again without overwrite - should raise error
+    with pytest.raises(FileExistsError):
+        graph_backend.to_geff(geff_store=geff_path, overwrite=False)
+
+    # Now with overwrite=True it should work
+    graph_backend.to_geff(geff_store=geff_path, overwrite=True)
+
+    geff_graph, _ = IndexedRXGraph.from_geff(geff_path)
+
+    assert geff_graph.num_nodes() == 3
+
+
 def test_geff_with_keymapping(graph_backend: BaseGraph) -> None:
     """Test geff roundtrip."""
 
