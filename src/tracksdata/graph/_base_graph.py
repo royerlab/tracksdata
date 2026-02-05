@@ -1704,6 +1704,7 @@ class BaseGraph(abc.ABC):
         self,
         geff_store: StoreLike,
         geff_metadata: geff.GeffMetadata | None = None,
+        overwrite: bool = False,
         zarr_format: Literal[2, 3] = 3,
     ) -> None:
         """
@@ -1718,6 +1719,8 @@ class BaseGraph(abc.ABC):
             It automatically generates the metadata with:
             - axes: time (t) and spatial axes ((z), y, x)
             - tracklet node property: tracklet_id
+        overwrite : bool
+            Whether to overwrite the geff data directory if it exists.
         zarr_format : Literal[2, 3]
             The zarr format to write the graph to.
             Defaults to 3.
@@ -1795,6 +1798,7 @@ class BaseGraph(abc.ABC):
             edge_ids=edge_ids.astype(np.uint64),
             edge_props=edge_dict,
             metadata=geff_metadata,
+            overwrite=overwrite,
             zarr_format=zarr_format,
         )
 
