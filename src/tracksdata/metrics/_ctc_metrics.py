@@ -104,7 +104,7 @@ def _match_single_frame(
         # loading original group ids and filtering by the matches
         _mapped_ref = ref_group[reference_graph_key][rows_id].to_list()
         _mapped_comp = comp_group[input_graph_key][cols_id].to_list()
-        _ious = weights[rows_id, cols_id].tolist()
+        _ious = np.asarray(weights[rows_id, cols_id]).ravel().tolist()
 
         LOG.info("Done!")
 
