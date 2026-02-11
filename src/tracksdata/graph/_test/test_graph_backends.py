@@ -2626,3 +2626,32 @@ def test_to_traccuracy_graph(graph_backend: BaseGraph) -> None:
 
     for name in ["TRA", "DET", "LNK"]:
         assert ctc_results[name] == 1.0
+
+
+class _MockObject:
+    def __init__(self, idx: int):
+        self.idx = idx
+
+
+def test_array_default_values(graph_backend: BaseGraph) -> None:
+    """Test that array default values are handled correctly."""
+
+    graph_backend.add_node_attr_key("ndfeature", pl.Array(pl.Float64, (3, 1, 5)), np.zeros((3, 1, 5)))
+    graph_backend.add_node_attr_key("random_object", pl.Object(), _MockObject(0))
+    graph_backend.add_node({"t": 0, "ndfeature": np.ones((3, 1, 5)), "random_object": _MockObject(1)})
+    node_attrs = graph_backend.node_attrs()
+    assert node_attrs.shape == (1, 4)  # including IDs
+    for col, dtype in node_attrs.schema.items():
+        assert dtype == graph_backend._node_attr_schemas()[col].dtype
+
+    graph_backend.add_node({"t": 0, "ndfeature": np.ones((3, 1, 5))}, validate_keys=False)
+    node_attrs = graph_backend.node_attrs()
+    assert node_attrs.shape == (2, 4)
+    for col, dtype in node_attrs.schema.items():
+        assert dtype == graph_backend._node_attr_schemas()[col].dtype
+
+    graph_backend.add_node({"t": 0, "random_object": _MockObject(2)}, validate_keys=False)
+    node_attrs = graph_backend.node_attrs()
+    assert node_attrs.shape == (3, 4)
+    for col, dtype in node_attrs.schema.items():
+        assert dtype == graph_backend._node_attr_schemas()[col].dtype
