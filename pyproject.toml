@@ -48,7 +48,7 @@ dependencies = [
   "ilpy >= 0.5.1",
   "pyarrow",
   "bidict>=0.23.1",
-  "geff>=1.0.0",
+  "geff>=1.1.3.1.1",
   "psygnal>=0.14.0",
 ]
 
