@@ -26,16 +26,24 @@ _POLARS_DTYPE_TO_NUMPY_DTYPE = {
     pl.UInt64: np.uint64,
 }
 
+_COMPATIBILITY_CONVERSION = {np.float16: np.float32}
 
-def polars_dtype_to_numpy_dtype(polars_dtype: pl.DataType, allow_sequence: bool = True) -> np.dtype:
+
+def polars_dtype_to_numpy_dtype(
+    polars_dtype: pl.DataType,
+    allow_sequence: bool = True,
+    compatibility: bool = False,
+) -> np.dtype:
     """Convert a polars dtype to a numpy dtype.
 
     Parameters
     ----------
     polars_dtype : DataType
         The polars dtype to convert.
-    allow_sequence : bool, optional
+    allow_sequence : bool
         Whether to allow sequence types (List, Array). Default is True.
+    compatibility : bool
+        Return numpy dtype in compatibility mode, avoiding exotic data types (e.g. np.float16)
 
     Returns
     -------
@@ -48,11 +56,16 @@ def polars_dtype_to_numpy_dtype(polars_dtype: pl.DataType, allow_sequence: bool 
         polars_dtype = polars_dtype.inner
 
     try:
-        return _POLARS_DTYPE_TO_NUMPY_DTYPE[polars_dtype]
+        np_dtype = _POLARS_DTYPE_TO_NUMPY_DTYPE[polars_dtype]
     except KeyError as e:
         raise ValueError(
             f"Invalid polars dtype: {polars_dtype}. Expected one of {_POLARS_DTYPE_TO_NUMPY_DTYPE.keys()}"
         ) from e
+
+    if compatibility:
+        np_dtype = _COMPATIBILITY_CONVERSION.get(np_dtype, np_dtype)
+
+    return np_dtype
 
 
 def column_to_bytes(df: pl.DataFrame, column: str) -> pl.DataFrame:

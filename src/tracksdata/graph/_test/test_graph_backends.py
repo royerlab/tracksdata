@@ -2320,7 +2320,7 @@ def _fill_mock_geff_graph(graph_backend: BaseGraph) -> None:
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.TRACKLET_ID, pl.Int64)
     graph_backend.add_node_attr_key("ndfeature", pl.Array(pl.Float64, (3, 1)), np.ones((3, 1)))
 
-    graph_backend.add_edge_attr_key("weight", pl.Float64)
+    graph_backend.add_edge_attr_key("weight", pl.Float16)
 
     graph_backend.update_metadata(
         shape=[1, 25, 25],
