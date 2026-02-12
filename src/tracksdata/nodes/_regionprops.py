@@ -136,6 +136,9 @@ class RegionPropsNodes(BaseNodesOperator):
                     graph.add_node_attr_key(
                         key, pl.Array(numpy_char_code_to_dtype(value.dtype), value.shape), default_value
                     )
+                elif np.isscalar(value):
+                    dtype = numpy_char_code_to_dtype(value.dtype) if hasattr(value, "dtype") else type(value)
+                    graph.add_node_attr_key(key, dtype)
                 elif type(value).__module__ != "builtins":
                     graph.add_node_attr_key(key, pl.Object)
                 else:
