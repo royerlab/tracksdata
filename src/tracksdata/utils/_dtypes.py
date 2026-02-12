@@ -7,42 +7,27 @@ import numpy as np
 import polars as pl
 import sqlalchemy as sa
 from cloudpickle import dumps, loads
-from polars.datatypes.classes import (
-    Boolean,
-    DataType,
-    Datetime,
-    Duration,
-    Float32,
-    Float64,
-    Int8,
-    Int16,
-    Int32,
-    Int64,
-    UInt8,
-    UInt16,
-    UInt32,
-    UInt64,
-)
 from sqlalchemy.sql.type_api import TypeEngine
 
 _POLARS_DTYPE_TO_NUMPY_DTYPE = {
-    Datetime: np.datetime64,
-    Boolean: np.bool_,
-    Float32: np.float32,
-    Float64: np.float64,
-    Int8: np.int8,
-    Int16: np.int16,
-    Int32: np.int32,
-    Int64: np.int64,
-    Duration: np.timedelta64,
-    UInt8: np.uint8,
-    UInt16: np.uint16,
-    UInt32: np.uint32,
-    UInt64: np.uint64,
+    pl.Datetime: np.datetime64,
+    pl.Boolean: np.bool_,
+    pl.Float16: np.float16,
+    pl.Float32: np.float32,
+    pl.Float64: np.float64,
+    pl.Int8: np.int8,
+    pl.Int16: np.int16,
+    pl.Int32: np.int32,
+    pl.Int64: np.int64,
+    pl.Duration: np.timedelta64,
+    pl.UInt8: np.uint8,
+    pl.UInt16: np.uint16,
+    pl.UInt32: np.uint32,
+    pl.UInt64: np.uint64,
 }
 
 
-def polars_dtype_to_numpy_dtype(polars_dtype: DataType, allow_sequence: bool = True) -> np.dtype:
+def polars_dtype_to_numpy_dtype(polars_dtype: pl.DataType, allow_sequence: bool = True) -> np.dtype:
     """Convert a polars dtype to a numpy dtype.
 
     Parameters
@@ -292,6 +277,7 @@ DTYPE_DEFAULT_MAP = {
     pl.Int16: -1,
     pl.Int32: -1,
     pl.Int64: -1,
+    pl.Float16: -1.0,
     pl.Float32: -1.0,
     pl.Float64: -1.0,
     pl.String: "",
@@ -354,6 +340,7 @@ _POLARS_TO_SQLALCHEMY_TYPE_MAP = {
     pl.Int64: sa.BigInteger,
     pl.UInt64: sa.BigInteger,
     # Float types
+    pl.Float16: sa.Float,
     pl.Float32: sa.Float,
     pl.Float64: sa.Float,
     # String types
