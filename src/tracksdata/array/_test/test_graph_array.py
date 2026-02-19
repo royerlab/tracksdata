@@ -378,3 +378,122 @@ def test_graph_array_raise_error_on_non_scalar_attr_key(graph_backend: BaseGraph
 
     with pytest.raises(ValueError, match="Attribute values for key 'label' must be scalar"):
         GraphArrayView(graph=graph_backend, shape=(10, 100, 100), attr_key="label")
+
+
+def _add_graph_array_node_attrs(graph_backend: BaseGraph) -> None:
+    graph_backend.add_node_attr_key("label", dtype=pl.Int64)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4))
+
+
+def _make_square_mask(y: int, x: int, size: int = 2) -> Mask:
+    return Mask(np.ones((size, size), dtype=bool), bbox=np.array([y, x, y + size, x + size]))
+
+
+def test_graph_array_view_invalidates_only_affected_chunk_on_add(graph_backend: BaseGraph) -> None:
+    _add_graph_array_node_attrs(graph_backend)
+
+    first_mask = _make_square_mask(1, 1)
+    graph_backend.add_node(
+        {
+            DEFAULT_ATTR_KEYS.T: 0,
+            "label": 1,
+            DEFAULT_ATTR_KEYS.MASK: first_mask,
+            DEFAULT_ATTR_KEYS.BBOX: first_mask.bbox,
+        }
+    )
+
+    array_view = GraphArrayView(graph=graph_backend, shape=(2, 8, 8), attr_key="label", chunk_shape=(4, 4))
+
+    _ = np.asarray(array_view[0])
+    np.testing.assert_array_equal(array_view._cache._store[0].ready, np.ones((2, 2), dtype=bool))
+
+    second_mask = _make_square_mask(5, 5)
+    graph_backend.add_node(
+        {
+            DEFAULT_ATTR_KEYS.T: 0,
+            "label": 2,
+            DEFAULT_ATTR_KEYS.MASK: second_mask,
+            DEFAULT_ATTR_KEYS.BBOX: second_mask.bbox,
+        }
+    )
+
+    expected_ready = np.ones((2, 2), dtype=bool)
+    expected_ready[1, 1] = False
+    np.testing.assert_array_equal(array_view._cache._store[0].ready, expected_ready)
+
+    output = np.asarray(array_view[0])
+    assert output[1, 1] == 1
+    assert output[5, 5] == 2
+
+
+def test_graph_array_view_invalidates_old_and_new_chunks_on_update(graph_backend: BaseGraph) -> None:
+    _add_graph_array_node_attrs(graph_backend)
+
+    mask = _make_square_mask(1, 1)
+    node_id = graph_backend.add_node(
+        {
+            DEFAULT_ATTR_KEYS.T: 0,
+            "label": 1,
+            DEFAULT_ATTR_KEYS.MASK: mask,
+            DEFAULT_ATTR_KEYS.BBOX: mask.bbox,
+        }
+    )
+
+    array_view = GraphArrayView(graph=graph_backend, shape=(2, 8, 8), attr_key="label", chunk_shape=(4, 4))
+    _ = np.asarray(array_view[0])
+
+    moved_mask = _make_square_mask(5, 5)
+    graph_backend.update_node_attrs(
+        attrs={
+            "label": [7],
+            DEFAULT_ATTR_KEYS.MASK: [moved_mask],
+            DEFAULT_ATTR_KEYS.BBOX: [moved_mask.bbox],
+        },
+        node_ids=[node_id],
+    )
+
+    expected_ready = np.ones((2, 2), dtype=bool)
+    expected_ready[0, 0] = False
+    expected_ready[1, 1] = False
+    np.testing.assert_array_equal(array_view._cache._store[0].ready, expected_ready)
+
+    output = np.asarray(array_view[0])
+    assert output[1, 1] == 0
+    assert output[5, 5] == 7
+
+
+def test_graph_array_view_invalidates_chunk_on_remove(graph_backend: BaseGraph) -> None:
+    _add_graph_array_node_attrs(graph_backend)
+
+    first_mask = _make_square_mask(1, 1)
+    graph_backend.add_node(
+        {
+            DEFAULT_ATTR_KEYS.T: 0,
+            "label": 1,
+            DEFAULT_ATTR_KEYS.MASK: first_mask,
+            DEFAULT_ATTR_KEYS.BBOX: first_mask.bbox,
+        }
+    )
+    second_mask = _make_square_mask(5, 5)
+    second_node = graph_backend.add_node(
+        {
+            DEFAULT_ATTR_KEYS.T: 0,
+            "label": 2,
+            DEFAULT_ATTR_KEYS.MASK: second_mask,
+            DEFAULT_ATTR_KEYS.BBOX: second_mask.bbox,
+        }
+    )
+
+    array_view = GraphArrayView(graph=graph_backend, shape=(2, 8, 8), attr_key="label", chunk_shape=(4, 4))
+    _ = np.asarray(array_view[0])
+
+    graph_backend.remove_node(second_node)
+
+    expected_ready = np.ones((2, 2), dtype=bool)
+    expected_ready[1, 1] = False
+    np.testing.assert_array_equal(array_view._cache._store[0].ready, expected_ready)
+
+    output = np.asarray(array_view[0])
+    assert output[1, 1] == 1
+    assert output[5, 5] == 0

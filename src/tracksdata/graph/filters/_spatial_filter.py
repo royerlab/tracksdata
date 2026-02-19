@@ -38,6 +38,7 @@ class DataFrameSpatialFilter:
 
         start_time = time.time()
         self._attr_keys = df.columns
+        self._ndims = len(self._attr_keys)
 
         if df.is_empty():
             self._node_rtree = None
@@ -45,7 +46,6 @@ class DataFrameSpatialFilter:
 
         indices = np.ascontiguousarray(indices.to_numpy(), dtype=np.int64).copy()
         node_pos = np.ascontiguousarray(df.to_numpy(), dtype=np.float32)
-        self._ndims = node_pos.shape[1]
         self._node_rtree = PointRTree(
             item_dtype="int64",
             coord_dtype="float32",
@@ -151,11 +151,16 @@ class SpatialFilter:
             attr_keys = list(filter(lambda x: x in valid_keys, attr_keys))
 
         self._graph = graph
+        self._attr_keys = attr_keys
 
         nodes_df = graph.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, *attr_keys])
         node_ids = nodes_df[DEFAULT_ATTR_KEYS.NODE_ID]
 
         self._df_filter = DataFrameSpatialFilter(indices=node_ids, df=nodes_df.select(attr_keys))
+
+        self._graph.node_added.connect(self._add_node)
+        self._graph.node_removed.connect(self._remove_node)
+        self._graph.node_updated.connect(self._update_node)
 
     def __getitem__(self, keys: tuple[slice, ...]) -> "BaseFilter":
         """
@@ -194,6 +199,55 @@ class SpatialFilter:
         """
         node_ids = self._df_filter[keys]
         return self._graph.filter(node_ids=node_ids)
+
+    def _attrs_to_point(self, attrs: dict[str, Any]) -> np.ndarray:
+        return np.ascontiguousarray([[attrs[key] for key in self._attr_keys]], dtype=np.float32)
+
+    def _add_node(
+        self,
+        node_id: int,
+        new_attrs: dict[str, Any],
+    ) -> None:
+        from spatial_graph import PointRTree
+
+        if self._df_filter._node_rtree is None:
+            if self._graph.num_nodes() == 0:
+                raise ValueError("Spatial filter is not initialized")
+            self._df_filter._node_rtree = PointRTree(
+                item_dtype="int64",
+                coord_dtype="float32",
+                dims=len(self._attr_keys),
+            )
+            self._df_filter._ndims = len(self._attr_keys)
+
+        positions = self._attrs_to_point(new_attrs)
+        self._df_filter._node_rtree.insert_point_items(
+            np.atleast_1d(node_id).astype(np.int64),
+            positions,
+        )
+
+    def _remove_node(
+        self,
+        node_id: int,
+        old_attrs: dict[str, Any],
+    ) -> None:
+        if self._df_filter._node_rtree is None:
+            return
+
+        positions = self._attrs_to_point(old_attrs)
+        self._df_filter._node_rtree.delete_items(
+            np.atleast_1d(node_id).astype(np.int64),
+            positions,
+        )
+
+    def _update_node(
+        self,
+        node_id: int,
+        old_attrs: dict[str, Any],
+        new_attrs: dict[str, Any],
+    ) -> None:
+        self._remove_node(node_id, old_attrs=old_attrs)
+        self._add_node(node_id, new_attrs=new_attrs)
 
 
 class BBoxSpatialFilter:
@@ -269,6 +323,7 @@ class BBoxSpatialFilter:
         # setup signal connections
         self._graph.node_added.connect(self._add_node)
         self._graph.node_removed.connect(self._remove_node)
+        self._graph.node_updated.connect(self._update_node)
 
     def __getitem__(self, keys: tuple[slice, ...]) -> "BaseFilter":
         """
@@ -358,7 +413,11 @@ class BBoxSpatialFilter:
 
         return positions_min, positions_max
 
-    def _add_node(self, node_id: int) -> None:
+    def _add_node(
+        self,
+        node_id: int,
+        new_attrs: dict[str, Any],
+    ) -> None:
         """
         Add a node to the spatial filter.
 
@@ -366,30 +425,30 @@ class BBoxSpatialFilter:
         ----------
         node_id : int
             The ID of the node to add.
+        new_attrs : dict[str, Any]
+            Current node attributes to insert into the spatial index.
         """
         from spatial_graph import PointRTree
 
         if self._node_rtree is None:
-            if self._graph.num_nodes() > 0:
-                nodes_df = self._graph.node_attrs()
-                bboxes = self._bboxes_to_array(nodes_df[self._bbox_attr_key])
-                num_dims = bboxes.shape[1] // 2
-
-                if self._frame_attr_key is None:
-                    self._ndims = num_dims
-                else:
-                    self._ndims = num_dims + 1  # +1 for the frame dimension
-
-                self._node_rtree = PointRTree(
-                    item_dtype="int64",
-                    coord_dtype="float32",
-                    dims=self._ndims,
-                )
-            else:
+            if self._graph.num_nodes() == 0:
                 raise ValueError("Spatial filter is not initialized")
+            bbox = new_attrs[self._bbox_attr_key]
+            if len(bbox) % 2 != 0:
+                raise ValueError(f"Bounding box coordinates must have even number of dimensions, got {len(bbox)}")
+            num_dims = len(bbox) // 2
+            if self._frame_attr_key is None:
+                self._ndims = num_dims
+            else:
+                self._ndims = num_dims + 1  # +1 for the frame dimension
 
-        attrs = self._graph.nodes[node_id].to_dict()
-        positions_min, positions_max = self._attrs_to_bb_window(attrs)
+            self._node_rtree = PointRTree(
+                item_dtype="int64",
+                coord_dtype="float32",
+                dims=self._ndims,
+            )
+
+        positions_min, positions_max = self._attrs_to_bb_window(new_attrs)
 
         self._node_rtree.insert_bb_items(
             np.atleast_1d(node_id).astype(np.int64),
@@ -397,7 +456,11 @@ class BBoxSpatialFilter:
             positions_max,
         )
 
-    def _remove_node(self, node_id: int) -> None:
+    def _remove_node(
+        self,
+        node_id: int,
+        old_attrs: dict[str, Any],
+    ) -> None:
         """
         Remove a node from the spatial filter.
 
@@ -405,18 +468,28 @@ class BBoxSpatialFilter:
         ----------
         node_id : int
             The ID of the node to remove.
+        old_attrs : dict[str, Any]
+            Previous node attributes used to remove the exact indexed bbox.
         """
         if self._node_rtree is None:
-            raise ValueError("Spatial filter is not initialized")
+            return
 
-        attrs = self._graph.nodes[node_id].to_dict()
-        positions_min, positions_max = self._attrs_to_bb_window(attrs)
+        positions_min, positions_max = self._attrs_to_bb_window(old_attrs)
 
         self._node_rtree.delete_items(
             np.atleast_1d(node_id).astype(np.int64),
             positions_min,
             positions_max,
         )
+
+    def _update_node(
+        self,
+        node_id: int,
+        old_attrs: dict[str, Any],
+        new_attrs: dict[str, Any],
+    ) -> None:
+        self._remove_node(node_id, old_attrs=old_attrs)
+        self._add_node(node_id, new_attrs=new_attrs)
 
     @staticmethod
     def _bboxes_to_array(bbox_series: pl.Series) -> np.ndarray:

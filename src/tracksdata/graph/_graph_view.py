@@ -400,8 +400,9 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         else:
             self._out_of_sync = True
 
-        self._root.node_added.emit_fast(parent_node_id)
-        self.node_added.emit_fast(parent_node_id)
+        new_attrs = dict(attrs)
+        self._root.node_added.emit(parent_node_id, dict(new_attrs))
+        self.node_added.emit(parent_node_id, dict(new_attrs))
 
         return parent_node_id
 
@@ -417,12 +418,12 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
             self._out_of_sync = True
 
         if is_signal_on(self._root.node_added):
-            for node_id in parent_node_ids:
-                self._root.node_added.emit_fast(node_id)
+            for node_id, node_attrs in zip(parent_node_ids, nodes, strict=True):
+                self._root.node_added.emit(node_id, dict(node_attrs))
 
         if is_signal_on(self.node_added):
-            for node_id in parent_node_ids:
-                self.node_added.emit_fast(node_id)
+            for node_id, node_attrs in zip(parent_node_ids, nodes, strict=True):
+                self.node_added.emit(node_id, dict(node_attrs))
 
         return parent_node_ids
 
@@ -446,9 +447,11 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         if node_id not in self._external_to_local:
             raise ValueError(f"Node {node_id} does not exist in the graph.")
 
+        old_attrs = self.nodes[node_id].to_dict()
+
         # Remove from root graph first, because removing bounding box requires node attrs
         self._root.remove_node(node_id)
-        self.node_removed.emit_fast(node_id)
+        self.node_removed.emit(node_id, old_attrs)
 
         if self.sync:
             # Get the local node ID and remove from local graph
@@ -652,6 +655,10 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
     ) -> None:
         if node_ids is None:
             node_ids = self.node_ids()
+        else:
+            node_ids = list(node_ids)
+
+        old_attrs_by_id = {node_id: self._root.nodes[node_id].to_dict() for node_id in node_ids}
 
         self._root.update_node_attrs(
             node_ids=node_ids,
@@ -660,12 +667,21 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         # because attributes are passed by reference, we need don't need if both are rustworkx graphs
         if not self._is_root_rx_graph:
             if self.sync:
-                super().update_node_attrs(
-                    node_ids=self._map_to_local(node_ids),
-                    attrs=attrs,
-                )
+                with self.node_updated.blocked():
+                    super().update_node_attrs(
+                        node_ids=self._map_to_local(node_ids),
+                        attrs=attrs,
+                    )
             else:
                 self._out_of_sync = True
+
+        if is_signal_on(self.node_updated):
+            for node_id in node_ids:
+                self.node_updated.emit(
+                    node_id,
+                    old_attrs_by_id[node_id],
+                    self._root.nodes[node_id].to_dict(),
+                )
 
     def update_edge_attrs(
         self,
