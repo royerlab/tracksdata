@@ -60,6 +60,7 @@ jobs:
             --machine github-actions \
             --python 3.12 \
             --factor 1.5 \
+            --attribute timeout=180 \
             --show-stderr || status=$?
           if [ "$status" -eq 2 ]; then
               echo "asv: benchmark run failed (exit 2). Failing CI." >&2

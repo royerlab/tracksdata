@@ -342,6 +342,55 @@ def test_add_and_remove_node(graph_backend: BaseGraph) -> None:
         assert graph.num_nodes() == 2
 
 
+def test_spatial_filter_add_update_and_remove_node(graph_backend: BaseGraph) -> None:
+    graph_backend.add_node_attr_key("y", pl.Int64)
+    graph_backend.add_node_attr_key("x", pl.Int64)
+
+    graph_backend.add_node({"t": 0, "y": 1, "x": 1})
+    graph_backend.add_node({"t": 1, "y": 10, "x": 10})
+
+    for graph in [graph_backend, graph_backend.filter().subgraph()]:
+        spatial_filter = SpatialFilter(graph, attr_keys=[DEFAULT_ATTR_KEYS.T, "y", "x"])
+
+        assert spatial_filter[2:3, 6:9, 6:9].node_attrs().is_empty()
+
+        new_node_id = graph.add_node({"t": 2, "y": 7, "x": 7})
+        result_ids = spatial_filter[2:3, 6:9, 6:9].node_ids()
+        assert new_node_id in result_ids
+
+        graph.update_node_attrs(attrs={"y": 20, "x": 20}, node_ids=[new_node_id])
+
+        assert spatial_filter[2:3, 6:9, 6:9].node_attrs().is_empty()
+        moved_ids = spatial_filter[2:3, 19:22, 19:22].node_ids()
+        assert new_node_id in moved_ids
+
+        graph.remove_node(new_node_id)
+        assert spatial_filter[2:3, 19:22, 19:22].node_attrs().is_empty()
+
+
+def test_bbox_spatial_filter_updates_node_position(graph_backend: BaseGraph) -> None:
+    graph_backend.add_node_attr_key("bbox", pl.Array(pl.Int64, 4))
+    moved_node_id = graph_backend.add_node({"t": 0, "bbox": np.asarray([0, 0, 2, 2])})
+    graph_backend.add_node({"t": 1, "bbox": np.asarray([10, 10, 12, 12])})
+
+    for graph in [graph_backend, graph_backend.filter().subgraph()]:
+        graph.update_node_attrs(
+            attrs={"bbox": [np.asarray([0, 0, 2, 2])]},
+            node_ids=[moved_node_id],
+        )
+
+        spatial_filter = BBoxSpatialFilter(graph, frame_attr_key="t", bbox_attr_key="bbox")
+        assert moved_node_id in spatial_filter[0:0.5, 0:3, 0:3].node_ids()
+
+        graph.update_node_attrs(
+            attrs={"bbox": [np.asarray([20, 20, 22, 22])]},
+            node_ids=[moved_node_id],
+        )
+
+        assert moved_node_id not in spatial_filter[0:0.5, 0:3, 0:3].node_ids()
+        assert moved_node_id in spatial_filter[0:0.5, 19:23, 19:23].node_ids()
+
+
 def test_bbox_spatial_filter_handles_list_dtype(graph_backend: BaseGraph) -> None:
     """Ensure bounding boxes stored as list dtype still work with the spatial filter."""
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4))

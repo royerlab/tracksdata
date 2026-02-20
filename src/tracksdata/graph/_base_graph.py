@@ -47,8 +47,9 @@ class BaseGraph(abc.ABC):
     Base class for a graph backend.
     """
 
-    node_added = Signal(int)
-    node_removed = Signal(int)
+    node_added = Signal(int, object)
+    node_removed = Signal(int, object)
+    node_updated = Signal(int, object, object)
 
     def __init__(self) -> None:
         self._cache = {}
