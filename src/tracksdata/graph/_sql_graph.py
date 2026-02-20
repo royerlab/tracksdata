@@ -2052,19 +2052,19 @@ class SQLGraph(BaseGraph):
                     raise ValueError(f"Edge {edge_id} does not exist in the graph.")
             session.commit()
 
-    def metadata(self) -> dict[str, Any]:
+    def _metadata(self) -> dict[str, Any]:
         with Session(self._engine) as session:
             result = session.query(self.Metadata).all()
             return {row.key: row.value for row in result}
 
-    def update_metadata(self, **kwargs) -> None:
+    def _update_metadata(self, **kwargs) -> None:
         with Session(self._engine) as session:
             for key, value in kwargs.items():
                 metadata_entry = self.Metadata(key=key, value=value)
                 session.merge(metadata_entry)
             session.commit()
 
-    def remove_metadata(self, key: str) -> None:
+    def _remove_metadata(self, key: str) -> None:
         with Session(self._engine) as session:
             session.query(self.Metadata).filter(self.Metadata.key == key).delete()
             session.commit()

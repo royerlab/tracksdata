@@ -42,10 +42,74 @@ else:
 T = TypeVar("T", bound="BaseGraph")
 
 
+class MetadataView(dict[str, Any]):
+    """Dictionary-like metadata view that syncs mutations back to the graph."""
+
+    _MISSING = object()
+
+    def __init__(
+        self,
+        graph: "BaseGraph",
+        data: dict[str, Any],
+        *,
+        is_public: bool = True,
+    ) -> None:
+        super().__init__(data)
+        self._graph = graph
+        self._is_public = is_public
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        self._graph._set_metadata_with_validation(is_public=self._is_public, **{key: value})
+        super().__setitem__(key, value)
+
+    def __delitem__(self, key: str) -> None:
+        self._graph._remove_metadata_with_validation(key, is_public=self._is_public)
+        super().__delitem__(key)
+
+    def pop(self, key: str, default: Any = _MISSING) -> Any:
+        self._graph._validate_metadata_key(key, is_public=self._is_public)
+
+        if key not in self:
+            if default is self._MISSING:
+                raise KeyError(key)
+            return default
+
+        value = super().__getitem__(key)
+        self._graph._remove_metadata_with_validation(key, is_public=self._is_public)
+        super().pop(key, None)
+        return value
+
+    def popitem(self) -> tuple[str, Any]:
+        key, value = super().popitem()
+        self._graph._remove_metadata_with_validation(key, is_public=self._is_public)
+        return key, value
+
+    def clear(self) -> None:
+        keys = list(self.keys())
+        for key in keys:
+            self._graph._remove_metadata_with_validation(key, is_public=self._is_public)
+        super().clear()
+
+    def setdefault(self, key: str, default: Any = None) -> Any:
+        if key in self:
+            return super().__getitem__(key)
+        self._graph._set_metadata_with_validation(is_public=self._is_public, **{key: default})
+        super().__setitem__(key, default)
+        return default
+
+    def update(self, *args, **kwargs) -> None:
+        updates = dict(*args, **kwargs)
+        if updates:
+            self._graph._set_metadata_with_validation(is_public=self._is_public, **updates)
+        super().update(updates)
+
+
 class BaseGraph(abc.ABC):
     """
     Base class for a graph backend.
     """
+
+    _PRIVATE_METADATA_PREFIX = "__private_"
 
     node_added = Signal(int)
     node_removed = Signal(int)
@@ -1186,7 +1250,8 @@ class BaseGraph(abc.ABC):
         node_attrs = node_attrs.drop(DEFAULT_ATTR_KEYS.NODE_ID)
 
         graph = cls(**kwargs)
-        graph.update_metadata(**other.metadata())
+        graph.metadata.update(other.metadata)
+        graph._private_metadata.update(other._private_metadata_for_copy())
 
         current_node_attr_schemas = graph._node_attr_schemas()
         for k, v in other._node_attr_schemas().items():
@@ -1791,7 +1856,8 @@ class BaseGraph(abc.ABC):
                 for k, v in edge_attrs.to_dict().items()
             }
 
-            td_metadata = self.metadata().copy()
+            td_metadata = self.metadata.copy()
+            td_metadata.update(self._private_metadata_for_copy())
             td_metadata.pop("geff", None)  # avoid geff being written multiple times
 
             geff_metadata = geff.GeffMetadata(
@@ -1829,57 +1895,88 @@ class BaseGraph(abc.ABC):
             zarr_format=zarr_format,
         )
 
-    @abc.abstractmethod
-    def metadata(self) -> dict[str, Any]:
+    @property
+    def metadata(self) -> MetadataView:
         """
         Return the metadata of the graph.
 
         Returns
         -------
-        dict[str, Any]
+        MetadataView
             The metadata of the graph as a dictionary.
 
         Examples
         --------
         ```python
-        metadata = graph.metadata()
+        metadata = graph.metadata
         print(metadata["shape"])
         ```
         """
+        return MetadataView(
+            graph=self,
+            data={k: v for k, v in self._metadata().items() if not self._is_private_metadata_key(k)},
+            is_public=True,
+        )
+
+    @property
+    def _private_metadata(self) -> MetadataView:
+        return MetadataView(
+            graph=self,
+            data={k: v for k, v in self._metadata().items() if self._is_private_metadata_key(k)},
+            is_public=False,
+        )
+
+    def _private_metadata_for_copy(self) -> dict[str, Any]:
+        """
+        Return private metadata entries that should be propagated by `from_other` or `to_geff`.
+        Backends can override this to exclude backend-specific private metadata.
+        """
+        return dict(self._private_metadata)
+
+    @classmethod
+    def _is_private_metadata_key(cls, key: str) -> bool:
+        return key.startswith(cls._PRIVATE_METADATA_PREFIX)
+
+    def _validate_metadata_key(self, key: str, *, is_public: bool) -> None:
+        if not isinstance(key, str):
+            raise TypeError(f"Metadata key must be a string. Got {type(key)}.")
+        is_private_key = self._is_private_metadata_key(key)
+        if is_public and is_private_key:
+            raise ValueError(f"Metadata key '{key}' is reserved for internal use.")
+        if not is_public and not is_private_key:
+            raise ValueError(
+                f"Metadata key '{key}' is not private. Private metadata keys must start with "
+                f"'{self._PRIVATE_METADATA_PREFIX}'."
+            )
+
+    def _validate_metadata_keys(self, keys: Sequence[str], *, is_public: bool) -> None:
+        for key in keys:
+            self._validate_metadata_key(key, is_public=is_public)
+
+    def _set_metadata_with_validation(self, is_public: bool = True, **kwargs) -> None:
+        self._validate_metadata_keys(kwargs.keys(), is_public=is_public)
+        self._update_metadata(**kwargs)
+
+    def _remove_metadata_with_validation(self, key: str, *, is_public: bool = True) -> None:
+        self._validate_metadata_key(key, is_public=is_public)
+        self._remove_metadata(key)
 
     @abc.abstractmethod
-    def update_metadata(self, **kwargs) -> None:
+    def _metadata(self) -> dict[str, Any]:
         """
-        Set or update metadata for the graph.
-
-        Parameters
-        ----------
-        **kwargs : Any
-            The metadata items to set by key. Values will be stored as JSON.
-
-        Examples
-        --------
-        ```python
-        graph.update_metadata(shape=[1, 25, 25], path="path/to/image.ome.zarr")
-        graph.update_metadata(description="Tracking data from experiment 1")
-        ```
+        Return the full metadata including private keys.
         """
 
     @abc.abstractmethod
-    def remove_metadata(self, key: str) -> None:
+    def _update_metadata(self, **kwargs) -> None:
         """
-        Remove a metadata key from the graph.
+        Backend-specific metadata update implementation without public key validation.
+        """
 
-        Parameters
-        ----------
-        key : str
-            The key of the metadata to remove.
-
-        Examples
-        --------
-        ```python
-        graph.remove_metadata("shape")
-        ```
+    @abc.abstractmethod
+    def _remove_metadata(self, key: str) -> None:
+        """
+        Backend-specific metadata removal implementation without public key validation.
         """
 
     def to_traccuracy_graph(self, array_view_kwargs: dict[str, Any] | None = None) -> "TrackingGraph":
