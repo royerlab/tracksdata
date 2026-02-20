@@ -383,6 +383,10 @@ def polars_dtype_to_sqlalchemy_type(dtype: pl.DataType) -> TypeEngine:
     >>> polars_dtype_to_sqlalchemy_type(pl.Boolean)
     <class 'sqlalchemy.sql.sqltypes.Boolean'>
     """
+    # Handle struct types as JSON for backend-level field filtering.
+    if isinstance(dtype, pl.Struct):
+        return sa.JSON()
+
     # Handle sequence types - use PickleType for storage
     if isinstance(dtype, pl.Array | pl.List):
         return sa.PickleType()
@@ -407,6 +411,7 @@ _SQLALCHEMY_TO_POLARS_TYPE_MAP = [
     (sa.Float, pl.Float64),
     (sa.Text, pl.String),  # Must come before String
     (sa.String, pl.String),
+    (sa.JSON, pl.Object),
     (sa.PickleType, pl.Object),  # Must come before LargeBinary
     (sa.LargeBinary, pl.Object),
 ]

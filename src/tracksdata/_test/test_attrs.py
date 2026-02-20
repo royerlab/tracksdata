@@ -115,6 +115,23 @@ def test_attr_expr_method_delegation() -> None:
     assert result.to_list() == expected.to_list()
 
 
+def test_attr_expr_struct_field_method_delegation() -> None:
+    df = pl.DataFrame({"s": [{"x": 1}, {"x": 2}, {"x": 3}]}, schema={"s": pl.Struct({"x": pl.Int64})})
+    expr = NodeAttr("s").struct.field("x")
+    result = expr.evaluate(df)
+    assert isinstance(expr, NodeAttr)
+    assert result.to_list() == [1, 2, 3]
+
+
+def test_attr_comparison_struct_field() -> None:
+    df = pl.DataFrame({"s": [{"x": 1}, {"x": 2}, {"x": 1}]}, schema={"s": pl.Struct({"x": pl.Int64})})
+    comp = NodeAttr("s").struct.field("x") == 1
+    result = comp.to_attr().evaluate(df)
+    assert comp.column == "s"
+    assert comp.field_path == ("x",)
+    assert result.to_list() == [True, False, True]
+
+
 def test_attr_expr_complex_expression() -> None:
     df = pl.DataFrame({"iou": [0.5, 0.7, 0.9], "distance": [10, 20, 30]})
     expr = (1 - Attr("iou")) * Attr("distance")

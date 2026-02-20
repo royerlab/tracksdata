@@ -129,7 +129,8 @@ class AttrComparison:
             raise ValueError(f"Comparison operators are not supported for multiple columns. Found {columns}.")
 
         self.attr = attr
-        self.column = columns[0]
+        self.column = attr.root_column if attr.root_column is not None else columns[0]
+        self.field_path = attr.field_path
         self.op = op
 
         # casting numpy scalars to python scalars
@@ -144,14 +145,18 @@ class AttrComparison:
         self.other = other
 
     def __repr__(self) -> str:
-        return f"{type(self.attr).__name__}({self.column}) {_OPS_MATH_SYMBOLS[self.op]} {self.other}"
+        if self.field_path:
+            column = ".".join([str(self.column), *self.field_path])
+        else:
+            column = str(self.column)
+        return f"{type(self.attr).__name__}({column}) {_OPS_MATH_SYMBOLS[self.op]} {self.other}"
 
     def to_attr(self) -> "Attr":
         """
         Transform the comparison back to an [Attr][tracksdata.attrs.Attr] object.
         This is useful for evaluating the expression on a DataFrame.
         """
-        return Attr(self.op(pl.col(self.column), self.other))
+        return Attr(self.op(self.attr.expr, self.other))
 
     def __getattr__(self, attr: str) -> Any:
         return getattr(self.to_attr(), attr)
@@ -198,6 +203,31 @@ class AttrComparison:
     def __rge__(self, other: ExprInput) -> "Attr": ...
 
 
+class _StructNamespace:
+    """Wrapper around polars struct namespace that preserves Attr semantics."""
+
+    def __init__(self, attr: "Attr") -> None:
+        self._attr = attr
+        self._namespace = attr.expr.struct
+
+    def field(self, name: str) -> "Attr":
+        out = self._attr._wrap(self._namespace.field(name), preserve_field_path=True)
+        if isinstance(out, Attr):
+            out._append_field_path(name)
+        return out
+
+    def __getattr__(self, name: str) -> Any:
+        namespace_attr = getattr(self._namespace, name)
+        if callable(namespace_attr):
+
+            @functools.wraps(namespace_attr)
+            def _wrapped(*args, **kwargs):
+                return self._attr._wrap(namespace_attr(*args, **kwargs))
+
+            return _wrapped
+        return namespace_attr
+
+
 class Attr:
     """
     A class to compose an attribute expression for attribute filtering or value evaluation.
@@ -222,30 +252,40 @@ class Attr:
     def __init__(self, value: ExprInput) -> None:
         self._inf_exprs = []  # expressions multiplied by +inf
         self._neg_inf_exprs = []  # expressions multiplied by -inf
+        self._root_column: str | None = None
+        self._field_path: tuple[str, ...] = ()
 
         if isinstance(value, str):
             self.expr = pl.col(value)
+            self._root_column = value
         elif isinstance(value, Attr):
             self.expr = value.expr
             # Copy infinity tracking from the other AttrExpr
             self._inf_exprs = value.inf_exprs
             self._neg_inf_exprs = value.neg_inf_exprs
+            self._root_column = value.root_column
+            self._field_path = value.field_path
         elif isinstance(value, AttrComparison):
             attr = value.to_attr()
             self.expr = attr.expr
             self._inf_exprs = attr.inf_exprs
             self._neg_inf_exprs = attr.neg_inf_exprs
+            self._root_column = attr.root_column
+            self._field_path = attr.field_path
         elif isinstance(value, Expr):
             self.expr = value
         else:
             self.expr = pl.lit(value)
 
-    def _wrap(self, expr: ExprInput) -> Union["Attr", Any]:
+    def _wrap(self, expr: ExprInput, *, preserve_field_path: bool = False) -> Union["Attr", Any]:
         if isinstance(expr, Expr):
-            result = Attr(expr)
+            result = type(self)(expr)
             # Propagate infinity tracking
             result._inf_exprs = self._inf_exprs.copy()
             result._neg_inf_exprs = self._neg_inf_exprs.copy()
+            if preserve_field_path:
+                result._root_column = self._root_column
+                result._field_path = self._field_path
             return result
         return expr
 
@@ -378,6 +418,14 @@ class Attr:
         return list(dict.fromkeys(self.expr_columns + self.inf_columns + self.neg_inf_columns))
 
     @property
+    def root_column(self) -> str | None:
+        return self._root_column
+
+    @property
+    def field_path(self) -> tuple[str, ...]:
+        return self._field_path
+
+    @property
     def inf_exprs(self) -> list["Attr"]:
         """Get the expressions multiplied by positive infinity."""
         return self._inf_exprs.copy()
@@ -464,6 +512,9 @@ class Attr:
         if attr.startswith("_"):
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{attr}'")
 
+        if attr == "struct":
+            return _StructNamespace(self)
+
         # To auto generate operator methods such as `.log()``
         expr_attr = getattr(self.expr, attr)
         if callable(expr_attr):
@@ -474,6 +525,12 @@ class Attr:
 
             return _wrapped
         return expr_attr
+
+    def _append_field_path(self, field_name: str) -> None:
+        if self._root_column is None:
+            self._field_path = ()
+        else:
+            self._field_path = (*self._field_path, field_name)
 
     def __repr__(self) -> str:
         return f"Attr({self.expr})"
@@ -733,4 +790,4 @@ def polars_reduce_attr_comps(
         # Return True for all rows by using the first column as a reference
         raise ValueError("No attribute comparisons provided.")
 
-    return pl.reduce(reduce_op, [attr_comp.op(df[str(attr_comp.column)], attr_comp.other) for attr_comp in attr_comps])
+    return pl.reduce(reduce_op, [attr_comp.op(attr_comp.attr.expr, attr_comp.other) for attr_comp in attr_comps])

@@ -54,6 +54,54 @@ def _data_numpy_to_native(data: dict[str, Any]) -> None:
             data[k] = v.item()
 
 
+def _field_scalar_sample(value: Any) -> Any:
+    if isinstance(value, list):
+        for item in value:
+            if item is not None:
+                if np.isscalar(item) and hasattr(item, "item"):
+                    return item.item()
+                return item
+        return None
+    if np.isscalar(value) and hasattr(value, "item"):
+        return value.item()
+    return value
+
+
+def _coerce_json_field_expr(lhs: Any, sample: Any) -> Any:
+    if isinstance(sample, bool):
+        if hasattr(lhs, "as_boolean"):
+            return lhs.as_boolean()
+        return sa.cast(lhs, sa.Boolean)
+    if isinstance(sample, int):
+        if hasattr(lhs, "as_integer"):
+            return lhs.as_integer()
+        return sa.cast(lhs, sa.BigInteger)
+    if isinstance(sample, float):
+        if hasattr(lhs, "as_float"):
+            return lhs.as_float()
+        return sa.cast(lhs, sa.Float)
+    if isinstance(sample, str):
+        if hasattr(lhs, "as_string"):
+            return lhs.as_string()
+        return sa.cast(lhs, sa.String)
+    return lhs
+
+
+def _resolve_attr_filter_column(
+    table: type[DeclarativeBase],
+    attr_filter: AttrComparison,
+) -> Any:
+    lhs = getattr(table, str(attr_filter.column))
+
+    if not attr_filter.field_path:
+        return lhs
+
+    for field in attr_filter.field_path:
+        lhs = lhs[field]
+
+    return _coerce_json_field_expr(lhs, _field_scalar_sample(attr_filter.other))
+
+
 def _filter_query(
     query: sa.Select,
     table: type[DeclarativeBase],
@@ -78,7 +126,10 @@ def _filter_query(
     """
     LOG.info("Filter query:\n%s", attr_filters)
     query = query.filter(
-        *[attr_filter.op(getattr(table, str(attr_filter.column)), attr_filter.other) for attr_filter in attr_filters]
+        *[
+            attr_filter.op(_resolve_attr_filter_column(table, attr_filter), attr_filter.other)
+            for attr_filter in attr_filters
+        ]
     )
     return query
 
@@ -373,6 +424,59 @@ def blob_default(engine: sa.Engine, value: bytes) -> sa.Text:
         raise RuntimeError(f"Unsupported dialect {engine.dialect.name}")
 
 
+def _dtype_to_metadata_dict(dtype: pl.DataType) -> dict[str, Any]:
+    if isinstance(dtype, pl.Struct):
+        return {
+            "kind": "struct",
+            "fields": [
+                {"name": field_name, "dtype": _dtype_to_metadata_dict(field_dtype)}
+                for field_name, field_dtype in dtype.to_schema().items()
+            ],
+        }
+
+    if isinstance(dtype, pl.List):
+        return {"kind": "list", "inner": _dtype_to_metadata_dict(dtype.inner)}
+
+    if isinstance(dtype, pl.Array):
+        return {"kind": "array", "inner": _dtype_to_metadata_dict(dtype.inner), "shape": list(dtype.shape)}
+
+    return {"kind": "scalar", "name": dtype.base_type().__name__}
+
+
+def _dtype_from_metadata_dict(serialized: Any) -> pl.DataType:
+    if not isinstance(serialized, dict):
+        return pl.Object
+
+    kind = serialized.get("kind")
+
+    if kind == "struct":
+        fields: dict[str, pl.DataType] = {}
+        for field in serialized.get("fields", []):
+            if not isinstance(field, dict) or "name" not in field:
+                continue
+            fields[str(field["name"])] = _dtype_from_metadata_dict(field.get("dtype"))
+        return pl.Struct(fields)
+
+    if kind == "list":
+        return pl.List(_dtype_from_metadata_dict(serialized.get("inner")))
+
+    if kind == "array":
+        inner = _dtype_from_metadata_dict(serialized.get("inner"))
+        shape_raw = serialized.get("shape", [])
+        if not isinstance(shape_raw, list | tuple) or len(shape_raw) == 0:
+            return pl.List(inner)
+        return pl.Array(inner, shape=tuple(shape_raw))
+
+    if kind == "scalar":
+        dtype_name = serialized.get("name")
+        dtype = getattr(pl, dtype_name, None)
+        if dtype is None:
+            return pl.Object
+        return dtype
+
+    return pl.Object
+
+
 class SQLGraph(BaseGraph):
     """
     SQL-based graph implementation using SQLAlchemy ORM.
@@ -445,6 +549,7 @@ class SQLGraph(BaseGraph):
     """
 
     node_id_time_multiplier: int = 1_000_000_000
+    _STRUCT_DTYPE_METADATA_KEY: str = f"{BaseGraph._PRIVATE_METADATA_PREFIX}struct_attr_dtypes"
     Base: type[DeclarativeBase]
     Node: type[DeclarativeBase]
     Edge: type[DeclarativeBase]
@@ -483,6 +588,7 @@ class SQLGraph(BaseGraph):
 
         # Initialize schemas from existing table columns
         self._init_schemas_from_tables()
+        self._restore_struct_attr_dtypes_from_private_metadata()
 
         self._max_id_per_time = {}
         self._update_max_id_per_time()
@@ -585,6 +691,45 @@ class SQLGraph(BaseGraph):
                     dtype=pl_dtype,
                 )
 
+    def _struct_attr_dtypes_metadata(self) -> dict[str, dict[str, Any]]:
+        metadata = self._private_metadata.get(self._STRUCT_DTYPE_METADATA_KEY, None)
+        if not isinstance(metadata, dict):
+            return {"node": {}, "edge": {}}
+
+        node_dtypes = metadata.get("node")
+        edge_dtypes = metadata.get("edge")
+        if not isinstance(node_dtypes, dict):
+            node_dtypes = {}
+        if not isinstance(edge_dtypes, dict):
+            edge_dtypes = {}
+        return {"node": node_dtypes, "edge": edge_dtypes}
+
+    def _set_struct_attr_dtypes_metadata(self, metadata: dict[str, dict[str, Any]]) -> None:
+        self._private_metadata.update(**{self._STRUCT_DTYPE_METADATA_KEY: metadata})
+
+    def _register_struct_attr_dtype(self, *, table: str, key: str, dtype: pl.DataType) -> None:
+        metadata = self._struct_attr_dtypes_metadata()
+        metadata.setdefault(table, {})[key] = _dtype_to_metadata_dict(dtype)
+        self._set_struct_attr_dtypes_metadata(metadata)
+
+    def _remove_struct_attr_dtype(self, *, table: str, key: str) -> None:
+        metadata = self._struct_attr_dtypes_metadata()
+        table_mapping = metadata.get(table, {})
+        if key in table_mapping:
+            table_mapping.pop(key, None)
+            self._set_struct_attr_dtypes_metadata(metadata)
+
+    def _restore_struct_attr_dtypes_from_private_metadata(self) -> None:
+        metadata = self._struct_attr_dtypes_metadata()
+
+        for key, serialized in metadata["node"].items():
+            if key in self.__node_attr_schemas:
+                self.__node_attr_schemas[key].dtype = _dtype_from_metadata_dict(serialized)
+
+        for key, serialized in metadata["edge"].items():
+            if key in self.__edge_attr_schemas:
+                self.__edge_attr_schemas[key].dtype = _dtype_from_metadata_dict(serialized)
+
     def _restore_pickled_column_types(self, table: sa.Table) -> None:
         for column in table.columns:
             if isinstance(column.type, sa.LargeBinary):
@@ -601,7 +746,7 @@ class SQLGraph(BaseGraph):
         return {
             key: schema.dtype
             for key, schema in schemas.items()
-            if not (schema.dtype == pl.Object or isinstance(schema.dtype, pl.Array | pl.List))
+            if not (schema.dtype == pl.Object or isinstance(schema.dtype, pl.Array | pl.List | pl.Struct))
         }
 
     def _cast_array_columns(self, table_class: type[DeclarativeBase], df: pl.DataFrame) -> pl.DataFrame:
@@ -611,12 +756,28 @@ class SQLGraph(BaseGraph):
         else:
             schemas = self._edge_attr_schemas()
 
-        # Cast array columns (stored as blobs in database)
-        df = df.with_columns(
-            pl.Series(key, df[key].to_list(), dtype=schema.dtype)
-            for key, schema in schemas.items()
-            if isinstance(schema.dtype, pl.Array) and key in df.columns
-        )
+        for key, schema in schemas.items():
+            if key not in df.columns:
+                continue
+
+            if isinstance(schema.dtype, pl.Array):
+                # Array columns are stored as pickled blobs.
+                df = df.with_columns(pl.Series(key, df[key].to_list(), dtype=schema.dtype))
+                continue
+
+            if isinstance(schema.dtype, pl.Struct):
+                source_dtype = df.schema[key]
+                if source_dtype == pl.String:
+                    # SQLite returns JSON columns as strings.
+                    df = df.with_columns(
+                        pl.when(pl.col(key).is_null())
+                        .then(None)
+                        .otherwise(pl.col(key).str.json_decode(schema.dtype))
+                        .alias(key)
+                    )
+                elif source_dtype != schema.dtype:
+                    df = df.with_columns(pl.Series(key, df[key].to_list(), dtype=schema.dtype))
+
         return df
 
     def _update_max_id_per_time(self) -> None:
@@ -1635,6 +1796,9 @@ class SQLGraph(BaseGraph):
         # Add column to database
         self._add_new_column(self.Node, schema)
 
+        if isinstance(schema.dtype, pl.Struct):
+            self._register_struct_attr_dtype(table="node", key=schema.key, dtype=schema.dtype)
+
     def remove_node_attr_key(self, key: str) -> None:
         if key not in self.node_attr_keys():
             raise ValueError(f"Node attribute key {key} does not exist")
@@ -1644,6 +1808,7 @@ class SQLGraph(BaseGraph):
 
         self._drop_column(self.Node, key)
         self.__node_attr_schemas.pop(key, None)
+        self._remove_struct_attr_dtype(table="node", key=key)
 
     def add_edge_attr_key(
         self,
@@ -1660,12 +1825,16 @@ class SQLGraph(BaseGraph):
         # Add column to database
         self._add_new_column(self.Edge, schema)
 
+        if isinstance(schema.dtype, pl.Struct):
+            self._register_struct_attr_dtype(table="edge", key=schema.key, dtype=schema.dtype)
+
     def remove_edge_attr_key(self, key: str) -> None:
         if key not in self.edge_attr_keys():
             raise ValueError(f"Edge attribute key {key} does not exist")
 
         self._drop_column(self.Edge, key)
         self.__edge_attr_schemas.pop(key, None)
+        self._remove_struct_attr_dtype(table="edge", key=key)
 
     def num_edges(self) -> int:
         with Session(self._engine) as session:
@@ -2052,19 +2221,19 @@ class SQLGraph(BaseGraph):
                     raise ValueError(f"Edge {edge_id} does not exist in the graph.")
             session.commit()
 
-    def metadata(self) -> dict[str, Any]:
+    def _metadata(self) -> dict[str, Any]:
         with Session(self._engine) as session:
             result = session.query(self.Metadata).all()
             return {row.key: row.value for row in result}
 
-    def update_metadata(self, **kwargs) -> None:
+    def _update_metadata(self, **kwargs) -> None:
         with Session(self._engine) as session:
             for key, value in kwargs.items():
                 metadata_entry = self.Metadata(key=key, value=value)
                 session.merge(metadata_entry)
             session.commit()
 
-    def remove_metadata(self, key: str) -> None:
+    def _remove_metadata(self, key: str) -> None:
         with Session(self._engine) as session:
             session.query(self.Metadata).filter(self.Metadata.key == key).delete()
             session.commit()

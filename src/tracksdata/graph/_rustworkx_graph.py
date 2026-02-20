@@ -74,9 +74,30 @@ def _create_filter_func(
 ) -> Callable[[dict[str, Any]], bool]:
     LOG.info(f"Creating filter function for {attr_comps}")
 
+    def _extract_field_path(value: Any, field_path: tuple[str, ...]) -> Any:
+        for field in field_path:
+            if value is None:
+                return None
+
+            if isinstance(value, dict):
+                value = value.get(field, None)
+                continue
+
+            try:
+                value = value[field]
+            except (KeyError, IndexError, TypeError):
+                try:
+                    value = getattr(value, field)
+                except AttributeError:
+                    return None
+
+        return value
+
     def _filter(attrs: dict[str, Any]) -> bool:
         for attr_op in attr_comps:
             value = attrs.get(attr_op.column, schema[attr_op.column].default_value)
+            if attr_op.field_path:
+                value = _extract_field_path(value, attr_op.field_path)
             if not attr_op.op(value, attr_op.other):
                 return False
         return True
@@ -371,7 +392,7 @@ class RustWorkXGraph(BaseGraph):
 
             elif not isinstance(self._graph.attrs, dict):
                 LOG.warning(
-                    "previous attribute %s will be added to key 'old_attrs' of `graph.metadata()`",
+                    "previous attribute %s will be added to key 'old_attrs' of `graph.metadata`",
                     self._graph.attrs,
                 )
                 self._graph.attrs = {
@@ -1503,13 +1524,13 @@ class RustWorkXGraph(BaseGraph):
         """
         return self.rx_graph.get_edge_data(source_id, target_id)[DEFAULT_ATTR_KEYS.EDGE_ID]
 
-    def metadata(self) -> dict[str, Any]:
+    def _metadata(self) -> dict[str, Any]:
         return self._graph.attrs
 
-    def update_metadata(self, **kwargs) -> None:
+    def _update_metadata(self, **kwargs) -> None:
         self._graph.attrs.update(kwargs)
 
-    def remove_metadata(self, key: str) -> None:
+    def _remove_metadata(self, key: str) -> None:
         self._graph.attrs.pop(key, None)
 
     def edge_list(self) -> list[list[int, int]]:
