@@ -175,6 +175,9 @@ class ILPSolver(BaseSolver):
         expr: Attr,
         df: pl.DataFrame,
     ) -> list[float]:
+        if df.is_empty():
+            return []
+
         if len(expr.expr_columns) == 0:
             return [expr.evaluate(df).item()] * len(df)
         else:
@@ -388,7 +391,11 @@ class ILPSolver(BaseSolver):
             node_attr_keys.extend(self.merge_weight_expr.columns)
 
         nodes_df = graph.node_attrs(attr_keys=node_attr_keys)
-        edges_df = graph.edge_attrs(attr_keys=self.edge_weight_expr.columns)
+        # When no edges exist, avoid requesting edge weight columns that may not
+        # be registered in the backend schema yet. _solve() handles this as a
+        # regular "no edges" ValueError.
+        edge_attr_keys = [] if graph.num_edges() == 0 else self.edge_weight_expr.columns
+        edges_df = graph.edge_attrs(attr_keys=edge_attr_keys)
 
         self._add_objective_and_variables(nodes_df, edges_df)
         self._add_continuous_flow_constraints(nodes_df[DEFAULT_ATTR_KEYS.NODE_ID].to_list(), edges_df)

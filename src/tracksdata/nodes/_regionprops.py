@@ -230,8 +230,8 @@ class RegionPropsNodes(BaseNodesOperator):
         axis_names = self._axis_names(labels)
         self._init_node_attrs(graph, axis_names, ndims=labels.ndim)
 
-        if "shape" not in graph.metadata():
-            graph.update_metadata(shape=labels.shape)
+        if "shape" not in graph.metadata:
+            graph.metadata.update(shape=labels.shape)
 
         if t is None:
             time_points = range(labels.shape[0])

@@ -1,3 +1,4 @@
+import datetime as dt
 from pathlib import Path
 from typing import Any
 
@@ -1359,7 +1360,7 @@ def test_from_other_with_edges(
 ) -> None:
     """Ensure from_other preserves structure across backend conversions."""
     # Create source graph with nodes, edges, and attributes
-    graph_backend.update_metadata(special_key="special_value")
+    graph_backend.metadata.update(special_key="special_value")
 
     graph_backend.add_node_attr_key("x", dtype=pl.Float64)
     graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=-1)
@@ -1386,7 +1387,7 @@ def test_from_other_with_edges(
     assert set(new_graph.node_attr_keys()) == set(graph_backend.node_attr_keys())
     assert set(new_graph.edge_attr_keys()) == set(graph_backend.edge_attr_keys())
 
-    assert new_graph.metadata() == graph_backend.metadata()
+    assert new_graph.metadata == graph_backend.metadata
 
     assert new_graph._node_attr_schemas() == graph_backend._node_attr_schemas()
     assert new_graph._edge_attr_schemas() == graph_backend._edge_attr_schemas()
@@ -1435,6 +1436,108 @@ def test_from_other_with_edges(
     source_overlaps = {tuple(sorted(node_map[node] for node in overlap)) for overlap in graph_backend.overlaps()}
     new_overlaps = {tuple(sorted(overlap)) for overlap in new_graph.overlaps()}
     assert new_overlaps == source_overlaps
+
+
+@pytest.mark.parametrize(
+    ("target_cls", "target_kwargs"),
+    [
+        pytest.param(RustWorkXGraph, {}, id="rustworkx"),
+        pytest.param(
+            SQLGraph,
+            {
+                "drivername": "sqlite",
+                "database": ":memory:",
+                "engine_kwargs": {"connect_args": {"check_same_thread": False}},
+            },
+            id="sql",
+        ),
+        pytest.param(IndexedRXGraph, {}, id="indexed"),
+    ],
+)
+def test_from_other_preserves_schema_roundtrip(target_cls: type[BaseGraph], target_kwargs: dict[str, Any]) -> None:
+    """Test that from_other preserves node and edge attribute schemas across backends."""
+    graph = RustWorkXGraph()
+    for dtype in [
+        pl.Float16,
+        pl.Float32,
+        pl.Float64,
+        pl.Int8,
+        pl.Int16,
+        pl.Int32,
+        pl.Int64,
+        pl.UInt8,
+        pl.UInt16,
+        pl.UInt32,
+        pl.UInt64,
+        pl.Date,
+        pl.Datetime,
+        pl.Boolean,
+        pl.Array(pl.Float32, 3),
+        pl.List(pl.Int32),
+        pl.Struct({"a": pl.Int8, "b": pl.Array(pl.String, 2)}),
+        pl.String,
+        pl.Object,
+    ]:
+        graph.add_node_attr_key(f"attr_{dtype}", dtype=dtype)
+    graph.add_node(
+        {
+            "t": 0,
+            "attr_Float16": np.float16(1.5),
+            "attr_Float32": np.float32(2.5),
+            "attr_Float64": np.float64(3.5),
+            "attr_Int8": np.int8(4),
+            "attr_Int16": np.int16(5),
+            "attr_Int32": np.int32(6),
+            "attr_Int64": np.int64(7),
+            "attr_UInt8": np.uint8(8),
+            "attr_UInt16": np.uint16(9),
+            "attr_UInt32": np.uint32(10),
+            "attr_UInt64": np.uint64(11),
+            "attr_Date": pl.date(2024, 1, 1),
+            "attr_Datetime": dt.datetime(2024, 1, 1, 12, 0, 0),
+            "attr_Boolean": True,
+            "attr_Array(Float32, shape=(3,))": np.array([1.0, 2.0, 3.0], dtype=np.float32),
+            "attr_List(Int32)": [1, 2, 3],
+            "attr_Struct({'a': Int8, 'b': Array(String, shape=(2,))})": {
+                "a": 1,
+                "b": np.array(["x", "y"], dtype=object),
+            },
+            "attr_String": "test",
+            "attr_Object": {"key": "value"},
+        }
+    )
+    graph2 = target_cls.from_other(graph, **target_kwargs)
+
+    assert graph2.num_nodes() == graph.num_nodes()
+    assert set(graph2.node_attr_keys()) == set(graph.node_attr_keys())
+
+    assert graph2._node_attr_schemas() == graph._node_attr_schemas()
+    assert graph2._edge_attr_schemas() == graph._edge_attr_schemas()
+    assert graph2.node_attrs().schema == graph.node_attrs().schema
+    assert graph2.edge_attrs().schema == graph.edge_attrs().schema
+
+    graph3 = RustWorkXGraph.from_other(graph2)
+    assert graph3._node_attr_schemas() == graph._node_attr_schemas()
+    assert graph3._edge_attr_schemas() == graph._edge_attr_schemas()
+    assert graph3.node_attrs().schema == graph.node_attrs().schema
+    assert graph3.edge_attrs().schema == graph.edge_attrs().schema
+
+
+@pytest.mark.xfail(reason="This is because of the lack of support of shape-less pl.Array in write_ipc of polars.")
+def test_from_other_with_array_no_shape():
+    """Test that from_other raises an error when trying to copy array attributes without shape information."""
+    graph = RustWorkXGraph()
+    graph.add_node_attr_key("array_attr", pl.Array)
+    graph.add_node({"t": 0, "array_attr": np.array([1.0, 2.0, 3.0], dtype=np.float32)})
+
+    # This should raise an error because the schema does not include shape information
+    graph2 = SQLGraph.from_other(
+        graph, drivername="sqlite", database=":memory:", engine_kwargs={"connect_args": {"check_same_thread": False}}
+    )
+    assert graph2.num_nodes() == graph.num_nodes()
+    assert set(graph2.node_attr_keys()) == set(graph.node_attr_keys())
+    assert graph2._node_attr_schemas() == graph._node_attr_schemas()
+    assert graph2.node_attrs().schema == graph.node_attrs().schema
 
 
 @pytest.mark.parametrize(
@@ -1617,6 +1720,72 @@ def test_sql_graph_max_id_restored_per_timepoint(tmp_path: Path) -> None:
     next_id = reloaded.add_node({DEFAULT_ATTR_KEYS.T: 1})
 
     assert next_id == first_id + 1
+
+
+def test_sql_graph_schema_defaults_survive_reload(tmp_path: Path) -> None:
+    """Reloading a SQLGraph should preserve dtype and default schema metadata."""
+    db_path = tmp_path / "schema_defaults.db"
+    graph = SQLGraph("sqlite", str(db_path))
+
+    node_array_default = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+    node_object_default = {"nested": [1, 2, 3]}
+    edge_score_default = 0.25
+
+    graph.add_node_attr_key("node_array_default", pl.Array(pl.Float32, 3), node_array_default)
+    graph.add_node_attr_key("node_object_default", pl.Object, node_object_default)
+    graph.add_edge_attr_key("edge_score_default", pl.Float32, edge_score_default)
+    graph._engine.dispose()
+
+    reloaded = SQLGraph("sqlite", str(db_path))
+
+    node_schemas = reloaded._node_attr_schemas()
+    edge_schemas = reloaded._edge_attr_schemas()
+    np.testing.assert_array_equal(node_schemas["node_array_default"].default_value, node_array_default)
+    assert node_schemas["node_array_default"].dtype == pl.Array(pl.Float32, 3)
+    assert node_schemas["node_object_default"].default_value == node_object_default
+    assert node_schemas["node_object_default"].dtype == pl.Object
+    assert edge_schemas["edge_score_default"].default_value == edge_score_default
+    assert edge_schemas["edge_score_default"].dtype == pl.Float32
+
+
+def test_sql_schema_metadata_not_copied_to_in_memory_graphs() -> None:
+    """SQL-private schema metadata should not leak into in-memory backends via from_other."""
+    sql_graph = SQLGraph("sqlite", ":memory:")
+    sql_graph.add_node_attr_key("node_array_default", pl.Array(pl.Float32, 3), np.array([1.0, 2.0, 3.0], np.float32))
+    sql_graph.add_node_attr_key("node_object_default", pl.Object, {"payload": [1, 2, 3]})
+    sql_graph.add_edge_attr_key("edge_score_default", pl.Float32, 0.25)
+
+    n1 = sql_graph.add_node(
+        {
+            "t": 0,
+            "node_array_default": np.array([1.0, 1.0, 1.0], dtype=np.float32),
+            "node_object_default": {"payload": [10]},
+        }
+    )
+    n2 = sql_graph.add_node(
+        {
+            "t": 1,
+            "node_array_default": np.array([2.0, 2.0, 2.0], dtype=np.float32),
+            "node_object_default": {"payload": [20]},
+        }
+    )
+    sql_graph.add_edge(n1, n2, {"edge_score_default": 0.75})
+
+    assert SQLGraph._PRIVATE_SQL_NODE_SCHEMA_STORE_KEY in sql_graph._private_metadata
+    assert SQLGraph._PRIVATE_SQL_EDGE_SCHEMA_STORE_KEY in sql_graph._private_metadata
+
+    rx_graph = RustWorkXGraph.from_other(sql_graph)
+    assert SQLGraph._PRIVATE_SQL_NODE_SCHEMA_STORE_KEY not in rx_graph._metadata()
+    assert SQLGraph._PRIVATE_SQL_EDGE_SCHEMA_STORE_KEY not in rx_graph._metadata()
+
+    sql_graph_roundtrip = SQLGraph.from_other(
+        rx_graph,
+        drivername="sqlite",
+        database=":memory:",
+        engine_kwargs={"connect_args": {"check_same_thread": False}},
+    )
+    assert sql_graph_roundtrip._node_attr_schemas() == sql_graph._node_attr_schemas()
+    assert sql_graph_roundtrip._edge_attr_schemas() == sql_graph._edge_attr_schemas()
 
 
 def test_compute_overlaps_invalid_threshold(graph_backend: BaseGraph) -> None:
@@ -2341,7 +2510,7 @@ def _fill_mock_geff_graph(graph_backend: BaseGraph) -> None:
 
     graph_backend.add_edge_attr_key("weight", pl.Float16)
 
-    graph_backend.update_metadata(
+    graph_backend.metadata.update(
         shape=[1, 25, 25],
         path="path/to/image.ome.zarr",
     )
@@ -2402,11 +2571,11 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
 
     geff_graph, _ = IndexedRXGraph.from_geff(output_store)
 
-    assert "geff" in geff_graph.metadata()
+    assert "geff" in geff_graph.metadata
 
     # geff metadata was not stored in original graph
-    geff_graph.metadata().pop("geff")
-    assert geff_graph.metadata() == graph_backend.metadata()
+    geff_graph.metadata.pop("geff")
+    assert geff_graph.metadata == graph_backend.metadata
 
     assert geff_graph.num_nodes() == 3
     assert geff_graph.num_edges() == 2
@@ -2461,11 +2630,11 @@ def test_geff_with_keymapping(graph_backend: BaseGraph) -> None:
         edge_attr_key_map={"weight": "weight_new"},
     )
 
-    assert "geff" in geff_graph.metadata()
+    assert "geff" in geff_graph.metadata
 
     # geff metadata was not stored in original graph
-    geff_graph.metadata().pop("geff")
-    assert geff_graph.metadata() == graph_backend.metadata()
+    geff_graph.metadata.pop("geff")
+    assert geff_graph.metadata == graph_backend.metadata
 
     assert geff_graph.num_nodes() == 3
     assert geff_graph.num_edges() == 2
@@ -2502,32 +2671,56 @@ def test_metadata_multiple_dtypes(graph_backend: BaseGraph) -> None:
     }
 
     # Update metadata with all test values
-    graph_backend.update_metadata(**test_metadata)
+    graph_backend.metadata.update(**test_metadata)
 
     # Retrieve and verify
-    retrieved = graph_backend.metadata()
+    retrieved = graph_backend.metadata
 
     for key, expected_value in test_metadata.items():
         assert key in retrieved, f"Key '{key}' not found in metadata"
         assert retrieved[key] == expected_value, f"Value mismatch for '{key}': {retrieved[key]} != {expected_value}"
 
     # Test updating existing keys
-    graph_backend.update_metadata(string="updated_value", new_key="new_value")
-    retrieved = graph_backend.metadata()
+    graph_backend.metadata.update(string="updated_value", new_key="new_value")
+    retrieved = graph_backend.metadata
 
     assert retrieved["string"] == "updated_value"
     assert retrieved["new_key"] == "new_value"
     assert retrieved["integer"] == 42  # Other values unchanged
 
     # Testing removing metadata
-    graph_backend.remove_metadata("string")
-    retrieved = graph_backend.metadata()
+    graph_backend.metadata.pop("string", None)
+    retrieved = graph_backend.metadata
     assert "string" not in retrieved
 
-    graph_backend.remove_metadata("mixed_list")
-    retrieved = graph_backend.metadata()
+    graph_backend.metadata.pop("mixed_list", None)
+    retrieved = graph_backend.metadata
     assert "string" not in retrieved
     assert "mixed_list" not in retrieved
+
+
+def test_private_metadata_is_hidden_from_public_apis(graph_backend: BaseGraph) -> None:
+    private_key = "__private_dtype_map"
+
+    graph_backend._private_metadata.update(**{private_key: {"x": "float64"}})
+    graph_backend.metadata.update(shape=[1, 2, 3])
+
+    public_metadata = graph_backend.metadata
+    assert private_key not in public_metadata
+    assert public_metadata["shape"] == [1, 2, 3]
+
+    with pytest.raises(ValueError, match="reserved for internal use"):
+        graph_backend.metadata.update(**{private_key: {"x": "int64"}})
+
+    with pytest.raises(ValueError, match="reserved for internal use"):
+        graph_backend.metadata.pop(private_key, None)
+
+    with pytest.raises(ValueError, match="is not private"):
+        graph_backend._private_metadata.update(shape=[1, 2, 3])
+
+    # Private metadata view can remove private keys.
+    graph_backend._private_metadata.pop(private_key, None)
+    assert private_key not in graph_backend._metadata()
 
 
 def test_pickle_roundtrip(graph_backend: BaseGraph) -> None:
@@ -2607,7 +2800,7 @@ def test_to_traccuracy_graph(graph_backend: BaseGraph) -> None:
     graph_backend.add_node_attr_key("y", pl.Float64)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4))
-    graph_backend.update_metadata(shape=[3, 25, 25])
+    graph_backend.metadata.update(shape=[3, 25, 25])
 
     # Create masks for first graph
     mask1_data = np.array([[True, True], [True, True]], dtype=bool)

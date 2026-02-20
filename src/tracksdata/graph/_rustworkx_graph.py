@@ -343,7 +343,7 @@ class RustWorkXGraph(BaseGraph):
         self._time_to_nodes: dict[int, list[int]] = {}
         self.__node_attr_schemas: dict[str, AttrSchema] = {}
         self.__edge_attr_schemas: dict[str, AttrSchema] = {}
-        self._overlaps: list[list[int, 2]] = []
+        self._overlaps: list[list[int]] = []
 
         # Add default node attributes with inferred schemas
         self.__node_attr_schemas[DEFAULT_ATTR_KEYS.T] = AttrSchema(
@@ -371,7 +371,7 @@ class RustWorkXGraph(BaseGraph):
 
             elif not isinstance(self._graph.attrs, dict):
                 LOG.warning(
-                    "previous attribute %s will be added to key 'old_attrs' of `graph.metadata()`",
+                    "previous attribute %s will be added to key 'old_attrs' of `graph.metadata`",
                     self._graph.attrs,
                 )
                 self._graph.attrs = {
@@ -1153,16 +1153,11 @@ class RustWorkXGraph(BaseGraph):
 
         edge_map = rx_graph.edge_index_map()
         if len(edge_map) == 0:
-            return pl.DataFrame(
-                {
-                    key: []
-                    for key in [
-                        *attr_keys,
-                        DEFAULT_ATTR_KEYS.EDGE_SOURCE,
-                        DEFAULT_ATTR_KEYS.EDGE_TARGET,
-                    ]
-                }
-            )
+            empty_columns = {}
+            for key in [*attr_keys, DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET]:
+                schema = self._edge_attr_schemas()[key]
+                empty_columns[key] = pl.Series(name=key, values=[], dtype=schema.dtype)
+            return pl.DataFrame(empty_columns)
 
         source, target, data = zip(*edge_map.values(), strict=False)
 
@@ -1503,13 +1498,13 @@ class RustWorkXGraph(BaseGraph):
         """
         return self.rx_graph.get_edge_data(source_id, target_id)[DEFAULT_ATTR_KEYS.EDGE_ID]
 
-    def metadata(self) -> dict[str, Any]:
+    def _metadata(self) -> dict[str, Any]:
         return self._graph.attrs
 
-    def update_metadata(self, **kwargs) -> None:
+    def _update_metadata(self, **kwargs) -> None:
         self._graph.attrs.update(kwargs)
 
-    def remove_metadata(self, key: str) -> None:
+    def _remove_metadata(self, key: str) -> None:
         self._graph.attrs.pop(key, None)
 
     def edge_list(self) -> list[list[int, int]]:
