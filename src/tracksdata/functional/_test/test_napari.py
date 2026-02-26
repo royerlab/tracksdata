@@ -31,7 +31,7 @@ def test_napari_conversion(metadata_shape: bool) -> None:
 
     shape = (2, 10, 22, 32)
     if metadata_shape:
-        graph.update_metadata(shape=shape)
+        graph.metadata.update(shape=shape)
         arg_shape = None
     else:
         arg_shape = shape

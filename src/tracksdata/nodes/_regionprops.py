@@ -229,8 +229,8 @@ class RegionPropsNodes(BaseNodesOperator):
         node_op.add_nodes(graph, labels=labels, t=0, intensity_image=fluorescence_image)
         ```
         """
-        if "shape" not in graph.metadata():
-            graph.update_metadata(shape=labels.shape)
+        if "shape" not in graph.metadata:
+            graph.metadata.update(shape=labels.shape)
 
         if t is None:
             time_points = range(labels.shape[0])

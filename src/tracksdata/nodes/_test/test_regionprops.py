@@ -79,8 +79,8 @@ def test_regionprops_add_nodes_2d() -> None:
     operator = RegionPropsNodes(extra_properties=extra_properties)
     operator.add_nodes(graph, labels=labels)
 
-    assert "shape" in graph.metadata()
-    assert graph.metadata()["shape"] == labels.shape
+    assert "shape" in graph.metadata
+    assert graph.metadata["shape"] == labels.shape
 
     # Check that nodes were added
     assert graph.num_nodes() == 2  # Two regions (labels 1 and 2)
@@ -115,8 +115,8 @@ def test_regionprops_add_nodes_3d() -> None:
     operator = RegionPropsNodes(extra_properties=extra_properties)
     operator.add_nodes(graph, labels=labels)
 
-    assert "shape" in graph.metadata()
-    assert graph.metadata()["shape"] == labels.shape
+    assert "shape" in graph.metadata
+    assert graph.metadata["shape"] == labels.shape
 
     # Check that nodes were added
     assert graph.num_nodes() == 2  # Two regions
@@ -150,8 +150,8 @@ def test_regionprops_add_nodes_with_intensity() -> None:
 
     operator.add_nodes(graph, labels=labels, intensity_image=intensity)
 
-    assert "shape" in graph.metadata()
-    assert graph.metadata()["shape"] == labels.shape
+    assert "shape" in graph.metadata
+    assert graph.metadata["shape"] == labels.shape
 
     # Check that nodes were added with intensity attributes
     nodes_df = graph.node_attrs()
@@ -181,8 +181,8 @@ def test_regionprops_add_nodes_timelapse(n_workers: int) -> None:
     with options_context(n_workers=n_workers):
         operator.add_nodes(graph, labels=labels)
 
-    assert "shape" in graph.metadata()
-    assert graph.metadata()["shape"] == labels.shape
+    assert "shape" in graph.metadata
+    assert graph.metadata["shape"] == labels.shape
 
     # Check that nodes were added for both time points
     nodes_df = graph.node_attrs()
@@ -209,8 +209,8 @@ def test_regionprops_add_nodes_timelapse_with_intensity() -> None:
 
     operator.add_nodes(graph, labels=labels, intensity_image=intensity)
 
-    assert "shape" in graph.metadata()
-    assert graph.metadata()["shape"] == labels.shape
+    assert "shape" in graph.metadata
+    assert graph.metadata["shape"] == labels.shape
 
     # Check that nodes were added with intensity attributes
     nodes_df = graph.node_attrs()
@@ -237,8 +237,8 @@ def test_regionprops_custom_properties() -> None:
 
     operator.add_nodes(graph, labels=labels, t=0)
 
-    assert "shape" in graph.metadata()
-    assert graph.metadata()["shape"] == labels.shape
+    assert "shape" in graph.metadata
+    assert graph.metadata["shape"] == labels.shape
 
     # Check that custom property was calculated
     nodes_df = graph.node_attrs()
@@ -275,8 +275,8 @@ def test_regionprops_mask_creation() -> None:
 
     operator.add_nodes(graph, labels=labels, t=0)
 
-    assert "shape" in graph.metadata()
-    assert graph.metadata()["shape"] == labels.shape
+    assert "shape" in graph.metadata
+    assert graph.metadata["shape"] == labels.shape
 
     # Check that masks were created
     nodes_df = graph.node_attrs()
@@ -300,8 +300,8 @@ def test_regionprops_spacing() -> None:
 
     operator.add_nodes(graph, labels=labels, t=0)
 
-    assert "shape" in graph.metadata()
-    assert graph.metadata()["shape"] == labels.shape
+    assert "shape" in graph.metadata
+    assert graph.metadata["shape"] == labels.shape
 
     # Check that nodes were added (spacing affects internal calculations)
     nodes_df = graph.node_attrs()
@@ -323,8 +323,8 @@ def test_regionprops_empty_labels() -> None:
 
     operator.add_nodes(graph, labels=labels, t=0)
 
-    assert "shape" in graph.metadata()
-    assert graph.metadata()["shape"] == labels.shape
+    assert "shape" in graph.metadata
+    assert graph.metadata["shape"] == labels.shape
 
     # No nodes should be added
     assert graph.num_nodes() == 0

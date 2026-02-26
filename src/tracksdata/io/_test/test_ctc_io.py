@@ -68,7 +68,7 @@ def test_export_from_ctc_roundtrip(tmp_path: Path, metadata_shape: bool) -> None
     in_graph.add_edge(node_1, node_3, attrs={DEFAULT_ATTR_KEYS.EDGE_DIST: 1.0})
 
     if metadata_shape:
-        in_graph.update_metadata(shape=(2, 4, 4))
+        in_graph.metadata.update(shape=(2, 4, 4))
         shape = None
     else:
         shape = (2, 4, 4)

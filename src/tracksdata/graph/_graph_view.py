@@ -847,11 +847,11 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
             "Use `detach` to create a new reference-less graph with the same nodes and edges."
         )
 
-    def metadata(self) -> dict[str, Any]:
-        return self._root.metadata()
+    def _metadata(self) -> dict[str, Any]:
+        return self._root._metadata()
 
-    def update_metadata(self, **kwargs) -> None:
-        self._root.update_metadata(**kwargs)
+    def _update_metadata(self, **kwargs) -> None:
+        self._root._update_metadata(**kwargs)
 
-    def remove_metadata(self, key: str) -> None:
-        self._root.remove_metadata(key)
+    def _remove_metadata(self, key: str) -> None:
+        self._root._remove_metadata(key)

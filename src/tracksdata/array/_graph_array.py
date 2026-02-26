@@ -23,7 +23,7 @@ def _validate_shape(
     """Helper function to validate the shape argument."""
     if shape is None:
         try:
-            shape = graph.metadata()["shape"]
+            shape = graph.metadata["shape"]
         except KeyError as e:
             raise KeyError(
                 f"`shape` is required to `{func_name}`. "
