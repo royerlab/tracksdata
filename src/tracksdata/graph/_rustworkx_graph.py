@@ -74,9 +74,30 @@ def _create_filter_func(
 ) -> Callable[[dict[str, Any]], bool]:
     LOG.info(f"Creating filter function for {attr_comps}")
 
+    def _extract_field_path(value: Any, field_path: tuple[str, ...]) -> Any:
+        for field in field_path:
+            if value is None:
+                return None
+
+            if isinstance(value, dict):
+                value = value.get(field, None)
+                continue
+
+            try:
+                value = value[field]
+            except (KeyError, IndexError, TypeError):
+                try:
+                    value = getattr(value, field)
+                except AttributeError:
+                    return None
+
+        return value
+
     def _filter(attrs: dict[str, Any]) -> bool:
         for attr_op in attr_comps:
             value = attrs.get(attr_op.column, schema[attr_op.column].default_value)
+            if attr_op.attr.field_path:
+                value = _extract_field_path(value, attr_op.attr.field_path)
             if not attr_op.op(value, attr_op.other):
                 return False
         return True
@@ -343,7 +364,7 @@ class RustWorkXGraph(BaseGraph):
         self._time_to_nodes: dict[int, list[int]] = {}
         self.__node_attr_schemas: dict[str, AttrSchema] = {}
         self.__edge_attr_schemas: dict[str, AttrSchema] = {}
-        self._overlaps: list[list[int, 2]] = []
+        self._overlaps: list[list[int]] = []
 
         # Add default node attributes with inferred schemas
         self.__node_attr_schemas[DEFAULT_ATTR_KEYS.T] = AttrSchema(
@@ -1159,16 +1180,11 @@ class RustWorkXGraph(BaseGraph):
 
         edge_map = rx_graph.edge_index_map()
         if len(edge_map) == 0:
-            return pl.DataFrame(
-                {
-                    key: []
-                    for key in [
-                        *attr_keys,
-                        DEFAULT_ATTR_KEYS.EDGE_SOURCE,
-                        DEFAULT_ATTR_KEYS.EDGE_TARGET,
-                    ]
-                }
-            )
+            empty_columns = {}
+            for key in [*attr_keys, DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET]:
+                schema = self._edge_attr_schemas()[key]
+                empty_columns[key] = pl.Series(name=key, values=[], dtype=schema.dtype)
+            return pl.DataFrame(empty_columns)
 
         source, target, data = zip(*edge_map.values(), strict=False)
 

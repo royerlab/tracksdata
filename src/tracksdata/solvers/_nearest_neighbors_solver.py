@@ -235,7 +235,8 @@ class NearestNeighborsSolver(BaseSolver):
             The graph view of the solution if `return_solution` is True, otherwise None.
         """
         # get edges and sort them by weight
-        edges_df = graph.edge_attrs(attr_keys=self.edge_weight_expr.columns)
+        edge_attr_keys = [] if graph.num_edges() == 0 else self.edge_weight_expr.columns
+        edges_df = graph.edge_attrs(attr_keys=edge_attr_keys)
 
         if len(edges_df) == 0:
             raise ValueError("No edges found in the graph, there is nothing to solve.")
