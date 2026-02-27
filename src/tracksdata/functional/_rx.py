@@ -128,7 +128,10 @@ def _numba_build_dict(keys: np.ndarray, values: np.ndarray) -> dict[int, int]:
     return dag
 
 
-def _rx_graph_to_dict_dag(graph: rx.PyDiGraph) -> tuple[dict[int, int], np.ndarray, pl.DataFrame]:
+def _rx_graph_to_dict_dag(
+    graph: rx.PyDiGraph,
+    allow_frame_skip: bool = False,
+) -> tuple[dict[int, int], np.ndarray, pl.DataFrame]:
     """Creates the DAG of track lineages, separating linear paths from dividing edges.
 
     This function implements the core logic for handling asymmetric division by:
@@ -141,6 +144,9 @@ def _rx_graph_to_dict_dag(graph: rx.PyDiGraph) -> tuple[dict[int, int], np.ndarr
     ----------
     graph : rx.PyDiGraph
         Directed acyclic graph of nodes with time attributes.
+    allow_frame_skip : bool
+        If True, edges that span multiple frames are treated as linear edges
+        instead of creating new tracklets.
 
     Returns
     -------
@@ -193,7 +199,10 @@ def _rx_graph_to_dict_dag(graph: rx.PyDiGraph) -> tuple[dict[int, int], np.ndarr
     # asymmetric branching patterns where one branch continues linearly while
     # another creates a new track.
     dividing_mask = edges_df["source"].is_duplicated()  # Nodes with multiple children
-    long_edges_mask = (edges_df["t_target"] - edges_df["t_source"]).abs() > 1  # Temporal gaps
+    if allow_frame_skip:
+        long_edges_mask = pl.Series(np.zeros(edges_df.height, dtype=bool))
+    else:
+        long_edges_mask = (edges_df["t_target"] - edges_df["t_source"]).abs() > 1  # Temporal gaps
     both_mask = dividing_mask | long_edges_mask
 
     long_edges_df = edges_df.filter(both_mask)  # Edges that create new track relationships
@@ -258,6 +267,7 @@ def _tracklet_id_edges_from_long_edges(
 def _assign_tracklet_ids(
     graph: rx.PyDiGraph,
     tracklet_id_offset: int,
+    allow_frame_skip: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, rx.PyDiGraph]:
     """
     Assigns an unique `tracklet_id` to each simple path in the graph and
@@ -269,6 +279,8 @@ def _assign_tracklet_ids(
         Directed acyclic graph of tracks.
     tracklet_id_offset : int
         The starting track id, useful when assigning track ids to a subgraph.
+    allow_frame_skip : bool
+        If True, do not split tracklets when an edge spans multiple frames.
 
     Returns
     -------
@@ -283,7 +295,7 @@ def _assign_tracklet_ids(
     LOG.info(f"Graph has {graph.num_nodes()} nodes and {graph.num_edges()} edges")
 
     # was it better (faster) when using a numpy array for the digraph as in ultrack?
-    linear_dag, starts, long_edges_df = _rx_graph_to_dict_dag(graph)
+    linear_dag, starts, long_edges_df = _rx_graph_to_dict_dag(graph, allow_frame_skip=allow_frame_skip)
 
     paths, tracklet_ids, lengths, last_to_tracklet_id, first_to_tracklet_id = _fast_dag_transverse(
         starts, linear_dag, tracklet_id_offset

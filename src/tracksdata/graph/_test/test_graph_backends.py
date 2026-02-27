@@ -1932,6 +1932,25 @@ def test_assign_tracklet_ids(graph_backend: BaseGraph, return_id_updates: bool) 
         _check_id_update_df(id_update_df, tracklet_ids, old_exists=True)
 
 
+def test_assign_tracklet_ids_allow_frame_skip(graph_backend: BaseGraph) -> None:
+    """Tracklets should stay connected across temporal gaps when allowed."""
+    first = graph_backend.add_node({DEFAULT_ATTR_KEYS.T: 0})
+    second = graph_backend.add_node({DEFAULT_ATTR_KEYS.T: 2})
+    graph_backend.add_edge(first, second, {})
+
+    default_tracks = graph_backend.assign_tracklet_ids()
+    default_ids = graph_backend.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.TRACKLET_ID])
+    assert len(set(default_ids[DEFAULT_ATTR_KEYS.TRACKLET_ID])) == 2
+    assert default_tracks.num_nodes() == 2
+    assert default_tracks.num_edges() == 1
+
+    merged_tracks = graph_backend.assign_tracklet_ids(allow_frame_skip=True)
+    merged_ids = graph_backend.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.TRACKLET_ID])
+    assert len(set(merged_ids[DEFAULT_ATTR_KEYS.TRACKLET_ID])) == 1
+    assert merged_tracks.num_nodes() == 1
+    assert merged_tracks.num_edges() == 0
+
+
 def _compare_tracklet_id_assignments(expected_node_sets, graph_backend: BaseGraph):
     ids_df = graph_backend.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.TRACKLET_ID])
     ids_map = dict(
@@ -2744,7 +2763,7 @@ def test_pickle_roundtrip(graph_backend: BaseGraph) -> None:
 
 
 @pytest.mark.slow
-def test_sql_graph_huge_update() -> None:
+def test_sql_graph_huge_dataset() -> None:
     # test is only executed if `--slow` is passed to pytest
     graph = SQLGraph("sqlite", ":memory:")
 
@@ -2765,6 +2784,9 @@ def test_sql_graph_huge_update() -> None:
         attrs={"x": 1.0},
         node_ids=graph.node_ids(),
     )
+
+    # testing if successors works with huge dataset
+    graph.successors(graph.node_ids())
 
 
 def test_to_traccuracy_graph(graph_backend: BaseGraph) -> None:

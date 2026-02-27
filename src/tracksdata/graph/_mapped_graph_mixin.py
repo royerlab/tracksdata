@@ -6,6 +6,7 @@ internal/local node IDs and external/world node IDs, such as IndexedRXGraph and 
 """
 
 from collections.abc import Sequence
+from numbers import Integral
 from typing import Any, overload
 
 import bidict
@@ -84,7 +85,7 @@ class MappedGraphMixin:
         """
         if local_ids is None:
             return None
-        if isinstance(local_ids, int):
+        if isinstance(local_ids, Integral):
             return self._local_to_external[local_ids]
         return [self._local_to_external[lid] for lid in local_ids]
 
@@ -113,7 +114,7 @@ class MappedGraphMixin:
         """
         if external_ids is None:
             return None
-        if isinstance(external_ids, int):
+        if isinstance(external_ids, Integral):
             return self._external_to_local[external_ids]
         return [self._external_to_local[eid] for eid in external_ids]
 

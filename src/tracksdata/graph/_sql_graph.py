@@ -1,7 +1,7 @@
 import binascii
 from collections.abc import Callable, Sequence
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import cloudpickle
 import numpy as np
@@ -10,6 +10,7 @@ import rustworkx as rx
 import sqlalchemy as sa
 from polars._typing import SchemaDict
 from sqlalchemy.orm import DeclarativeBase, Session, aliased, load_only
+from sqlalchemy.orm.query import Query
 from sqlalchemy.sql.type_api import TypeEngine
 
 from tracksdata.attrs import AttrComparison, split_attr_comps
@@ -31,6 +32,9 @@ from tracksdata.utils._signal import is_signal_on
 
 if TYPE_CHECKING:
     from tracksdata.graph._graph_view import GraphView
+
+
+T = TypeVar("T")
 
 
 def _is_builtin(obj: Any) -> bool:
@@ -778,7 +782,8 @@ class SQLGraph(BaseGraph):
         if index is None:
             self._max_id_per_time[time] = node_id
 
-        self.node_added.emit_fast(node_id)
+        if is_signal_on(self.node_added):
+            self.node_added.emit(node_id, attrs)
 
         return node_id
 
@@ -842,11 +847,12 @@ class SQLGraph(BaseGraph):
             node[DEFAULT_ATTR_KEYS.NODE_ID] = node_id
             node_ids.append(node_id)
 
-        self._chunked_sa_operation(Session.bulk_insert_mappings, self.Node, nodes)
+        self._chunked_sa_write(Session.bulk_insert_mappings, nodes, self.Node)
 
         if is_signal_on(self.node_added):
-            for node_id in node_ids:
-                self.node_added.emit_fast(node_id)
+            for node_id, node_attrs in zip(node_ids, nodes, strict=True):
+                new_attrs = {key: value for key, value in node_attrs.items() if key != DEFAULT_ATTR_KEYS.NODE_ID}
+                self.node_added.emit(node_id, new_attrs)
 
         return node_ids
 
@@ -868,13 +874,14 @@ class SQLGraph(BaseGraph):
         ValueError
             If the node_id does not exist in the graph.
         """
-        self.node_removed.emit_fast(node_id)
-
         with Session(self._engine) as session:
             # Check if the node exists
             node = session.query(self.Node).filter(self.Node.node_id == node_id).first()
             if node is None:
                 raise ValueError(f"Node {node_id} does not exist in the graph.")
+
+            if is_signal_on(self.node_removed):
+                old_attrs = {key: getattr(node, key) for key in self.node_attr_keys()}
 
             # Remove all edges where this node is source or target
             session.query(self.Edge).filter(
@@ -889,6 +896,8 @@ class SQLGraph(BaseGraph):
             # Remove the node itself
             session.delete(node)
             session.commit()
+            if is_signal_on(self.node_removed):
+                self.node_removed.emit(node_id, old_attrs)
 
     def add_edge(
         self,
@@ -1001,7 +1010,7 @@ class SQLGraph(BaseGraph):
                 return list(result.scalars().all())
 
         else:
-            self._chunked_sa_operation(Session.bulk_insert_mappings, self.Edge, edges)
+            self._chunked_sa_write(Session.bulk_insert_mappings, edges, self.Edge)
             return None
 
     def add_overlap(
@@ -1055,7 +1064,7 @@ class SQLGraph(BaseGraph):
             overlaps = overlaps.tolist()
 
         overlaps = [{"source_id": source_id, "target_id": target_id} for source_id, target_id in overlaps]
-        self._chunked_sa_operation(Session.bulk_insert_mappings, self.Overlap, overlaps)
+        self._chunked_sa_write(Session.bulk_insert_mappings, overlaps, self.Overlap)
 
     def overlaps(
         self,
@@ -1154,14 +1163,19 @@ class SQLGraph(BaseGraph):
 
             query = session.query(getattr(self.Edge, node_key), *node_columns)
             query = query.join(self.Edge, getattr(self.Edge, neighbor_key) == self.Node.node_id)
-            if filter_node_ids is not None:
-                query = query.filter(getattr(self.Edge, node_key).in_(filter_node_ids))
-
-            node_df = pl.read_database(
-                query.statement,
-                connection=session.connection(),
-                schema_overrides=self._polars_schema_override(self.Node),
-            )
+            if filter_node_ids is None or len(filter_node_ids) == 0:
+                node_df = pl.read_database(
+                    query.statement,
+                    connection=session.connection(),
+                    schema_overrides=self._polars_schema_override(self.Node),
+                )
+            else:
+                node_df = self._chunked_sa_read(
+                    session,
+                    lambda x: query.filter(getattr(self.Edge, node_key).in_(x)),
+                    filter_node_ids,
+                    self.Node,
+                )
             node_df = unpickle_bytes_columns(node_df)
             node_df = self._cast_array_columns(self.Node, node_df)
 
@@ -1805,13 +1819,13 @@ class SQLGraph(BaseGraph):
         LOG.info("update %s table with %d rows", table_class.__table__, len(update_data))
         LOG.info("update data sample: %s", update_data[:2])
 
-        self._chunked_sa_operation(Session.bulk_update_mappings, table_class, update_data)
+        self._chunked_sa_write(Session.bulk_update_mappings, update_data, table_class)
 
-    def _chunked_sa_operation(
+    def _chunked_sa_write(
         self,
         session_op: Callable[[Session, type[DeclarativeBase], list[dict[str, Any]]], None],
-        table_class: type[DeclarativeBase],
         data: list[dict[str, Any]],
+        table_class: type[DeclarativeBase],
     ) -> None:
         if len(data) == 0:
             return
@@ -1824,6 +1838,55 @@ class SQLGraph(BaseGraph):
                 session_op(session, table_class, data[i : i + chunk_size])
             session.commit()
 
+    def _chunked_sa_read(
+        self,
+        session: Session,
+        query_filter_op: Callable[[T], Query],
+        data: list[T],
+        table_class: type[DeclarativeBase],
+    ) -> pl.DataFrame:
+        """
+        Apply a query filter in chunks and concatenate the results.
+
+        Parameters
+        ----------
+        session : Session
+            The SQLAlchemy session.
+        query_filter_op : Callable[[T], Query]
+            The function to apply a query filter to the data. It must return a SQLAlchemy Query object.
+        data : list[T]
+            List of data to passed into the query_filter_op function.
+        table_class : type[DeclarativeBase]
+            The SQLAlchemy table class.
+
+        Examples
+        --------
+        ```python
+        data = [1, 2, 3, 4, 5]
+        query_filter_op = lambda x: query.filter(x.id.in_(data))
+        data_df = self._chunked_sa_read(session, query_filter_op, data, Node)
+        ```
+
+        Returns
+        -------
+        pl.DataFrame
+            The data as a Polars DataFrame.
+        """
+        if len(data) == 0:
+            raise ValueError("Data is empty")
+
+        chunk_size = max(1, self._sql_chunk_size())
+        chunks = []
+        for i in range(0, len(data), chunk_size):
+            query = query_filter_op(data[i : i + chunk_size])
+            data_df = pl.read_database(
+                query.statement,
+                connection=session.connection(),
+                schema_overrides=self._polars_schema_override(table_class),
+            )
+            chunks.append(data_df)
+        return pl.concat(chunks)
+
     def update_node_attrs(
         self,
         *,
@@ -1833,7 +1896,26 @@ class SQLGraph(BaseGraph):
         if "t" in attrs:
             raise ValueError("Node attribute 't' cannot be updated.")
 
+        updated_node_ids = self.node_ids() if node_ids is None else list(node_ids)
+        if len(updated_node_ids) == 0:
+            return
+
+        attr_keys = self.node_attr_keys()
+        if is_signal_on(self.node_updated):
+            old_df = self.filter(node_ids=updated_node_ids).node_attrs(
+                attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, *attr_keys]
+            )
+            old_attrs_by_id = {row[DEFAULT_ATTR_KEYS.NODE_ID]: row for row in old_df.rows(named=True)}
+
         self._update_table(self.Node, node_ids, DEFAULT_ATTR_KEYS.NODE_ID, attrs)
+
+        if is_signal_on(self.node_updated):
+            new_df = self.filter(node_ids=updated_node_ids).node_attrs(
+                attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, *attr_keys]
+            )
+            new_attrs_by_id = {row[DEFAULT_ATTR_KEYS.NODE_ID]: row for row in new_df.rows(named=True)}
+            for node_id in updated_node_ids:
+                self.node_updated.emit(node_id, old_attrs_by_id[node_id], new_attrs_by_id[node_id])
 
     def update_edge_attrs(
         self,
@@ -1850,6 +1932,7 @@ class SQLGraph(BaseGraph):
         tracklet_id_offset: int | None = None,
         node_ids: list[int] | None = None,
         return_id_update: bool = False,
+        allow_frame_skip: bool = False,
     ) -> rx.PyDiGraph | tuple[rx.PyDiGraph, pl.DataFrame]:
         if node_ids is not None:
             track_node_ids = list(set(self.tracklet_nodes(node_ids)))
@@ -1868,6 +1951,7 @@ class SQLGraph(BaseGraph):
                 reset=reset,
                 tracklet_id_offset=tracklet_id_offset,
                 return_id_update=return_id_update,
+                allow_frame_skip=allow_frame_skip,
             )
         )
 
