@@ -591,10 +591,19 @@ class SQLGraph(BaseGraph):
                     dtype=sqlalchemy_type_to_polars_dtype(column.type),
                 )
 
-        ordered_keys = [key for key in preferred_order if key in schemas]
-        ordered_keys.extend(key for key in table_class.__table__.columns.keys() if key not in ordered_keys)
-        ordered_keys.extend(key for key in schemas if key not in ordered_keys)
-        return {key: schemas[key] for key in ordered_keys}
+        result = {}
+
+        # return dictionary in preferred order
+        for source in (
+            preferred_order,
+            table_class.__table__.columns.keys(),
+            schemas,
+        ):
+            for key in source:
+                if key in schemas:
+                    result.setdefault(key, schemas[key])
+
+        return result
 
     def _attr_schemas_for_table(self, table_class: type[DeclarativeBase]) -> dict[str, AttrSchema]:
         if table_class.__tablename__ == self.Node.__tablename__:
