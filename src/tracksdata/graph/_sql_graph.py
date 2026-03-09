@@ -28,7 +28,11 @@ from tracksdata.utils._dtypes import (
     sqlalchemy_type_to_polars_dtype,
 )
 from tracksdata.utils._logging import LOG
-from tracksdata.utils._signal import is_signal_on
+from tracksdata.utils._signal import (
+    emit_node_added_events,
+    emit_node_updated_events,
+    is_signal_on,
+)
 
 if TYPE_CHECKING:
     from tracksdata.graph._graph_view import GraphView
@@ -833,6 +837,7 @@ class SQLGraph(BaseGraph):
         self._validate_indices_length(nodes, indices)
 
         node_ids = []
+        insert_rows = []
         for i, node in enumerate(nodes):
             time = node["t"]
 
@@ -844,15 +849,15 @@ class SQLGraph(BaseGraph):
             else:
                 node_id = indices[i]
 
-            node[DEFAULT_ATTR_KEYS.NODE_ID] = node_id
             node_ids.append(node_id)
+            insert_rows.append({**node, DEFAULT_ATTR_KEYS.NODE_ID: node_id})
 
-        self._chunked_sa_write(Session.bulk_insert_mappings, nodes, self.Node)
+        self._chunked_sa_write(Session.bulk_insert_mappings, insert_rows, self.Node)
 
-        if is_signal_on(self.node_added):
-            for node_id, node_attrs in zip(node_ids, nodes, strict=True):
-                new_attrs = {key: value for key, value in node_attrs.items() if key != DEFAULT_ATTR_KEYS.NODE_ID}
-                self.node_added.emit(node_id, new_attrs)
+        emit_node_added_events(
+            self.node_added,
+            zip(node_ids, nodes, strict=True),
+        )
 
         return node_ids
 
@@ -1920,12 +1925,6 @@ class SQLGraph(BaseGraph):
             )
 
         self._update_table(self.Node, node_ids, DEFAULT_ATTR_KEYS.NODE_ID, attrs)
-        new_df = self.filter(node_ids=updated_node_ids).node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, *attr_keys])
-        new_attrs_by_id = new_df.rows_by_key(key=DEFAULT_ATTR_KEYS.NODE_ID, named=True, unique=True, include_key=True)
-
-        if is_signal_on(self.node_updated):
-            for node_id in updated_node_ids:
-                self.node_updated.emit(node_id, old_attrs_by_id[node_id], new_attrs_by_id[node_id])
 
         if is_signal_on(self.node_updated):
             new_df = self.filter(node_ids=updated_node_ids).node_attrs(
@@ -1934,8 +1933,10 @@ class SQLGraph(BaseGraph):
             new_attrs_by_id = new_df.rows_by_key(
                 key=DEFAULT_ATTR_KEYS.NODE_ID, named=True, unique=True, include_key=True
             )
-            for node_id in updated_node_ids:
-                self.node_updated.emit(node_id, old_attrs_by_id[node_id], new_attrs_by_id[node_id])
+            emit_node_updated_events(
+                self.node_updated,
+                ((node_id, old_attrs_by_id[node_id], new_attrs_by_id[node_id]) for node_id in updated_node_ids),
+            )
 
     def update_edge_attrs(
         self,

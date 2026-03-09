@@ -518,6 +518,38 @@ def test_update_node_attrs(graph_backend: BaseGraph) -> None:
         graph_backend.update_node_attrs(node_ids=[node_1, node_2], attrs={"x": [1.0]})
 
 
+def test_bulk_add_nodes_emits_batched_node_added_callback(graph_backend: BaseGraph) -> None:
+    graph_backend.add_node_attr_key("x", pl.Float64)
+
+    calls: list[tuple[Any, Any]] = []
+    graph_backend.node_added.connect(lambda node_ids, attrs: calls.append((node_ids, attrs)))
+
+    nodes = [{"t": 0, "x": 1.0}, {"t": 1, "x": 2.0}, {"t": 1, "x": 3.0}]
+    node_ids = graph_backend.bulk_add_nodes(nodes)
+
+    assert len(calls) == 1
+    assert calls[0][0] == node_ids
+    assert calls[0][1] == nodes
+
+
+def test_update_node_attrs_emits_batched_node_updated_callback(graph_backend: BaseGraph) -> None:
+    graph_backend.add_node_attr_key("x", pl.Float64)
+
+    node_ids = graph_backend.bulk_add_nodes([{"t": 0, "x": 1.0}, {"t": 1, "x": 2.0}, {"t": 1, "x": 3.0}])
+
+    calls: list[tuple[Any, Any, Any]] = []
+    graph_backend.node_updated.connect(
+        lambda node_ids, old_attrs, new_attrs: calls.append((node_ids, old_attrs, new_attrs))
+    )
+
+    graph_backend.update_node_attrs(node_ids=node_ids, attrs={"x": [10.0, 20.0, 30.0]})
+
+    assert len(calls) == 1
+    assert calls[0][0] == node_ids
+    assert [attrs["x"] for attrs in calls[0][1]] == [1.0, 2.0, 3.0]
+    assert [attrs["x"] for attrs in calls[0][2]] == [10.0, 20.0, 30.0]
+
+
 def test_update_edge_attrs(graph_backend: BaseGraph) -> None:
     """Test updating edge attributes."""
     node1 = graph_backend.add_node({"t": 0})

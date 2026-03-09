@@ -16,7 +16,11 @@ from tracksdata.utils._cache import cache_method
 from tracksdata.utils._dataframe import unpack_array_attrs
 from tracksdata.utils._dtypes import AttrSchema, process_attr_key_args
 from tracksdata.utils._logging import LOG
-from tracksdata.utils._signal import is_signal_on
+from tracksdata.utils._signal import (
+    emit_node_added_events,
+    emit_node_updated_events,
+    is_signal_on,
+)
 
 if TYPE_CHECKING:
     from tracksdata.graph._graph_view import GraphView
@@ -522,10 +526,7 @@ class RustWorkXGraph(BaseGraph):
         for node, index in zip(nodes, node_indices, strict=True):
             self._time_to_nodes.setdefault(node["t"], []).append(index)
 
-        # checking if it has connections to reduce overhead
-        if is_signal_on(self.node_added):
-            for node_id, node_attrs in zip(node_indices, nodes, strict=True):
-                self.node_added.emit(node_id, node_attrs)
+        emit_node_added_events(self.node_added, zip(node_indices, nodes, strict=True))
 
         return node_indices
 
@@ -1213,6 +1214,8 @@ class RustWorkXGraph(BaseGraph):
         """
         if node_ids is None:
             node_ids = self.node_ids()
+        else:
+            node_ids = list(node_ids)
 
         if is_signal_on(self.node_updated):
             old_attrs_by_id = {node_id: dict(self._graph[node_id]) for node_id in node_ids}
@@ -1232,8 +1235,10 @@ class RustWorkXGraph(BaseGraph):
                 self._graph[node_id][key] = v
 
         if is_signal_on(self.node_updated):
-            for node_id in node_ids:
-                self.node_updated.emit(node_id, old_attrs_by_id[node_id], dict(self._graph[node_id]))
+            emit_node_updated_events(
+                self.node_updated,
+                ((node_id, old_attrs_by_id[node_id], dict(self._graph[node_id])) for node_id in node_ids),
+            )
 
     def update_edge_attrs(
         self,
@@ -1666,9 +1671,7 @@ class IndexedRXGraph(MappedGraphMixin, RustWorkXGraph):
 
         self._add_id_mappings(list(zip(graph_ids, indices, strict=True)))
 
-        if is_signal_on(self.node_added):
-            for index, node_attrs in zip(indices, nodes, strict=True):
-                self.node_added.emit(index, node_attrs)
+        emit_node_added_events(self.node_added, zip(indices, nodes, strict=True))
 
         return indices
 
@@ -1959,12 +1962,13 @@ class IndexedRXGraph(MappedGraphMixin, RustWorkXGraph):
             super().update_node_attrs(attrs=attrs, node_ids=local_node_ids)
 
         if is_signal_on(self.node_updated) and old_attrs_by_id is not None:
-            for external_node_id, local_node_id in zip(external_node_ids, local_node_ids, strict=True):
-                self.node_updated.emit(
-                    external_node_id,
-                    old_attrs_by_id[external_node_id],
-                    dict(self._graph[local_node_id]),
-                )
+            emit_node_updated_events(
+                self.node_updated,
+                (
+                    (external_node_id, old_attrs_by_id[external_node_id], dict(self._graph[local_node_id]))
+                    for external_node_id, local_node_id in zip(external_node_ids, local_node_ids, strict=True)
+                ),
+            )
 
     def remove_node(self, node_id: int) -> None:
         """

@@ -12,7 +12,11 @@ from tracksdata.graph._mapped_graph_mixin import MappedGraphMixin
 from tracksdata.graph._rustworkx_graph import IndexedRXGraph, RustWorkXGraph, RXFilter
 from tracksdata.graph.filters._indexed_filter import IndexRXFilter
 from tracksdata.utils._dtypes import AttrSchema
-from tracksdata.utils._signal import is_signal_on
+from tracksdata.utils._signal import (
+    emit_node_added_events,
+    emit_node_updated_events,
+    is_signal_on,
+)
 
 
 class GraphView(MappedGraphMixin, RustWorkXGraph):
@@ -411,20 +415,19 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         with self._root.node_added.blocked():
             parent_node_ids = self._root.bulk_add_nodes(nodes, indices=indices)
 
+        emitted_nodes = [
+            {key: value for key, value in node_attrs.items() if key != DEFAULT_ATTR_KEYS.NODE_ID}
+            for node_attrs in nodes
+        ]
         if self.sync:
             with self.node_added.blocked():
-                node_ids = RustWorkXGraph.bulk_add_nodes(self, nodes)
+                node_ids = RustWorkXGraph.bulk_add_nodes(self, emitted_nodes)
             self._add_id_mappings(list(zip(node_ids, parent_node_ids, strict=True)))
         else:
             self._out_of_sync = True
 
-        if is_signal_on(self._root.node_added):
-            for node_id, node_attrs in zip(parent_node_ids, nodes, strict=True):
-                self._root.node_added.emit(node_id, node_attrs)
-
-        if is_signal_on(self.node_added):
-            for node_id, node_attrs in zip(parent_node_ids, nodes, strict=True):
-                self.node_added.emit(node_id, node_attrs)
+        emit_node_added_events(self._root.node_added, zip(parent_node_ids, emitted_nodes, strict=True))
+        emit_node_added_events(self.node_added, zip(parent_node_ids, emitted_nodes, strict=True))
 
         return parent_node_ids
 
@@ -684,13 +687,11 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
                 self._out_of_sync = True
 
         if is_signal_on(self.node_updated):
-            for node_id in node_ids:
-                old_attrs_by_id = cast(dict[int, dict[str, Any]], old_attrs_by_id)  # for mypy
-                self.node_updated.emit(
-                    node_id,
-                    old_attrs_by_id[node_id],
-                    self._root.nodes[node_id].to_dict(),
-                )
+            old_attrs_by_id = cast(dict[int, dict[str, Any]], old_attrs_by_id)  # for mypy
+            emit_node_updated_events(
+                self.node_updated,
+                ((node_id, old_attrs_by_id[node_id], self._root.nodes[node_id].to_dict()) for node_id in node_ids),
+            )
 
     def update_edge_attrs(
         self,

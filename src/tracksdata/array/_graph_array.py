@@ -10,6 +10,7 @@ from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.options import get_options
 from tracksdata.utils._dtypes import polars_dtype_to_numpy_dtype
+from tracksdata.utils._signal import iter_node_added_events, iter_node_updated_events
 
 if TYPE_CHECKING:
     from tracksdata.nodes._mask import Mask
@@ -415,15 +416,24 @@ class GraphArrayView(BaseReadOnlyArray):
         if slices is not None:
             self._cache.invalidate(time=time, volume_slicing=slices)
 
-    def _on_node_added(self, node_id: int, new_attrs: dict) -> None:
-        del node_id
-        self._invalidate_from_attrs(new_attrs)
+    def _on_node_added(
+        self,
+        node_id: int | Sequence[int],
+        new_attrs: dict | Sequence[dict],
+    ) -> None:
+        for _, attrs in iter_node_added_events(node_id, new_attrs):
+            self._invalidate_from_attrs(attrs)
 
     def _on_node_removed(self, node_id: int, old_attrs: dict) -> None:
         del node_id
         self._invalidate_from_attrs(old_attrs)
 
-    def _on_node_updated(self, node_id: int, old_attrs: dict, new_attrs: dict) -> None:
-        del node_id
-        self._invalidate_from_attrs(old_attrs)
-        self._invalidate_from_attrs(new_attrs)
+    def _on_node_updated(
+        self,
+        node_id: int | Sequence[int],
+        old_attrs: dict | Sequence[dict],
+        new_attrs: dict | Sequence[dict],
+    ) -> None:
+        for _, old_attr, new_attr in iter_node_updated_events(node_id, old_attrs, new_attrs):
+            self._invalidate_from_attrs(old_attr)
+            self._invalidate_from_attrs(new_attr)

@@ -473,6 +473,43 @@ def test_subgraph_add_node(graph_backend: BaseGraph) -> None:
         assert attributes["label"].to_list()[0] == "NEW"
 
 
+def test_subgraph_bulk_add_nodes_emits_batched_node_added_callbacks(graph_backend: BaseGraph) -> None:
+    graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
+    subgraph = graph_with_data.filter(node_ids=graph_with_data._test_nodes[:2]).subgraph()  # type: ignore
+
+    root_calls: list[tuple[object, object]] = []
+    subgraph_calls: list[tuple[object, object]] = []
+    graph_with_data.node_added.connect(lambda node_ids, attrs: root_calls.append((node_ids, attrs)))
+    subgraph.node_added.connect(lambda node_ids, attrs: subgraph_calls.append((node_ids, attrs)))
+
+    nodes = [
+        {"t": 10, "x": 10.0, "y": 10.0, "label": "A"},
+        {"t": 11, "x": 11.0, "y": 11.0, "label": "B"},
+    ]
+    node_ids = subgraph.bulk_add_nodes(nodes)
+
+    assert len(root_calls) == 1
+    assert len(subgraph_calls) == 1
+    assert root_calls[0] == (node_ids, nodes)
+    assert subgraph_calls[0] == (node_ids, nodes)
+
+
+def test_subgraph_update_node_attrs_emits_batched_node_updated_callback(graph_backend: BaseGraph) -> None:
+    graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
+    subgraph = graph_with_data.filter(node_ids=graph_with_data._test_nodes[:3]).subgraph()  # type: ignore
+    node_ids = graph_with_data._test_nodes[:2]  # type: ignore
+
+    calls: list[tuple[object, object, object]] = []
+    subgraph.node_updated.connect(lambda node_ids, old_attrs, new_attrs: calls.append((node_ids, old_attrs, new_attrs)))
+
+    subgraph.update_node_attrs(node_ids=node_ids, attrs={"x": [10.0, 20.0]})
+
+    assert len(calls) == 1
+    assert calls[0][0] == node_ids
+    assert [attrs["x"] for attrs in calls[0][1]] == [0.0, 1.0]
+    assert [attrs["x"] for attrs in calls[0][2]] == [10.0, 20.0]
+
+
 def test_subgraph_add_edge(graph_backend: BaseGraph) -> None:
     """Test adding edges to a subgraph."""
     graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
