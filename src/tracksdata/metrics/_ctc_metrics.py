@@ -25,7 +25,7 @@ def _fill_empty(weights: sp.csr_array, fill_value: float) -> None:
     """
     empty_rows = weights.sum(axis=1) == 0
     empty_cols = weights.sum(axis=0) == 0 #find the empty rows before applying the fill_value
-    
+
     if empty_rows.any():
         weights[empty_rows, :] = fill_value
 
