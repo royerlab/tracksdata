@@ -24,10 +24,11 @@ def _fill_empty(weights: sp.csr_array, fill_value: float) -> None:
     Fill empty rows and columns of a sparse matrix with a small value.
     """
     empty_rows = weights.sum(axis=1) == 0
+    empty_cols = weights.sum(axis=0) == 0 #find the empty rows before applying the fill_value
+    
     if empty_rows.any():
         weights[empty_rows, :] = fill_value
 
-    empty_cols = weights.sum(axis=0) == 0
     if empty_cols.any():
         weights[:, empty_cols] = fill_value
 
