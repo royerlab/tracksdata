@@ -510,7 +510,30 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         return parent_edge_id
 
     def bulk_add_edges(self, edges: list[dict[str, Any]], return_ids: bool = False) -> list[int] | None:
-        return BaseGraph.bulk_add_edges(self, edges, return_ids=return_ids)
+        # Capture source/target before _root.bulk_add_edges pops them from edge dicts
+        source_ids = [edge[DEFAULT_ATTR_KEYS.EDGE_SOURCE] for edge in edges]
+        target_ids = [edge[DEFAULT_ATTR_KEYS.EDGE_TARGET] for edge in edges]
+
+        # Always request ids — needed to build _edge_map_to_root
+        parent_edge_ids = self._root.bulk_add_edges(edges=edges, return_ids=True)
+
+        if self.sync:
+            for edge, source_id, target_id, parent_edge_id in zip(
+                edges, source_ids, target_ids, parent_edge_ids, strict=True
+            ):
+                # RustWorkXGraph sets EDGE_ID in the dict; SQLGraph does not — set explicitly
+                edge[DEFAULT_ATTR_KEYS.EDGE_ID] = parent_edge_id
+                edge_id = self.rx_graph.add_edge(
+                    self._map_to_local(source_id),
+                    self._map_to_local(target_id),
+                    edge,
+                )
+                self._edge_map_to_root.put(edge_id, parent_edge_id)
+        else:
+            self._out_of_sync = True
+
+        if return_ids:
+            return parent_edge_ids
 
     def remove_edge(
         self,
