@@ -67,7 +67,8 @@ class Mask:
     def __getstate__(self) -> dict:
         data_dict = self.__dict__.copy()
         prev_nthreads = blosc2.set_nthreads(1)
-        data_dict["_mask"] = blosc2.pack_array2(self._mask)
+        with np.printoptions(threshold=1):
+            data_dict["_mask"] = blosc2.pack_array2(self._mask)
         blosc2.set_nthreads(prev_nthreads)
         return data_dict
 
