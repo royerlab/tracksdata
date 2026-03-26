@@ -1,7 +1,8 @@
+import cloudpickle
 import numpy as np
 import polars as pl
 
-from tracksdata.utils._dataframe import unpack_array_attrs
+from tracksdata.utils._dataframe import unpack_array_attrs, unpickle_bytes_columns
 
 
 def test_unpack_array_attrs() -> None:
@@ -31,3 +32,22 @@ def test_unpack_array_attrs() -> None:
         unpackaged_df.to_numpy(),
         expected_df.to_numpy(),
     )
+
+
+def test_unpickle_bytes_columns_variable_size_arrays() -> None:
+    """Regression: unpickling a binary column with variable-size numpy arrays must not crash.
+
+    This reproduces the production bug triggered by GEFF import: masks are stored as raw
+    numpy arrays (not Mask objects) after a zarr roundtrip, so different nodes have arrays
+    of different shapes. Without return_dtype=pl.Object, polars infers the type from the
+    first array and raises SchemaError on the next differently-shaped one.
+    """
+    arrays = [np.ones((41, 41), dtype=bool), np.ones((4, 4), dtype=bool)]
+    df = pl.DataFrame(
+        {"mask": pl.Series([cloudpickle.dumps(a) for a in arrays], dtype=pl.Binary)}
+    )
+
+    result = unpickle_bytes_columns(df)  # must not raise SchemaError
+
+    for actual, expected in zip(result["mask"].to_list(), arrays):
+        np.testing.assert_array_equal(actual, expected)

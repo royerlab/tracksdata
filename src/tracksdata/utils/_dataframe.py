@@ -43,7 +43,7 @@ def unpickle_bytes_columns(df: pl.DataFrame) -> pl.DataFrame:
     pl.DataFrame
         The DataFrame with the bytes columns unpickled.
     """
-    df = df.map_columns(cs.binary(), lambda x: x.map_elements(cloudpickle.loads))
+    df = df.map_columns(cs.binary(), lambda x: x.map_elements(cloudpickle.loads, return_dtype=pl.Object))
     for col, dtype in zip(df.columns, df.dtypes, strict=True):
         if isinstance(dtype, pl.Object):
             try:
