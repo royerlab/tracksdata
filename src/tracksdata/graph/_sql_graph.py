@@ -485,6 +485,8 @@ class SQLGraph(BaseGraph):
 
         self._max_id_per_time = {}
         self._update_max_id_per_time()
+        self._node_attr_schemas_cache: dict | None = None
+        self._edge_attr_schemas_cache: dict | None = None
 
     def supports_custom_indices(self) -> bool:
         return True
@@ -607,12 +609,14 @@ class SQLGraph(BaseGraph):
 
     @property
     def __node_attr_schemas(self) -> dict[str, AttrSchema]:
-        return self._attr_schemas_from_metadata(
-            table_class=self.Node,
-            metadata_key=self._PRIVATE_SQL_NODE_SCHEMA_STORE_KEY,
-            default_schemas=self._default_node_attr_schemas(),
-            preferred_order=[DEFAULT_ATTR_KEYS.T, DEFAULT_ATTR_KEYS.NODE_ID],
-        )
+        if self._node_attr_schemas_cache is None:
+            self._node_attr_schemas_cache = self._attr_schemas_from_metadata(
+                table_class=self.Node,
+                metadata_key=self._PRIVATE_SQL_NODE_SCHEMA_STORE_KEY,
+                default_schemas=self._default_node_attr_schemas(),
+                preferred_order=[DEFAULT_ATTR_KEYS.T, DEFAULT_ATTR_KEYS.NODE_ID],
+            )
+        return self._node_attr_schemas_cache
 
     @__node_attr_schemas.setter
     def __node_attr_schemas(self, schemas: dict[str, AttrSchema]) -> None:
@@ -621,19 +625,22 @@ class SQLGraph(BaseGraph):
         schemas = merged_schemas
         encoded_schemas = {key: serialize_attr_schema(schema) for key, schema in schemas.items()}
         self._private_metadata[self._PRIVATE_SQL_NODE_SCHEMA_STORE_KEY] = encoded_schemas
+        self._node_attr_schemas_cache = None
 
     @property
     def __edge_attr_schemas(self) -> dict[str, AttrSchema]:
-        return self._attr_schemas_from_metadata(
-            table_class=self.Edge,
-            metadata_key=self._PRIVATE_SQL_EDGE_SCHEMA_STORE_KEY,
-            default_schemas=self._default_edge_attr_schemas(),
-            preferred_order=[
-                DEFAULT_ATTR_KEYS.EDGE_ID,
-                DEFAULT_ATTR_KEYS.EDGE_SOURCE,
-                DEFAULT_ATTR_KEYS.EDGE_TARGET,
-            ],
-        )
+        if self._edge_attr_schemas_cache is None:
+            self._edge_attr_schemas_cache = self._attr_schemas_from_metadata(
+                table_class=self.Edge,
+                metadata_key=self._PRIVATE_SQL_EDGE_SCHEMA_STORE_KEY,
+                default_schemas=self._default_edge_attr_schemas(),
+                preferred_order=[
+                    DEFAULT_ATTR_KEYS.EDGE_ID,
+                    DEFAULT_ATTR_KEYS.EDGE_SOURCE,
+                    DEFAULT_ATTR_KEYS.EDGE_TARGET,
+                ],
+            )
+        return self._edge_attr_schemas_cache
 
     @__edge_attr_schemas.setter
     def __edge_attr_schemas(self, schemas: dict[str, AttrSchema]) -> None:
@@ -642,6 +649,7 @@ class SQLGraph(BaseGraph):
         schemas = merged_schemas
         encoded_schemas = {key: serialize_attr_schema(schema) for key, schema in schemas.items()}
         self._private_metadata[self._PRIVATE_SQL_EDGE_SCHEMA_STORE_KEY] = encoded_schemas
+        self._edge_attr_schemas_cache = None
 
     def _restore_pickled_column_types(self, table: sa.Table) -> None:
         for column in table.columns:
