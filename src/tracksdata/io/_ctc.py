@@ -283,7 +283,7 @@ def to_ctc(
 
     def _write_tiff(t: int) -> None:
         LOG.info(f"Saving label image for time point {t}")
-        frame = view[t]
+        frame = np.asarray(view[t])
         if dtype is not None:
             frame = frame.astype(dtype)
         tiff.imwrite(
