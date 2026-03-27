@@ -687,9 +687,24 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
 
         signal_on = is_signal_on(self.node_updated)
         if signal_on:
+            existing_keys = set(self._root.node_attr_keys(return_ids=True))
+            signal_keys = list(
+                dict.fromkeys(
+                    k
+                    for k in [
+                        DEFAULT_ATTR_KEYS.NODE_ID,
+                        DEFAULT_ATTR_KEYS.T,
+                        DEFAULT_ATTR_KEYS.Z,
+                        DEFAULT_ATTR_KEYS.Y,
+                        DEFAULT_ATTR_KEYS.X,
+                        *attrs.keys(),
+                    ]
+                    if k in existing_keys
+                )
+            )
             old_attrs_by_id = (
                 self._root.filter(node_ids=node_ids)
-                .node_attrs()
+                .node_attrs(attr_keys=signal_keys)
                 .rows_by_key(key=DEFAULT_ATTR_KEYS.NODE_ID, named=True, unique=True, include_key=True)
             )
 
@@ -711,7 +726,7 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         if signal_on:
             new_attrs_by_id = (
                 self._root.filter(node_ids=node_ids)
-                .node_attrs()
+                .node_attrs(attr_keys=signal_keys)
                 .rows_by_key(key=DEFAULT_ATTR_KEYS.NODE_ID, named=True, unique=True, include_key=True)
             )
             old_attrs_by_id = cast(dict[int, dict[str, Any]], old_attrs_by_id)  # for mypy
