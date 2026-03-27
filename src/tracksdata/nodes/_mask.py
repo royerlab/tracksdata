@@ -67,14 +67,18 @@ class Mask:
     def __getstate__(self) -> dict:
         data_dict = self.__dict__.copy()
         prev_nthreads = blosc2.set_nthreads(1)
-        with np.printoptions(threshold=1):
-            data_dict["_mask"] = blosc2.pack_array2(self._mask)
+        # Bypass blosc2 printing overhead by directly creating a schunk and converting it to cframe,
+        # instead of using blosc2.pack_tensor
+        schunk = blosc2.SChunk(data=self._mask)
+        dtype = self._mask.dtype.descr if self._mask.dtype.kind == "V" else self._mask.dtype.str
+        schunk.vlmeta["__pack_tensor__"] = ("numpy", self._mask.shape, dtype)
+        data_dict["_mask"] = schunk.to_cframe()
         blosc2.set_nthreads(prev_nthreads)
         return data_dict
 
     def __setstate__(self, state: dict) -> None:
         prev_nthreads = blosc2.set_nthreads(1)
-        state["_mask"] = blosc2.unpack_array2(state["_mask"])
+        state["_mask"] = blosc2.unpack_tensor(state["_mask"])
         blosc2.set_nthreads(prev_nthreads)
         self.__dict__.update(state)
 
