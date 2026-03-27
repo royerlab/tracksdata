@@ -7,6 +7,7 @@ import polars as pl
 import pyarrow as pa
 import tifffile as tiff
 from dask.array.image import imread as dask_imread
+from numpy.typing import DTypeLike
 
 from tracksdata.array._graph_array import GraphArrayView
 from tracksdata.constants import DEFAULT_ATTR_KEYS
@@ -235,6 +236,7 @@ def to_ctc(
     shape: tuple[int, ...] | None = None,
     tracklet_id_key: str = DEFAULT_ATTR_KEYS.TRACKLET_ID,
     overwrite: bool = False,
+    dtype: None | DTypeLike = None,
 ) -> None:
     """
     Save a graph to a CTC data directory.
@@ -252,6 +254,8 @@ def to_ctc(
         The attribute key to use for the track IDs.
     overwrite : bool
         Whether to overwrite the output directory if it exists.
+    dtype : None | DtypeLike
+        Dtype to save segmentation images.
 
     See Also
     --------
@@ -279,9 +283,12 @@ def to_ctc(
 
     def _write_tiff(t: int) -> None:
         LOG.info(f"Saving label image for time point {t}")
+        frame = view[t]
+        if dtype is not None:
+            frame = frame.astype(dtype)
         tiff.imwrite(
             output_dir / f"mask{t:0{n_digits}d}.tif",
-            view[t],
+            frame,
             compression="LZW",
         )
 
