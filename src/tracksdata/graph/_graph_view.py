@@ -686,9 +686,11 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
             node_ids = list(node_ids)
 
         if is_signal_on(self.node_updated):
-            old_attrs_by_id = self._root.filter(node_ids=node_ids).node_attrs()
-            old_attrs_by_id = old_attrs_by_id.rows_by_key(
-                key=DEFAULT_ATTR_KEYS.NODE_ID, named=True, unique=True, include_key=True
+            updated_keys = list(attrs.keys())
+            old_attrs_by_id = (
+                self._root.filter(node_ids=node_ids)
+                .node_attrs(attr_keys=updated_keys)
+                .rows_by_key(key=DEFAULT_ATTR_KEYS.NODE_ID, named=True, unique=True, include_key=True)
             )
 
         self._root.update_node_attrs(
@@ -707,12 +709,18 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
                 self._out_of_sync = True
 
         if is_signal_on(self.node_updated):
+            updated_keys = list(attrs.keys())
+            new_attrs_by_id = (
+                self._root.filter(node_ids=node_ids)
+                .node_attrs(attr_keys=updated_keys)
+                .rows_by_key(key=DEFAULT_ATTR_KEYS.NODE_ID, named=True, unique=True, include_key=True)
+            )
+            old_attrs_by_id = cast(dict[int, dict[str, Any]], old_attrs_by_id)  # for mypy
             for node_id in node_ids:
-                old_attrs_by_id = cast(dict[int, dict[str, Any]], old_attrs_by_id)  # for mypy
                 self.node_updated.emit(
                     node_id,
                     old_attrs_by_id[node_id],
-                    self._root.nodes[node_id].to_dict(),
+                    new_attrs_by_id[node_id],
                 )
 
     def update_edge_attrs(
