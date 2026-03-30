@@ -212,6 +212,92 @@ def test_paint_buffer_with_offset() -> None:
     assert np.array_equal(buffer, expected_buffer)
 
 
+def test_paint_buffer_bbox_completely_outside_positive() -> None:
+    """Bbox is entirely beyond the buffer boundary (positive overhang) — nothing should be painted."""
+    mask_array = np.array([[True, True], [True, True]], dtype=bool)
+    bbox = np.array([10, 10, 12, 12])  # entirely outside a (5, 5) buffer
+
+    mask = Mask(mask_array, bbox)
+    buffer = np.zeros((5, 5), dtype=float)
+    mask.paint_buffer(buffer, value=1.0)
+
+    assert np.all(buffer == 0.0)
+
+
+def test_paint_buffer_bbox_completely_outside_negative() -> None:
+    """Bbox is entirely at negative coordinates — nothing should be painted (no wrap-around)."""
+    mask_array = np.array([[True, True], [True, True]], dtype=bool)
+    bbox = np.array([-5, -5, -3, -3])  # entirely negative
+
+    mask = Mask(mask_array, bbox)
+    buffer = np.zeros((5, 5), dtype=float)
+    mask.paint_buffer(buffer, value=1.0)
+
+    assert np.all(buffer == 0.0)
+
+
+def test_paint_buffer_bbox_touching_positive_edge() -> None:
+    """Bbox ends exactly at the buffer boundary — all pixels should be painted."""
+    # 2x2 mask at [3, 3] -> [5, 5], fits exactly inside a (5, 5) buffer
+    mask_array = np.array([[True, True], [True, True]], dtype=bool)
+    bbox = np.array([3, 3, 5, 5])  # fits exactly in (5,5)
+
+    mask = Mask(mask_array, bbox)
+    buffer = np.zeros((5, 5), dtype=float)
+    mask.paint_buffer(buffer, value=2.0)
+
+    expected = np.zeros((5, 5), dtype=float)
+    expected[3:5, 3:5] = 2.0
+    assert np.array_equal(buffer, expected)
+
+
+def test_paint_buffer_bbox_on_positive_edge_overhang() -> None:
+    """Bbox starts inside the buffer but extends one row/col beyond the edge."""
+    # 3x3 mask starting at (3,3), buffer is (5,5) → rows 5 and col 5 overhang by 1
+    mask_array = np.ones((3, 3), dtype=bool)
+    bbox = np.array([3, 3, 6, 6])
+
+    mask = Mask(mask_array, bbox)
+    buffer = np.zeros((5, 5), dtype=float)
+    mask.paint_buffer(buffer, value=3.0)
+
+    expected = np.zeros((5, 5), dtype=float)
+    expected[3:5, 3:5] = 3.0  # only the 2x2 in-bounds portion
+    assert np.array_equal(buffer, expected)
+
+
+def test_paint_buffer_bbox_on_negative_edge_overhang() -> None:
+    """Bbox starts before index 0 but ends inside the buffer — only in-bounds part painted."""
+    # 3x3 mask with bbox [-1, -1, 2, 2]; only [0:2, 0:2] is in-bounds
+    mask_array = np.ones((3, 3), dtype=bool)
+    bbox = np.array([-1, -1, 2, 2])
+
+    mask = Mask(mask_array, bbox)
+    buffer = np.zeros((5, 5), dtype=float)
+    mask.paint_buffer(buffer, value=4.0)
+
+    expected = np.zeros((5, 5), dtype=float)
+    expected[0:2, 0:2] = 4.0  # only the 2x2 in-bounds portion
+    assert np.array_equal(buffer, expected)
+
+
+def test_paint_buffer_bbox_on_negative_edge_with_sparse_mask() -> None:
+    """Partial negative overhang with a sparse mask — only in-bounds True pixels painted."""
+    # mask has True only at [0,0] and [2,2]; bbox is [-1,-1,2,2]
+    # after clipping: [0,0] maps to buffer [-1+0,-1+0] = out of bounds → skipped
+    #                 [2,2] maps to buffer [-1+2,-1+2] = [1,1] → painted
+    mask_array = np.array([[True, False, False], [False, False, False], [False, False, True]], dtype=bool)
+    bbox = np.array([-1, -1, 2, 2])
+
+    mask = Mask(mask_array, bbox)
+    buffer = np.zeros((5, 5), dtype=float)
+    mask.paint_buffer(buffer, value=5.0)
+
+    expected = np.zeros((5, 5), dtype=float)
+    expected[1, 1] = 5.0
+    assert np.array_equal(buffer, expected)
+
+
 def test_mask_iou() -> None:
     """Test IoU calculation between masks."""
     # Create two overlapping masks

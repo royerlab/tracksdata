@@ -182,14 +182,34 @@ class Mask:
         offset : NDArray[np.integer] | int, optional
             The offset to add to the indices, should be used with bounding box information.
         """
-        if isinstance(offset, int):
-            offset = np.full(self._mask.ndim, offset)
+        ndim = self._mask.ndim
+        bbox = self._bbox
+        shape = buffer.shape
 
-        window = tuple(
-            slice(i + o, j + o)
-            for i, j, o in zip(self._bbox[: self._mask.ndim], self._bbox[self._mask.ndim :], offset, strict=True)
+        if isinstance(offset, int):
+            starts = [int(bbox[i]) + offset for i in range(ndim)]
+            stops = [int(bbox[i + ndim]) + offset for i in range(ndim)]
+        else:
+            starts = [int(bbox[i]) + int(offset[i]) for i in range(ndim)]
+            stops = [int(bbox[i + ndim]) + int(offset[i]) for i in range(ndim)]
+
+        # fast path: bbox fully inside buffer — no numpy allocations
+        if all(starts[i] >= 0 and stops[i] <= shape[i] for i in range(ndim)):
+            buffer[tuple(slice(starts[i], stops[i]) for i in range(ndim))][self._mask] = value
+            return
+
+        # if bboxes falls outside buffer, clip to buffer bounds
+        clipped_start = [max(0, starts[i]) for i in range(ndim)]
+        clipped_stop = [min(shape[i], stops[i]) for i in range(ndim)]
+
+        if any(clipped_stop[i] <= clipped_start[i] for i in range(ndim)):
+            return
+
+        mask_slicing = tuple(
+            slice(clipped_start[i] - starts[i], self._mask.shape[i] - (stops[i] - clipped_stop[i])) for i in range(ndim)
         )
-        buffer[window][self._mask] = value
+        window = tuple(slice(clipped_start[i], clipped_stop[i]) for i in range(ndim))
+        buffer[window][self._mask[mask_slicing]] = value
 
     def iou(self, other: "Mask") -> float:
         """
