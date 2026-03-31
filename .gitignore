@@ -195,3 +195,6 @@ benchmarks/outputs/*.md
 src/tracksdata/__about__.py
 
 .vscode/
+
+# Claude
+.claude/
