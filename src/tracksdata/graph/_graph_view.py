@@ -697,6 +697,7 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
                         DEFAULT_ATTR_KEYS.Z,
                         DEFAULT_ATTR_KEYS.Y,
                         DEFAULT_ATTR_KEYS.X,
+                        DEFAULT_ATTR_KEYS.BBOX,
                         *attrs.keys(),
                     ]
                     if k in existing_keys

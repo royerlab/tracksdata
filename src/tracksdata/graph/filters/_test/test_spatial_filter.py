@@ -391,6 +391,28 @@ def test_bbox_spatial_filter_updates_node_position(graph_backend: BaseGraph) -> 
         assert moved_node_id in spatial_filter[0:0.5, 19:23, 19:23].node_ids()
 
 
+def test_bbox_spatial_filter_update_non_bbox_attr_no_error(graph_backend: BaseGraph) -> None:
+    """Updating a non-bbox attribute must not cause a KeyError in BBoxSpatialFilter.
+
+    Regression test: GraphView.update_node_attrs previously emitted node_updated
+    with old_attrs containing only the updated keys, omitting bbox when it was not
+    part of the update — causing a KeyError in _update_node.
+    """
+    graph_backend.add_node_attr_key("bbox", pl.Array(pl.Int64, 4))
+    graph_backend.add_node_attr_key("score", pl.Float32)
+    node_id = graph_backend.add_node({"t": 0, "bbox": np.asarray([0, 0, 2, 2]), "score": 1.0})
+
+    for graph in [graph_backend, graph_backend.filter().subgraph()]:
+        spatial_filter = BBoxSpatialFilter(graph, frame_attr_key="t", bbox_attr_key="bbox")
+        assert node_id in spatial_filter[0:0.5, 0:3, 0:3].node_ids()
+
+        # Update only 'score' — bbox is not in attrs, so it was missing from the signal.
+        graph.update_node_attrs(attrs={"score": 2.0}, node_ids=[node_id])
+
+        # Node must still be found at its original spatial position (no KeyError).
+        assert node_id in spatial_filter[0:0.5, 0:3, 0:3].node_ids()
+
+
 def test_bbox_spatial_filter_handles_list_dtype(graph_backend: BaseGraph) -> None:
     """Ensure bounding boxes stored as list dtype still work with the spatial filter."""
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4))
