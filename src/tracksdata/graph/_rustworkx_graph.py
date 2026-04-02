@@ -70,7 +70,11 @@ def _maybe_fill_null(s: pl.Series, schema: AttrSchema) -> pl.Series:
 
 def _list_to_pl_series(key: str, values: list[Any], schema: AttrSchema) -> pl.Series:
     if isinstance(schema.dtype, pl.Array):
-        values = np.asarray(values)
+        try:
+            values = np.asarray(values)
+        except ValueError:
+            # catches when it fails with None in `values`
+            pass
     else:
         values = values
     s = pl.Series(name=key, values=values, dtype=schema.dtype)
