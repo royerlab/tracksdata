@@ -68,6 +68,16 @@ def _maybe_fill_null(s: pl.Series, schema: AttrSchema) -> pl.Series:
     return s
 
 
+def _list_to_pl_series(key: str, values: list[Any], schema: AttrSchema) -> pl.Series:
+    if isinstance(schema.dtype, pl.Array):
+        values = np.asarray(values)
+    else:
+        values = values
+    s = pl.Series(name=key, values=values, dtype=schema.dtype)
+    s = _maybe_fill_null(s, schema)
+    return s
+
+
 def _create_filter_func(
     attr_comps: Sequence[AttrComparison],
     schema: dict[str, AttrSchema],
@@ -189,9 +199,7 @@ class RXFilter(BaseFilter):
 
         for k in data.keys():
             schema = self._graph._edge_attr_schemas()[k]
-            s = pl.Series(name=k, values=data[k], dtype=schema.dtype)
-            s = _maybe_fill_null(s, schema)
-            data[k] = s
+            data[k] = _list_to_pl_series(k, data[k], schema)
 
         data[DEFAULT_ATTR_KEYS.EDGE_SOURCE] = pl.Series(
             name=DEFAULT_ATTR_KEYS.EDGE_SOURCE, values=sources, dtype=pl.Int64
@@ -1109,9 +1117,7 @@ class RustWorkXGraph(BaseGraph):
 
         for key in attr_keys:
             schema = node_attr_schemas[key]
-            s = pl.Series(name=key, values=columns[key], dtype=schema.dtype)
-            s = _maybe_fill_null(s, schema)
-            columns[key] = s
+            columns[key] = _list_to_pl_series(key, columns[key], schema)
 
         # Create DataFrame and set node_id as index in one shot
         df = pl.DataFrame(columns)
@@ -1172,11 +1178,10 @@ class RustWorkXGraph(BaseGraph):
         columns[DEFAULT_ATTR_KEYS.EDGE_SOURCE] = source
         columns[DEFAULT_ATTR_KEYS.EDGE_TARGET] = target
 
+        edge_attr_schemas = self._edge_attr_schemas()
         for key in attr_keys:
-            schema = self._edge_attr_schemas()[key]
-            s = pl.Series(name=key, values=columns[key], dtype=schema.dtype)
-            s = _maybe_fill_null(s, schema)
-            columns[key] = s
+            schema = edge_attr_schemas[key]
+            columns[key] = _list_to_pl_series(key, columns[key], schema)
 
         df = pl.DataFrame(columns)
         if unpack:
