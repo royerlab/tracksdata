@@ -2870,3 +2870,26 @@ def test_array_default_values(graph_backend: BaseGraph) -> None:
     assert node_attrs.shape == (3, 4)
     for col, dtype in node_attrs.schema.items():
         assert dtype == graph_backend._node_attr_schemas()[col].dtype
+
+
+def test_dividing_nodes(graph_backend: BaseGraph) -> None:
+    """Test that dividing_nodes returns exactly the nodes with out-degree 2."""
+    # node0 divides into node1 and node2; node1 continues linearly; node3 is a leaf
+    node0 = graph_backend.add_node({"t": 0})
+    node1 = graph_backend.add_node({"t": 1})
+    node2 = graph_backend.add_node({"t": 1})
+    node3 = graph_backend.add_node({"t": 2})
+    node4 = graph_backend.add_node({"t": 2})
+
+    graph_backend.add_edge(node0, node1, {})
+    graph_backend.add_edge(node0, node2, {})  # node0 divides
+    graph_backend.add_edge(node1, node3, {})  # node1 continues linearly
+    graph_backend.add_edge(node2, node4, {})  # node2 continues linearly
+
+    assert set(graph_backend.dividing_nodes()) == {node0}
+
+    # After adding a second child to node1, it should also be a dividing node
+    node5 = graph_backend.add_node({"t": 2})
+    graph_backend.add_edge(node1, node5, {})
+
+    assert set(graph_backend.dividing_nodes()) == {node0, node1}

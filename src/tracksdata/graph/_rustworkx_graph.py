@@ -1398,6 +1398,13 @@ class RustWorkXGraph(BaseGraph):
             return rx_graph.out_degree(node_ids)
         return [rx_graph.out_degree(node_id) for node_id in node_ids]
 
+    def dividing_nodes(self) -> list[int]:
+        """
+        Get the node ids of dividing nodes (nodes with out-degree == 2).
+        """
+        rx_graph = self.rx_graph
+        return [int(i) for i in rx_graph.node_indices() if rx_graph.out_degree(i) == 2]
+
     def contract_nodes(
         self,
         permanent_node_ids: Sequence[int],
@@ -1803,6 +1810,12 @@ class IndexedRXGraph(MappedGraphMixin, RustWorkXGraph):
         """
         node_ids = self._get_local_ids() if node_ids is None else self._map_to_local(node_ids)
         return super().out_degree(node_ids)
+
+    def dividing_nodes(self) -> list[int]:
+        """
+        Get the node ids of dividing nodes (nodes with out-degree == 2).
+        """
+        return self._map_to_external(super().dividing_nodes())
 
     def add_edge(
         self,

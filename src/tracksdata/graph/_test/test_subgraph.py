@@ -1266,6 +1266,28 @@ def test_picking_graph_mappings(graph_backend: BaseGraph, use_subgraph: bool) ->
 
 
 @parametrize_subgraph_tests
+def test_dividing_nodes(graph_backend: BaseGraph, use_subgraph: bool) -> None:
+    """Test dividing_nodes on both original graphs and subgraphs."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+
+    if graph_with_data._is_subgraph:  # type: ignore[attr-defined]
+        # subgraph contains node1, node2, node4 with edge node1 -> node2 -> node4
+        # node1 has out-degree 1 within the subgraph, so no dividing nodes yet
+        assert set(graph_with_data.dividing_nodes()) == set()
+
+        # Add a sibling for node2 branching off node1, making node1 a dividing node
+        node1 = graph_with_data._test_nodes[2]  # type: ignore[attr-defined]
+        new_node = graph_with_data.add_node({"t": 2, "x": 9.0, "y": 9.0, "label": "D"})
+        graph_with_data.add_edge(node1, new_node, attrs={"weight": 0.5, "new_attribute": 1.0})
+
+        assert set(graph_with_data.dividing_nodes()) == {node1}
+    else:
+        # full graph: node1 divides into node2 and node3
+        node1 = graph_with_data._test_nodes[1]  # type: ignore[attr-defined]
+        assert set(graph_with_data.dividing_nodes()) == {node1}
+
+
+@parametrize_subgraph_tests
 def test_edge_list(graph_backend: BaseGraph, use_subgraph: bool) -> None:
     """Test edge_list functionality on both original graphs and subgraphs."""
     graph_with_data = create_test_graph(graph_backend, use_subgraph)
