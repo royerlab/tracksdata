@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 import polars as pl
 
 from tracksdata.constants import DEFAULT_ATTR_KEYS
@@ -77,7 +79,11 @@ def _avg_edge_attrs(attrs_list: list[dict]) -> dict:
     return _avg_df(pl.DataFrame(non_empty))
 
 
-def _shift_division_ahead_once(graph: BaseGraph, node_id: int) -> int:
+def _shift_division_ahead_once(
+    graph: BaseGraph,
+    node_id: int,
+    on_conflict: Literal["raise", "merge"] = "raise",
+) -> int:
     """
     Shift a division one frame ahead in-place.
 
@@ -91,6 +97,13 @@ def _shift_division_ahead_once(graph: BaseGraph, node_id: int) -> int:
         The graph to modify in-place.
     node_id : int
         The dividing node (must have exactly 2 successors).
+    on_conflict : {"raise", "merge"}, optional
+        Action when both children are themselves dividing nodes (the merged
+        node would inherit more than 2 successors).
+
+        - ``"raise"`` *(default)*: raise :exc:`ValueError`.
+        - ``"merge"``: proceed without raising; the merged node inherits
+          all grandchildren from both children, producing a >2-way division.
 
     Returns
     -------
@@ -110,6 +123,18 @@ def _shift_division_ahead_once(graph: BaseGraph, node_id: int) -> int:
     # edges from c2 take precedence for any shared grandchild.
     grandchild_edges: dict[int, dict] = {g: _get_edge_custom_attrs(graph, c1, g) for g in grand_c1}
     grandchild_edges.update({g: _get_edge_custom_attrs(graph, c2, g) for g in grand_c2})
+
+    # Conflict: merging would produce a node with more than 2 successors,
+    # meaning both children are themselves dividing nodes.
+    if len(grandchild_edges) > 2:
+        if on_conflict == "raise":
+            raise ValueError(
+                f"Cannot shift division at node {node_id} ahead: both children ({c1}, {c2}) are "
+                f"dividing nodes; merging them would create a node with {len(grandchild_edges)} "
+                "successors. Use on_conflict='merge' to allow the multi-way division."
+            )
+        # on_conflict == "merge": proceed without raising, letting the merged
+        # node inherit all grandchildren (a >2-way division is the result).
 
     # Averaged edge attrs for the edge from node_id to the new merged node
     edge_node_to_merged = _avg_edge_attrs(
@@ -137,7 +162,11 @@ def _shift_division_ahead_once(graph: BaseGraph, node_id: int) -> int:
     return merged_id
 
 
-def _shift_division_behind_once(graph: BaseGraph, node_id: int) -> int:
+def _shift_division_behind_once(
+    graph: BaseGraph,
+    node_id: int,
+    on_conflict: Literal["raise", "merge"] = "raise",
+) -> int:
     """
     Shift a division one frame behind in-place.
 
@@ -151,6 +180,17 @@ def _shift_division_behind_once(graph: BaseGraph, node_id: int) -> int:
         The graph to modify in-place.
     node_id : int
         The dividing node (must have exactly 1 predecessor and 2 successors).
+    on_conflict : {"raise", "merge"}, optional
+        Action when the parent is already a dividing node (has other children
+        besides ``node_id``), meaning shifting behind would give the parent
+        more than 2 children.
+
+        - ``"raise"`` *(default)*: raise :exc:`ValueError`.
+        - ``"merge"``: replace ``node_id`` with two interpolated nodes, each
+          averaged between ``node_id`` and one of its children (same
+          interpolation as the normal shift, but anchored at ``node_id``
+          rather than its parent). The parent retains all its existing
+          children plus the two new nodes.
 
     Returns
     -------
@@ -168,6 +208,36 @@ def _shift_division_behind_once(graph: BaseGraph, node_id: int) -> int:
 
     parent = parents[0]
     c1, c2 = children[0], children[1]
+
+    # Conflict: parent already has other children, so shifting behind would
+    # give it more than 2 successors.
+    if len(graph.successors(parent)) > 1:
+        if on_conflict == "raise":
+            other = [c for c in graph.successors(parent) if c != node_id]
+            raise ValueError(
+                f"Cannot shift division at node {node_id} behind: parent {parent} is already a "
+                f"dividing node (children: {[*other, node_id]}). "
+                "Use on_conflict='merge' to remove the moving node and wire its children to parent."
+            )
+        # on_conflict == "merge": replace node_id with two interpolated nodes,
+        # each averaged between node_id and one of its children.
+        # This mirrors the normal behind-shift but uses node_id (not parent)
+        # as the interpolation anchor.
+        edge_parent_to_node = _get_edge_custom_attrs(graph, parent, node_id)
+        edge_node_to_c1 = _get_edge_custom_attrs(graph, node_id, c1)
+        edge_node_to_c2 = _get_edge_custom_attrs(graph, node_id, c2)
+
+        m1 = graph.add_node(_avg_node_attrs(graph, [node_id, c1], non_numeric_idx=1))
+        m2 = graph.add_node(_avg_node_attrs(graph, [node_id, c2], non_numeric_idx=1))
+
+        graph.remove_node(node_id)  # removes parent→node_id, node_id→c1, node_id→c2
+
+        graph.add_edge(parent, m1, dict(edge_parent_to_node))
+        graph.add_edge(parent, m2, dict(edge_parent_to_node))
+        graph.add_edge(m1, c1, dict(edge_node_to_c1))
+        graph.add_edge(m2, c2, dict(edge_node_to_c2))
+
+        return parent
 
     # Save edge attrs before modifying the graph
     edge_parent_to_node = _get_edge_custom_attrs(graph, parent, node_id)
@@ -193,7 +263,12 @@ def _shift_division_behind_once(graph: BaseGraph, node_id: int) -> int:
     return parent
 
 
-def shift_division(graph: BaseGraph, node_id: int, frames: int) -> BaseGraph:
+def shift_division(
+    graph: BaseGraph,
+    node_id: int,
+    frames: int,
+    on_conflict: Literal["raise", "merge"] = "raise",
+) -> BaseGraph:
     """
     Move a dividing node forward or backward in time by the given number of frames.
 
@@ -220,6 +295,24 @@ def shift_division(graph: BaseGraph, node_id: int, frames: int) -> BaseGraph:
     frames : int
         Number of frames to move the division.  Positive shifts ahead in time,
         negative shifts behind.
+    on_conflict : {"raise", "merge"}, optional
+        Action when the shift encounters an existing division "in the way":
+
+        - **Shift ahead** conflict: both children are themselves dividing nodes,
+          so merging them would produce a node with more than 2 successors.
+        - **Shift behind** conflict: the parent is already a dividing node
+          (has other children), so shifting behind would give it more than 2
+          children.
+
+        - ``"raise"`` *(default)*: raise :exc:`ValueError` on conflict.
+        - ``"merge"``: resolve the conflict by collapsing the moving division
+          into the existing one.
+
+          - *Ahead*: proceed without raising; the merged node inherits all
+            grandchildren, producing a >2-way division.
+          - *Behind*: replace the moving node with two interpolated nodes
+            (each averaged between the moving node and one child) and attach
+            them to the parent alongside its existing children.
 
     Returns
     -------
@@ -230,7 +323,8 @@ def shift_division(graph: BaseGraph, node_id: int, frames: int) -> BaseGraph:
     ------
     ValueError
         If the node does not have exactly 2 children, or if shifting behind and
-        the node does not have exactly 1 parent.
+        the node does not have exactly 1 parent, or if a conflict is detected
+        and ``on_conflict="raise"``.
 
     Examples
     --------
@@ -245,6 +339,12 @@ def shift_division(graph: BaseGraph, node_id: int, frames: int) -> BaseGraph:
     ```python
     new_graph = shift_division(graph, node_id=5, frames=2)
     ```
+
+    Move a division ahead, merging into an existing division if encountered:
+
+    ```python
+    new_graph = shift_division(graph, node_id=5, frames=1, on_conflict="merge")
+    ```
     """
     new_graph = graph.copy()
 
@@ -255,9 +355,9 @@ def shift_division(graph: BaseGraph, node_id: int, frames: int) -> BaseGraph:
 
     if frames > 0:
         for _ in range(frames):
-            current_node = _shift_division_ahead_once(new_graph, current_node)
+            current_node = _shift_division_ahead_once(new_graph, current_node, on_conflict)
     else:
         for _ in range(-frames):
-            current_node = _shift_division_behind_once(new_graph, current_node)
+            current_node = _shift_division_behind_once(new_graph, current_node, on_conflict)
 
     return new_graph

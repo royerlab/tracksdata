@@ -74,6 +74,12 @@ def _node_attrs(graph: td.graph.RustWorkXGraph, node_id: int) -> dict:
 
 
 def test_shift_division_zero_frames_returns_copy() -> None:
+    """frames=0 returns a copy with identical structure (no transformation).
+
+    Before / After (unchanged):
+        gp → p → d* → c1
+                    → c2
+    """
     g, ids = _make_simple_graph()
     result = shift_division(g, ids["d"], frames=0)
 
@@ -86,6 +92,10 @@ def test_shift_division_zero_frames_returns_copy() -> None:
 
 
 def test_shift_division_does_not_modify_original() -> None:
+    """shift_division always works on a copy; the input graph is unchanged.
+
+    Input:  gp → p → d* → c1 / c2   (frames=1, the input must stay identical)
+    """
     g, ids = _make_simple_graph()
     original_node_ids = set(g.node_ids())
 
@@ -100,6 +110,12 @@ def test_shift_division_does_not_modify_original() -> None:
 
 
 def test_shift_division_ahead_1_frame() -> None:
+    """Division moves one frame ahead: c1 and c2 are merged, grandchildren inherited.
+
+    Before:                          After:
+        gp → p → d* → c1 → g1           gp → p → d → M*(avg c1,c2) → g1
+                    → c2 → g2                                        → g2
+    """
     g, ids = _make_deep_graph()
     result = shift_division(g, ids["d"], frames=1)
 
@@ -125,6 +141,12 @@ def test_shift_division_ahead_1_frame() -> None:
 
 
 def test_shift_division_ahead_2_frames() -> None:
+    """Division moves two frames ahead: two successive merges collapse both levels.
+
+    Before:                          After:
+        gp → p → d* → c1 → g1           gp → p → d → Mc → Mg(avg g1,g2)
+                    → c2 → g2
+    """
     g, ids = _make_deep_graph()
     result = shift_division(g, ids["d"], frames=2)
 
@@ -149,12 +171,48 @@ def test_shift_division_ahead_2_frames() -> None:
     assert len(result.node_ids()) == len(g.node_ids()) - 2
 
 
+def test_shift_division_ahead_at_penultimate_frame() -> None:
+    """Shifting ahead when children are leaves produces a single merged leaf.
+
+    Before:                   After:
+        p → d* → c1 (leaf)        p → d → M(avg c1,c2, leaf)
+                → c2 (leaf)
+    """
+    g = td.graph.RustWorkXGraph()
+    g.add_node_attr_key("x", pl.Float64)
+
+    p = g.add_node({"t": 0, "x": 0.0})
+    d = g.add_node({"t": 1, "x": 2.0})
+    c1 = g.add_node({"t": 2, "x": 1.0})
+    c2 = g.add_node({"t": 2, "x": 3.0})
+    g.add_edge(p, d, {})
+    g.add_edge(d, c1, {})
+    g.add_edge(d, c2, {})
+
+    result = shift_division(g, d, frames=1)
+
+    # c1 and c2 merged into one leaf node
+    successors_d = result.successors(d)
+    assert len(successors_d) == 1
+    merged_id = successors_d[0]
+
+    assert result.successors(merged_id) == []
+    assert result.nodes[merged_id]["x"] == pytest.approx(2.0)  # avg(1.0, 3.0)
+    assert result.nodes[merged_id]["t"] == 2  # avg(2, 2)
+
+
 # ---------------------------------------------------------------------------
 # Tests: behind (negative frames)
 # ---------------------------------------------------------------------------
 
 
 def test_shift_division_behind_1_frame() -> None:
+    """Division moves one frame behind: d is replaced by two interpolated nodes.
+
+    Before:                       After:
+        gp → p → d* → c1             gp → p* → d1(avg p,c1) → c1
+                    → c2                      → d2(avg p,c2) → c2
+    """
     g, ids = _make_simple_graph()
     result = shift_division(g, ids["d"], frames=-1)
 
@@ -182,6 +240,12 @@ def test_shift_division_behind_1_frame() -> None:
 
 
 def test_shift_division_behind_2_frames() -> None:
+    """Division moves two frames behind: two successive splits push division to gp.
+
+    Before:                        After:
+        gp → p → d* → c1              gp* → p1(avg gp,d1') → d1'(avg p,c1) → c1
+                    → c2                   → p2(avg gp,d2') → d2'(avg p,c2) → c2
+    """
     g, ids = _make_simple_graph()
     result = shift_division(g, ids["d"], frames=-2)
 
@@ -215,6 +279,12 @@ def test_shift_division_behind_2_frames() -> None:
 
 
 def test_shift_division_ahead_preserves_edge_attrs() -> None:
+    """Edge weights are averaged for the merged edge, preserved for grandchild edges.
+
+    Before:                                  After:
+        p -0.9→ d* -0.6→ c1 -0.8→ g1            p -0.9→ d -0.5→ M -0.8→ g1
+                   -0.4→ c2 -0.7→ g2                                -0.7→ g2
+    """
     g = td.graph.RustWorkXGraph()
     g.add_node_attr_key("x", pl.Float64)
     g.add_edge_attr_key("weight", pl.Float64, default_value=0.0)
@@ -248,6 +318,12 @@ def test_shift_division_ahead_preserves_edge_attrs() -> None:
 
 
 def test_shift_division_behind_preserves_edge_attrs() -> None:
+    """Parent→divider weight is reused for both new edges; child edges are preserved.
+
+    Before:                            After:
+        p -0.9→ d* -0.6→ c1               p -0.9→ d1 -0.6→ c1
+                   -0.4→ c2                 -0.9→ d2 -0.4→ c2
+    """
     g = td.graph.RustWorkXGraph()
     g.add_node_attr_key("x", pl.Float64)
     g.add_edge_attr_key("weight", pl.Float64, default_value=0.0)
@@ -284,31 +360,6 @@ def test_shift_division_behind_preserves_edge_attrs() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_shift_division_ahead_at_penultimate_frame() -> None:
-    """Shifting ahead when children are leaf nodes (last frame, no grandchildren)."""
-    g = td.graph.RustWorkXGraph()
-    g.add_node_attr_key("x", pl.Float64)
-
-    p = g.add_node({"t": 0, "x": 0.0})
-    d = g.add_node({"t": 1, "x": 2.0})
-    c1 = g.add_node({"t": 2, "x": 1.0})
-    c2 = g.add_node({"t": 2, "x": 3.0})
-    g.add_edge(p, d, {})
-    g.add_edge(d, c1, {})
-    g.add_edge(d, c2, {})
-
-    result = shift_division(g, d, frames=1)
-
-    # c1 and c2 merged into one leaf node
-    successors_d = result.successors(d)
-    assert len(successors_d) == 1
-    merged_id = successors_d[0]
-
-    assert result.successors(merged_id) == []
-    assert result.nodes[merged_id]["x"] == pytest.approx(2.0)  # avg(1.0, 3.0)
-    assert result.nodes[merged_id]["t"] == 2  # avg(2, 2)
-
-
 def test_shift_division_ahead_raises_if_not_two_children() -> None:
     g = td.graph.RustWorkXGraph()
     n0 = g.add_node({"t": 0})
@@ -342,6 +393,204 @@ def test_shift_division_behind_raises_if_not_two_children() -> None:
 
     with pytest.raises(ValueError, match="exactly 2 children"):
         shift_division(g, d, frames=-1)
+
+
+# ---------------------------------------------------------------------------
+# Tests: on_conflict handling
+# ---------------------------------------------------------------------------
+
+
+def _make_graph_with_dividing_children() -> tuple[td.graph.RustWorkXGraph, dict[str, int]]:
+    """
+    Both children of the dividing node are themselves dividing:
+
+        d  (t=0)
+       / \\
+      c1   c2     (t=1)
+     / \\   / \\
+   gc1 gc2 gc3 gc4  (t=2)
+    """
+    g = td.graph.RustWorkXGraph()
+    g.add_node_attr_key("x", pl.Float64)
+
+    ids: dict[str, int] = {}
+    ids["d"] = g.add_node({"t": 0, "x": 0.0})
+    ids["c1"] = g.add_node({"t": 1, "x": -1.0})
+    ids["c2"] = g.add_node({"t": 1, "x": 1.0})
+    ids["gc1"] = g.add_node({"t": 2, "x": -2.0})
+    ids["gc2"] = g.add_node({"t": 2, "x": 0.0})
+    ids["gc3"] = g.add_node({"t": 2, "x": 0.0})
+    ids["gc4"] = g.add_node({"t": 2, "x": 2.0})
+
+    g.add_edge(ids["d"], ids["c1"], {})
+    g.add_edge(ids["d"], ids["c2"], {})
+    g.add_edge(ids["c1"], ids["gc1"], {})
+    g.add_edge(ids["c1"], ids["gc2"], {})
+    g.add_edge(ids["c2"], ids["gc3"], {})
+    g.add_edge(ids["c2"], ids["gc4"], {})
+
+    return g, ids
+
+
+def _make_graph_with_dividing_parent() -> tuple[td.graph.RustWorkXGraph, dict[str, int]]:
+    """
+    The parent of the dividing node is already dividing:
+
+        p  (t=0)
+       / \\
+      d  sibling  (t=1)
+     / \\
+    c1   c2       (t=2)
+    """
+    g = td.graph.RustWorkXGraph()
+    g.add_node_attr_key("x", pl.Float64)
+
+    ids: dict[str, int] = {}
+    ids["p"] = g.add_node({"t": 0, "x": 0.0})
+    ids["d"] = g.add_node({"t": 1, "x": -1.0})
+    ids["sibling"] = g.add_node({"t": 1, "x": 1.0})
+    ids["c1"] = g.add_node({"t": 2, "x": -2.0})
+    ids["c2"] = g.add_node({"t": 2, "x": 0.0})
+
+    g.add_edge(ids["p"], ids["d"], {})
+    g.add_edge(ids["p"], ids["sibling"], {})
+    g.add_edge(ids["d"], ids["c1"], {})
+    g.add_edge(ids["d"], ids["c2"], {})
+
+    return g, ids
+
+
+def test_shift_ahead_one_dividing_child_no_conflict() -> None:
+    """Shifting ahead when only one child is dividing is not a conflict.
+
+    c1 has 2 successors and c2 is a leaf, so the merged node inherits exactly
+    2 grandchildren — no error regardless of on_conflict.
+
+    Before:                         After:
+        d* → c1* → gc1                  d → M*(avg c1,c2) → gc1
+                 → gc2                                     → gc2
+           → c2 (leaf)
+    """
+    g = td.graph.RustWorkXGraph()
+    g.add_node_attr_key("x", pl.Float64)
+
+    d = g.add_node({"t": 0, "x": 0.0})
+    c1 = g.add_node({"t": 1, "x": -1.0})  # will be dividing
+    c2 = g.add_node({"t": 1, "x": 1.0})  # leaf
+    gc1 = g.add_node({"t": 2, "x": -2.0})
+    gc2 = g.add_node({"t": 2, "x": 0.0})
+
+    g.add_edge(d, c1, {})
+    g.add_edge(d, c2, {})
+    g.add_edge(c1, gc1, {})
+    g.add_edge(c1, gc2, {})
+
+    # No error — only c1 is dividing, total grandchildren == 2
+    result = shift_division(g, d, frames=1)
+
+    successors_d = result.successors(d)
+    assert len(successors_d) == 1
+    merged_id = successors_d[0]
+
+    # Merged node inherits c1's two grandchildren, making it a dividing node
+    assert set(result.successors(merged_id)) == {gc1, gc2}
+
+    # c1 and c2 are removed; merged attrs are average of c1 and c2
+    assert c1 not in result.node_ids()
+    assert c2 not in result.node_ids()
+    assert _node_attrs(result, merged_id)["x"] == pytest.approx(0.0)  # avg(-1.0, 1.0)
+
+
+def test_shift_ahead_conflict_raises() -> None:
+    """Shifting ahead when both children are dividing raises by default.
+
+    Input:
+        d* → c1* → gc1 / gc2
+           → c2* → gc3 / gc4
+    Merged node would have 4 successors → ValueError with on_conflict='raise'.
+    """
+    g, ids = _make_graph_with_dividing_children()
+    with pytest.raises(ValueError, match="conflict"):
+        shift_division(g, ids["d"], frames=1)
+
+
+def test_shift_ahead_conflict_merge() -> None:
+    """on_conflict='merge' proceeds without raising, producing a 4-way division.
+
+    Before:                         After:
+        d* → c1* → gc1                  d → M(avg c1,c2) → gc1
+                 → gc2                                   → gc2
+           → c2* → gc3                                   → gc3
+                 → gc4                                   → gc4
+    """
+    g, ids = _make_graph_with_dividing_children()
+    result = shift_division(g, ids["d"], frames=1, on_conflict="merge")
+
+    # d still exists; its single successor is the merged node
+    successors_d = result.successors(ids["d"])
+    assert len(successors_d) == 1
+    merged_id = successors_d[0]
+
+    # Merged node inherits all 4 grandchildren
+    assert set(result.successors(merged_id)) == {ids["gc1"], ids["gc2"], ids["gc3"], ids["gc4"]}
+
+    # c1 and c2 are removed
+    assert ids["c1"] not in result.node_ids()
+    assert ids["c2"] not in result.node_ids()
+
+    # Merged node attributes are the average of c1 and c2
+    merged = _node_attrs(result, merged_id)
+    assert merged["t"] == 1  # avg(1, 1)
+    assert merged["x"] == pytest.approx(0.0)  # avg(-1.0, 1.0)
+
+
+def test_shift_behind_conflict_raises() -> None:
+    """Shifting behind when the parent is already dividing raises by default.
+
+    Input:
+        p* → d* → c1 / c2
+           → sibling
+    Shifting d behind would give p 3 children → ValueError with on_conflict='raise'.
+    """
+    g, ids = _make_graph_with_dividing_parent()
+    with pytest.raises(ValueError, match="conflict"):
+        shift_division(g, ids["d"], frames=-1)
+
+
+def test_shift_behind_conflict_merge() -> None:
+    """on_conflict='merge' replaces the moving node with two interpolated nodes.
+
+    Each new node is averaged between the moving node (d) and its respective
+    child — the same interpolation as a normal behind-shift but anchored at d
+    instead of p.
+
+    Before:                        After:
+        p* → d*(t=1) → c1(t=2)        p → M1(avg d,c1) → c1
+                     → c2(t=2)           → M2(avg d,c2) → c2
+           → sibling                     → sibling
+    """
+    g, ids = _make_graph_with_dividing_parent()
+    result = shift_division(g, ids["d"], frames=-1, on_conflict="merge")
+
+    # d is removed
+    assert ids["d"] not in result.node_ids()
+
+    # p now has sibling plus two new interpolated nodes
+    p_children = result.successors(ids["p"])
+    assert len(p_children) == 3
+    new_nodes = [nc for nc in p_children if nc != ids["sibling"]]
+    assert len(new_nodes) == 2
+
+    # each new node connects to exactly one of the original children
+    targets = {result.successors(nc)[0] for nc in new_nodes}
+    assert targets == {ids["c1"], ids["c2"]}
+
+    # attrs are avg(d, respective_child): t=avg(1,2)=2, x as expected
+    attrs_by_child = {result.successors(nc)[0]: _node_attrs(result, nc) for nc in new_nodes}
+    assert attrs_by_child[ids["c1"]]["t"] == 2  # avg(1, 2)
+    assert attrs_by_child[ids["c1"]]["x"] == pytest.approx(-1.5)  # avg(-1.0, -2.0)
+    assert attrs_by_child[ids["c2"]]["t"] == 2  # avg(1, 2)
+    assert attrs_by_child[ids["c2"]]["x"] == pytest.approx(-0.5)  # avg(-1.0, 0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -403,6 +652,12 @@ def _make_graph_with_mask() -> tuple[td.graph.RustWorkXGraph, dict[str, int]]:
 
 
 def test_shift_division_ahead_bbox() -> None:
+    """bbox (pl.Array) on the merged node is the element-wise average of both children.
+
+    Before:                                   After:
+        p → d* → c1(bbox=[0,0,4,4])               p → d → M(bbox=[2,2,6,6], t=2)
+                → c2(bbox=[4,4,8,8])
+    """
     g, ids = _make_graph_with_bbox()
     result = shift_division(g, ids["d"], frames=1)
 
@@ -418,9 +673,11 @@ def test_shift_division_ahead_bbox() -> None:
 
 
 def test_shift_division_behind_bbox_is_interpolated() -> None:
-    """
-    bbox is a pl.Array column; each replacement node's bbox is element-wise
-    average of the parent's bbox and its respective child's bbox.
+    """Each replacement node's bbox is element-wise average of parent and its child.
+
+    Before:                                      After:
+        p(bbox=[0,0,4,4]) → d* → c1([0,0,4,4])      p → d1(bbox=[0,0,4,4]) → c1
+                                → c2([4,4,8,8])        → d2(bbox=[2,2,6,6]) → c2
     """
     g, ids = _make_graph_with_bbox()
     # p=[0,0,4,4], c1=[0,0,4,4], c2=[4,4,8,8]
@@ -436,6 +693,12 @@ def test_shift_division_behind_bbox_is_interpolated() -> None:
 
 
 def test_shift_division_ahead_mask() -> None:
+    """Mask (pl.Object) on the merged node falls back to the first child's mask.
+
+    Before:                        After:
+        p → d* → c1(mask_c1)           p → d → M(mask=mask_c1)
+                → c2(mask_c2)
+    """
     g, ids, masks = _make_graph_with_mask()
     result = shift_division(g, ids["d"], frames=1)
 
@@ -454,6 +717,12 @@ def test_shift_division_ahead_mask() -> None:
 
 
 def test_shift_division_behind_mask() -> None:
+    """Each replacement node carries its respective child's mask (non-numeric fallback).
+
+    Before:                         After:
+        p → d* → c1(mask_c1)            p → d1(mask=mask_c1) → c1
+                → c2(mask_c2)             → d2(mask=mask_c2) → c2
+    """
     g, ids, masks = _make_graph_with_mask()
     result = shift_division(g, ids["d"], frames=-1)
 
