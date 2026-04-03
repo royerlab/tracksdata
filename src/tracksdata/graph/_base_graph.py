@@ -1114,6 +1114,12 @@ class BaseGraph(abc.ABC):
         Get the out-degree of a list of nodes.
         """
 
+    @abc.abstractmethod
+    def dividing_nodes(self) -> list[int]:
+        """
+        Get the node ids of dividing nodes.
+        """
+
     def match(
         self,
         other: "BaseGraph",

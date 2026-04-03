@@ -2025,6 +2025,15 @@ class SQLGraph(BaseGraph):
         """
         return self._get_degree(node_ids, DEFAULT_ATTR_KEYS.EDGE_SOURCE)
 
+    def dividing_nodes(self) -> list[int]:
+        """
+        Get the node ids of dividing nodes (nodes with out-degree == 2).
+        """
+        edge_key_col = getattr(self.Edge, DEFAULT_ATTR_KEYS.EDGE_SOURCE)
+        stmt = sa.select(edge_key_col).group_by(edge_key_col).having(sa.func.count() == 2)
+        with Session(self._engine) as session:
+            return [int(row[0]) for row in session.execute(stmt).all()]
+
     def __getstate__(self) -> dict:
         data_dict = self.__dict__.copy()
         for k in ["Base", "Node", "Edge", "Overlap", "Metadata", "_engine"]:

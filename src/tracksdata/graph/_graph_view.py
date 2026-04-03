@@ -783,6 +783,12 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
             return rx_graph.out_degree(self._map_to_local(node_ids))
         return [rx_graph.out_degree(self._map_to_local(node_id)) for node_id in node_ids]
 
+    def dividing_nodes(self) -> list[int]:
+        """
+        Get the node ids of dividing nodes (nodes with out-degree == 2).
+        """
+        return self._map_to_external(super().dividing_nodes())
+
     def _replace_parent_graph_with_root(self) -> None:
         """
         Replace the parent graph with it's own parent graph (the root graph)
