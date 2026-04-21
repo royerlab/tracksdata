@@ -1288,6 +1288,41 @@ def test_dividing_nodes(graph_backend: BaseGraph, use_subgraph: bool) -> None:
 
 
 @parametrize_subgraph_tests
+def test_filter_num_nodes_and_edges(graph_backend: BaseGraph, use_subgraph: bool) -> None:
+    """Test filter.num_nodes() and filter.num_edges() across backends and subgraphs."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+
+    # filter returning all nodes/edges
+    all_filter = graph_with_data.filter()
+    assert all_filter.num_nodes() == len(graph_with_data._test_nodes)  # type: ignore
+    assert all_filter.num_edges() == len(graph_with_data._test_edges)  # type: ignore
+
+    # filter by node attribute
+    node_attrs = graph_with_data.node_attrs()
+    for t_val in node_attrs["t"].unique().to_list():
+        f = graph_with_data.filter(NodeAttr("t") == t_val)
+        expected_nodes = node_attrs.filter(pl.col("t") == t_val)[DEFAULT_ATTR_KEYS.NODE_ID].to_list()
+        assert f.num_nodes() == len(expected_nodes)
+
+    # filter by node IDs
+    node_ids = graph_with_data._test_nodes[:2]  # type: ignore
+    id_filter = graph_with_data.filter(node_ids=node_ids)
+    assert id_filter.num_nodes() == 2
+
+    # filter by edge attribute
+    edge_attrs = graph_with_data.edge_attrs()
+    for w_val in edge_attrs["weight"].unique().to_list():
+        f = graph_with_data.filter(EdgeAttr("weight") == w_val)
+        expected_edges = edge_attrs.filter(pl.col("weight") == w_val)[DEFAULT_ATTR_KEYS.EDGE_ID].to_list()
+        assert f.num_edges() == len(expected_edges)
+
+    # filter returning nothing
+    empty_filter = graph_with_data.filter(NodeAttr("t") == 9999)
+    assert empty_filter.num_nodes() == 0
+    assert empty_filter.num_edges() == 0
+
+
+@parametrize_subgraph_tests
 def test_edge_list(graph_backend: BaseGraph, use_subgraph: bool) -> None:
     """Test edge_list functionality on both original graphs and subgraphs."""
     graph_with_data = create_test_graph(graph_backend, use_subgraph)

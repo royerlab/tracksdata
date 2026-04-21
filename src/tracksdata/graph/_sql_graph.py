@@ -205,6 +205,18 @@ class SQLFilter(BaseFilter):
                 return session.execute(self._edge_query.with_only_columns(self._graph.Edge.edge_id)).scalars().all()
 
     @cache_method
+    def num_nodes(self) -> int:
+        count_query = sa.select(sa.func.count()).select_from(self._node_query.subquery())
+        with Session(self._graph._engine) as session:
+            return session.execute(count_query).scalar()
+
+    @cache_method
+    def num_edges(self) -> int:
+        count_query = sa.select(sa.func.count()).select_from(self._edge_query.subquery())
+        with Session(self._graph._engine) as session:
+            return session.execute(count_query).scalar()
+
+    @cache_method
     def node_attrs(
         self,
         *,

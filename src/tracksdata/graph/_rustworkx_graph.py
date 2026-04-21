@@ -219,6 +219,12 @@ class RXFilter(BaseFilter):
     def edge_ids(self) -> list[int]:
         return self._edge_attrs()[DEFAULT_ATTR_KEYS.EDGE_ID].to_list()
 
+    def num_nodes(self) -> int:
+        return len(self.node_ids())
+
+    def num_edges(self) -> int:
+        return len(self.edge_ids())
+
     @cache_method
     def node_attrs(
         self,

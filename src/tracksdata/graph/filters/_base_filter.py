@@ -53,3 +53,15 @@ class BaseFilter(abc.ABC):
         """
         Get a subgraph of the graph resulting from the filter.
         """
+
+    @abc.abstractmethod
+    def num_edges(self) -> int:
+        """
+        The number of edges selected by the filter
+        """
+
+    @abc.abstractmethod
+    def num_nodes(self) -> int:
+        """
+        The number of nodes selected by the filter
+        """
