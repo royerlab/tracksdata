@@ -1,3 +1,4 @@
+import itertools
 import re
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -1337,3 +1338,72 @@ def test_edge_list(graph_backend: BaseGraph, use_subgraph: bool) -> None:
         )
     )
     assert edge_list == expected_edge_list
+
+
+def _build_chain_graph(graph: SQLGraph, n_nodes: int) -> list[int]:
+    node_ids: list[int] = []
+    for t in range(n_nodes):
+        node_ids.append(graph.add_node({DEFAULT_ATTR_KEYS.T: t}))
+    for src, tgt in itertools.pairwise(node_ids):
+        graph.add_edge(src, tgt, {})
+    graph.add_overlap(node_ids[0], node_ids[1])
+    graph.add_overlap(node_ids[2], node_ids[3])
+    return node_ids
+
+
+def test_sql_graph_filter_large_node_ids(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Filtering with more ids than SQLite's variable limit must not raise.
+
+    Reproduces the ``OperationalError: too many SQL variables`` failure by
+    forcing the scratch-table code path via a tiny chunk size.
+    """
+    graph = SQLGraph("sqlite", str(tmp_path / "scratch.db"))
+    n_nodes = 40
+    node_ids = _build_chain_graph(graph, n_nodes)
+
+    # Force scratch-table path on every call site.
+    monkeypatch.setattr(SQLGraph, "_sql_chunk_size", lambda self: 4)
+
+    filtered = graph.filter(node_ids=node_ids)
+    # Confirm the scratch-table code path was taken rather than raw IN (...).
+    assert filtered._id_sets[0].uses_scratch_table
+    subgraph = filtered.subgraph()
+    assert subgraph.num_nodes() == n_nodes
+    assert subgraph.num_edges() == n_nodes - 1
+
+    in_deg = graph.in_degree(node_ids)
+    out_deg = graph.out_degree(node_ids)
+    assert sum(in_deg) == n_nodes - 1
+    assert sum(out_deg) == n_nodes - 1
+
+    overlaps = graph.overlaps(node_ids)
+    assert sorted(map(tuple, overlaps)) == sorted([(node_ids[0], node_ids[1]), (node_ids[2], node_ids[3])])
+
+
+def test_sql_graph_filter_borderline_node_ids(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The scratch cutoff must account for how many times ids appear per statement.
+
+    With ``_sql_chunk_size() == 12`` and ``SQLFilter`` using ``occurrences=3``,
+    a list of 5 ids would compile to ~15 bound variables — above the limit —
+    even though ``len(node_ids) <= chunk_size``. The helper must still switch
+    to the scratch-table path in that band.
+    """
+    graph = SQLGraph("sqlite", str(tmp_path / "scratch.db"))
+    n_nodes = 5
+    node_ids = _build_chain_graph(graph, n_nodes)
+
+    monkeypatch.setattr(SQLGraph, "_sql_chunk_size", lambda self: 12)
+
+    filtered = graph.filter(node_ids=node_ids)
+    # 5 ids fits under chunk_size=12 inline, but with occurrences=3 the
+    # effective cutoff is 12 // 3 == 4, so scratch must kick in.
+    assert filtered._id_sets[0].uses_scratch_table
+    subgraph = filtered.subgraph()
+    assert subgraph.num_nodes() == n_nodes
+    assert subgraph.num_edges() == n_nodes - 1
+
+    # overlaps() uses occurrences=2 → cutoff 6, so len==5 stays inline.
+    # Still assert it returns the right data regardless of path.
+    assert sorted(map(tuple, graph.overlaps(node_ids))) == sorted(
+        [(node_ids[0], node_ids[1]), (node_ids[2], node_ids[3])]
+    )

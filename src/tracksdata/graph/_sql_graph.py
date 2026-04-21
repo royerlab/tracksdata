@@ -1,4 +1,6 @@
 import binascii
+import uuid
+import weakref
 from collections.abc import Callable, Sequence
 from enum import Enum
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -56,6 +58,82 @@ def _data_numpy_to_native(data: dict[str, Any]) -> None:
             data[k] = v.item()
 
 
+def _drop_scratch_tables(engine: sa.Engine, tables: list[sa.Table]) -> None:
+    """Drop scratch tables, swallowing errors (e.g. at interpreter shutdown)."""
+    for table in tables:
+        try:
+            table.drop(engine)
+        except Exception as exc:
+            LOG.debug("Failed to drop scratch table %s: %s", table.name, exc)
+
+
+class _SqlIdSet:
+    """A set of ids usable in SQL ``IN`` clauses without overflowing bind limits.
+
+    Small sets compile to inline ``col.in_([...])``; larger sets are materialized
+    into a per-instance scratch table and matched via ``col.in_(SELECT id FROM
+    scratch)``. The same ``_SqlIdSet`` may be reused against multiple columns —
+    each call to :meth:`in_clause` emits a fresh expression backed by the same
+    underlying ids.
+
+    ``occurrences`` is the maximum number of times the id set will be expanded
+    in a single compiled statement (e.g. filtering both ``source_id`` and
+    ``target_id`` of an edge table counts as 2). The scratch-table cutoff is
+    scaled by it so that ``len(ids) * occurrences`` stays safely under the
+    backend's bound-variable limit.
+    """
+
+    def __init__(
+        self,
+        graph: "SQLGraph",
+        ids: Sequence[int],
+        *,
+        occurrences: int = 1,
+    ) -> None:
+        if hasattr(ids, "tolist"):
+            ids = ids.tolist()
+        self._ids: list[int] = list(ids)
+        self._graph = graph
+
+        limit = max(1, graph._sql_chunk_size() // max(1, occurrences))
+        if len(self._ids) > limit:
+            self._scratch: sa.Table | None = graph._create_id_scratch_table(self._ids)
+        else:
+            self._scratch = None
+
+    @property
+    def ids(self) -> list[int]:
+        return self._ids
+
+    @property
+    def uses_scratch_table(self) -> bool:
+        return self._scratch is not None
+
+    def in_clause(self, column: sa.ColumnElement) -> sa.ColumnElement[bool]:
+        if self._scratch is None:
+            return column.in_(self._ids)
+        return column.in_(sa.select(self._scratch.c.id))
+
+    def close(self) -> None:
+        if self._scratch is not None:
+            _drop_scratch_tables(self._graph._engine, [self._scratch])
+            self._scratch = None
+
+    def __enter__(self) -> "_SqlIdSet":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+
+def _close_id_sets(id_sets: list[_SqlIdSet]) -> None:
+    for id_set in id_sets:
+        try:
+            id_set.close()
+        except Exception as exc:
+            LOG.debug("Failed to close _SqlIdSet: %s", exc)
+
+
 def _filter_query(
     query: sa.Select,
     table: type[DeclarativeBase],
@@ -99,6 +177,7 @@ class SQLFilter(BaseFilter):
         self._node_attr_comps, self._edge_attr_comps = split_attr_comps(attr_filters)
         self._include_targets = include_targets
         self._include_sources = include_sources
+        self._id_sets: list[_SqlIdSet] = []
 
         # creating initial query
         self._node_query: sa.Select = sa.select(self._graph.Node)
@@ -106,18 +185,19 @@ class SQLFilter(BaseFilter):
         node_filtered = False
 
         if node_ids is not None:
-            if hasattr(node_ids, "tolist"):
-                node_ids = node_ids.tolist()
+            # ``node_ids`` may be expanded in up to three places within a
+            # single compiled statement (Node.node_id, Edge.source_id,
+            # Edge.target_id — the node-attr-filter path at L159-L160 inlines
+            # the edge query as a subquery), so the scratch-table cutoff is
+            # scaled accordingly.
+            id_set = _SqlIdSet(self._graph, node_ids, occurrences=3)
+            self._id_sets.append(id_set)
 
-            self._node_query = self._node_query.filter(self._graph.Node.node_id.in_(node_ids))
+            self._node_query = self._node_query.filter(id_set.in_clause(self._graph.Node.node_id))
             if not self._include_targets:
-                self._edge_query = self._edge_query.filter(
-                    self._graph.Edge.target_id.in_(node_ids),
-                )
+                self._edge_query = self._edge_query.filter(id_set.in_clause(self._graph.Edge.target_id))
             if not self._include_sources:
-                self._edge_query = self._edge_query.filter(
-                    self._graph.Edge.source_id.in_(node_ids),
-                )
+                self._edge_query = self._edge_query.filter(id_set.in_clause(self._graph.Edge.source_id))
             node_filtered = True
 
         if self._node_attr_comps:
@@ -181,6 +261,9 @@ class SQLFilter(BaseFilter):
                 )
 
             self._node_query = sa.union(*nodes_query)
+
+        if any(id_set.uses_scratch_table for id_set in self._id_sets):
+            weakref.finalize(self, _close_id_sets, self._id_sets)
 
     @cache_method
     def node_ids(self) -> list[int]:
@@ -1104,19 +1187,18 @@ class SQLGraph(BaseGraph):
         """
         Get the overlaps between the nodes in `node_ids`.
         """
-        if hasattr(node_ids, "tolist"):
-            node_ids = node_ids.tolist()
-
         with Session(self._engine) as session:
             query = session.query(self.Overlap.source_id, self.Overlap.target_id)
 
-            if node_ids is not None:
-                query = query.filter(
-                    self.Overlap.source_id.in_(node_ids),
-                    self.Overlap.target_id.in_(node_ids),
-                )
+            if node_ids is None:
+                return [[source_id, target_id] for source_id, target_id in query.all()]
 
-            return [[source_id, target_id] for source_id, target_id in query.all()]
+            with _SqlIdSet(self, node_ids, occurrences=2) as id_set:
+                query = query.filter(
+                    id_set.in_clause(self.Overlap.source_id),
+                    id_set.in_clause(self.Overlap.target_id),
+                )
+                return [[source_id, target_id] for source_id, target_id in query.all()]
 
     def has_overlaps(self) -> bool:
         """
@@ -1806,6 +1888,35 @@ class SQLGraph(BaseGraph):
 
         return chunk_size
 
+    def _create_id_scratch_table(self, ids: Sequence[int]) -> sa.Table:
+        """Create a uniquely-named helper table holding ``ids``.
+
+        Used to work around SQL bound-variable limits when filtering by large
+        ``IN (...)`` lists: callers replace ``col.in_(ids)`` with
+        ``col.in_(sa.select(table.c.id))``. The caller owns the returned table
+        and is responsible for dropping it.
+        """
+        if hasattr(ids, "tolist"):
+            ids = ids.tolist()
+        unique_ids = list({int(v) for v in ids})
+
+        name = f"_tracksdata_ids_{uuid.uuid4().hex}"
+        table = sa.Table(
+            name,
+            sa.MetaData(),
+            sa.Column("id", sa.BigInteger, primary_key=True),
+        )
+        table.create(self._engine)
+
+        chunk_size = max(1, self._sql_chunk_size())
+        with self._engine.begin() as conn:
+            for i in range(0, len(unique_ids), chunk_size):
+                conn.execute(
+                    table.insert(),
+                    [{"id": v} for v in unique_ids[i : i + chunk_size]],
+                )
+        return table
+
     def _update_table(
         self,
         table_class: type[DeclarativeBase],
@@ -2021,18 +2132,18 @@ class SQLGraph(BaseGraph):
                 return int(session.execute(stmt).scalar())
 
         stmt = sa.select(edge_key_col, sa.func.count()).group_by(edge_key_col)
-        if node_ids is not None:
-            stmt = stmt.where(edge_key_col.in_(node_ids))
-
-        with Session(self._engine) as session:
-            # get the number of edges for each using group by and count
-            degree = dict(session.execute(stmt).all())
 
         if node_ids is None:
-            # this is necessary to make sure it's the same order as node_ids
+            with Session(self._engine) as session:
+                degree = dict(session.execute(stmt).all())
+            # preserve the canonical node ordering
             return [degree.get(node_id, 0) for node_id in self.node_ids()]
 
-        return [degree.get(node_id, 0) for node_id in node_ids]
+        with _SqlIdSet(self, node_ids, occurrences=1) as id_set:
+            stmt = stmt.where(id_set.in_clause(edge_key_col))
+            with Session(self._engine) as session:
+                degree = dict(session.execute(stmt).all())
+            return [degree.get(node_id, 0) for node_id in id_set.ids]
 
     def in_degree(self, node_ids: list[int] | int | None = None) -> list[int] | int:
         """
