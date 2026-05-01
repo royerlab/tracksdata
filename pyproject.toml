@@ -50,6 +50,12 @@ dependencies = [
   "bidict>=0.23.1",
   "geff>=1.1.3.1.1",
   "psygnal>=0.14.0",
+  # zarr 2.x's util.py imports cbuffer_sizes/cbuffer_metainfo from
+  # numcodecs.blosc, which numcodecs >= 0.16 removed. On Python 3.10 the
+  # resolver is forced to numcodecs <= 0.13 (numcodecs >= 0.14 needs
+  # Python >= 3.11), so zarr 2.18 still imports there. On Python >= 3.11
+  # nothing prevents the broken pair, so require zarr >= 3 explicitly.
+  "zarr>=3; python_version >= '3.11'",
 ]
 
 [project.optional-dependencies]
