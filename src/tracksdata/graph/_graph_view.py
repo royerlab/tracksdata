@@ -448,11 +448,18 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         if node_id not in self._external_to_local:
             raise ValueError(f"Node {node_id} does not exist in the graph.")
 
-        if is_signal_on(self.node_removed):
+        # Capture signal state once so a slot connecting mid-call cannot reference
+        # an unbound `old_attrs`.
+        view_signal_on = is_signal_on(self.node_removed)
+        root_signal_on = is_signal_on(self._root.node_removed)
+        if view_signal_on or root_signal_on:
             old_attrs = self.nodes[node_id].to_dict()
 
-        # Remove from root graph first, because removing bounding box requires node attrs
-        self._root.remove_node(node_id)
+        # Remove from root graph first, because removing bounding box requires node attrs.
+        # Block root's signal so it doesn't fire while the view is still in old state;
+        # re-emit at the end after both root and view are consistent.
+        with self._root.node_removed.blocked():
+            self._root.remove_node(node_id)
 
         if self.sync:
             # Get the local node ID and remove from local graph
@@ -478,7 +485,9 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         else:
             self._out_of_sync = True
 
-        if is_signal_on(self.node_removed):
+        if root_signal_on:
+            self._root.node_removed.emit(node_id, old_attrs)
+        if view_signal_on:
             self.node_removed.emit(node_id, old_attrs)
 
     def add_edge(
@@ -685,8 +694,11 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         else:
             node_ids = list(node_ids)
 
-        signal_on = is_signal_on(self.node_updated)
-        if signal_on:
+        # Capture signal state once so slots connecting mid-call cannot toggle behavior
+        # between the old/new attr captures or between the two emit blocks.
+        view_signal_on = is_signal_on(self.node_updated)
+        root_signal_on = is_signal_on(self._root.node_updated)
+        if view_signal_on or root_signal_on:
             existing_keys = set(self._root.node_attr_keys(return_ids=True))
             signal_keys = list(
                 dict.fromkeys(
@@ -709,10 +721,13 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
                 .rows_by_key(key=DEFAULT_ATTR_KEYS.NODE_ID, named=True, unique=True, include_key=True)
             )
 
-        self._root.update_node_attrs(
-            node_ids=node_ids,
-            attrs=attrs,
-        )
+        # Block root signal so it doesn't fire while the view is still in old state;
+        # re-emit at the end after both root and view are consistent.
+        with self._root.node_updated.blocked():
+            self._root.update_node_attrs(
+                node_ids=node_ids,
+                attrs=attrs,
+            )
         # because attributes are passed by reference, we need don't need if both are rustworkx graphs
         if not self._is_root_rx_graph:
             if self.sync:
@@ -724,19 +739,27 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
             else:
                 self._out_of_sync = True
 
-        if signal_on:
+        if view_signal_on or root_signal_on:
             new_attrs_by_id = (
                 self._root.filter(node_ids=node_ids)
                 .node_attrs(attr_keys=signal_keys)
                 .rows_by_key(key=DEFAULT_ATTR_KEYS.NODE_ID, named=True, unique=True, include_key=True)
             )
             old_attrs_by_id = cast(dict[int, dict[str, Any]], old_attrs_by_id)  # for mypy
-            for node_id in node_ids:
-                self.node_updated.emit(
-                    node_id,
-                    old_attrs_by_id[node_id],
-                    new_attrs_by_id[node_id],
-                )
+            if root_signal_on:
+                for node_id in node_ids:
+                    self._root.node_updated.emit(
+                        node_id,
+                        old_attrs_by_id[node_id],
+                        new_attrs_by_id[node_id],
+                    )
+            if view_signal_on:
+                for node_id in node_ids:
+                    self.node_updated.emit(
+                        node_id,
+                        old_attrs_by_id[node_id],
+                        new_attrs_by_id[node_id],
+                    )
 
     def update_edge_attrs(
         self,
