@@ -1106,9 +1106,12 @@ class SQLGraph(BaseGraph):
         """
         Get the overlaps between the nodes in `node_ids`.
 
-        When ``node_ids`` is provided, the query is split into chunks to keep
-        the number of bound parameters below the backend's limit (notably
-        SQLite's ``SQLITE_MAX_VARIABLE_NUMBER``).
+        When ``node_ids`` is provided, the query is split via
+        :meth:`_chunked_sa_read` to keep the number of bound parameters below
+        the backend's limit (notably SQLite's ``SQLITE_MAX_VARIABLE_NUMBER``).
+        Only the source side is constrained per-chunk; the target side is
+        filtered in Polars afterwards to avoid a quadratic blow-up of bound
+        parameters.
         """
         if hasattr(node_ids, "tolist"):
             node_ids = node_ids.tolist()
@@ -1122,27 +1125,15 @@ class SQLGraph(BaseGraph):
             if len(node_ids) == 0:
                 return []
 
-            # Split the IN(...) clause into chunks. Each chunk uses 2 * chunk_size
-            # bound parameters (one IN clause per source/target column), so we halve
-            # the chunk size to stay below the backend's limit.
-            chunk_size = max(1, self._sql_chunk_size() // 2)
-            node_id_set = set(node_ids)
-            results: list[list[int]] = []
-            seen: set[tuple[int, int]] = set()
-            for i in range(0, len(node_ids), chunk_size):
-                chunk = node_ids[i : i + chunk_size]
-                # Constrain the source side via the chunk and filter the target side
-                # in Python to avoid an O(N^2) blow-up of bound parameters.
-                query = base_query.filter(self.Overlap.source_id.in_(chunk))
-                for source_id, target_id in query.all():
-                    if target_id not in node_id_set:
-                        continue
-                    key = (source_id, target_id)
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    results.append([source_id, target_id])
-            return results
+            df = self._chunked_sa_read(
+                session,
+                lambda chunk: base_query.filter(self.Overlap.source_id.in_(chunk)),
+                node_ids,
+                self.Overlap,
+            )
+
+        df = df.filter(pl.col("target_id").is_in(node_ids))
+        return [[source_id, target_id] for source_id, target_id in df.iter_rows()]
 
     def has_overlaps(self) -> bool:
         """
