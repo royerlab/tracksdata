@@ -30,9 +30,7 @@ def test_view_node_signals_fire_with_consistent_state(graph_backend: BaseGraph) 
 
     def make_slot(source: str, signal: str):
         def slot(node_id: int, *_args) -> None:
-            observations.append(
-                (source, signal, node_id, graph_backend.has_node(node_id), view.has_node(node_id))
-            )
+            observations.append((source, signal, node_id, graph_backend.has_node(node_id), view.has_node(node_id)))
 
         return slot
 
@@ -45,12 +43,9 @@ def test_view_node_signals_fire_with_consistent_state(graph_backend: BaseGraph) 
     view.remove_node(new_id)
 
     inconsistent = [obs for obs in observations if obs[3] != obs[4]]
-    assert not inconsistent, (
-        "Listener saw root and view in inconsistent state at signal time:\n"
-        + "\n".join(
-            f"  {source}.{signal}(node={nid}): root.has_node={rh}, view.has_node={vh}"
-            for source, signal, nid, rh, vh in inconsistent
-        )
+    assert not inconsistent, "Listener saw root and view in inconsistent state at signal time:\n" + "\n".join(
+        f"  {source}.{signal}(node={nid}): root.has_node={rh}, view.has_node={vh}"
+        for source, signal, nid, rh, vh in inconsistent
     )
 
 
@@ -87,7 +82,6 @@ def test_view_update_node_attrs_signal_fires_with_consistent_value(graph_backend
     assert not inconsistent, (
         "Listener saw root and view holding different attribute values at signal time:\n"
         + "\n".join(
-            f"  {source}.node_updated(node={nid}): root.x={rx}, view.x={vx}"
-            for source, nid, rx, vx in inconsistent
+            f"  {source}.node_updated(node={nid}): root.x={rx}, view.x={vx}" for source, nid, rx, vx in inconsistent
         )
     )
