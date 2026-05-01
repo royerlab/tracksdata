@@ -1143,6 +1143,165 @@ def test_graph_view_remove_edge(graph_backend: BaseGraph) -> None:
         view.remove_edge()
 
 
+def test_remove_node_from_view_basic(graph_backend: BaseGraph) -> None:
+    """`remove_node_from_view` drops the node from the view but leaves the root untouched."""
+    graph_backend.add_node_attr_key("x", pl.Float64)
+    graph_backend.add_edge_attr_key("weight", pl.Float64)
+
+    n0 = graph_backend.add_node({"t": 0, "x": 0.0})
+    n1 = graph_backend.add_node({"t": 1, "x": 1.0})
+    n2 = graph_backend.add_node({"t": 2, "x": 2.0})
+    graph_backend.add_edge(n0, n1, {"weight": 0.2})
+    graph_backend.add_edge(n1, n2, {"weight": 0.8})
+
+    view = graph_backend.filter().subgraph()
+    assert isinstance(view, GraphView)
+
+    view.remove_node_from_view(n1)
+
+    # View no longer has the node or its incident edges
+    assert n1 not in view.node_ids()
+    assert not view.has_node(n1)
+    assert not view.has_edge(n0, n1)
+    assert not view.has_edge(n1, n2)
+
+    # Edge bookkeeping is cleaned in the view
+    view_edge_root_ids = set(view._edge_map_to_root.values())
+    assert graph_backend.edge_id(n0, n1) not in view_edge_root_ids
+    assert graph_backend.edge_id(n1, n2) not in view_edge_root_ids
+
+    # Root is untouched
+    assert n1 in graph_backend.node_ids()
+    assert graph_backend.has_node(n1)
+    assert graph_backend.has_edge(n0, n1)
+    assert graph_backend.has_edge(n1, n2)
+
+
+def test_remove_node_from_view_traversals_still_work(graph_backend: BaseGraph) -> None:
+    """`_out_of_sync` is not set: successors/predecessors still work after view-only removal."""
+    graph_backend.add_node_attr_key("x", pl.Float64)
+    n0 = graph_backend.add_node({"t": 0, "x": 0.0})
+    n1 = graph_backend.add_node({"t": 1, "x": 1.0})
+    n2 = graph_backend.add_node({"t": 2, "x": 2.0})
+    graph_backend.add_edge(n0, n1, {})
+    graph_backend.add_edge(n1, n2, {})
+
+    view = graph_backend.filter().subgraph()
+    view.remove_node_from_view(n1)
+
+    assert view._out_of_sync is False
+    # Should not raise
+    view.successors(n0)
+    view.predecessors(n2)
+
+
+def test_remove_node_from_view_signals(graph_backend: BaseGraph) -> None:
+    """Only the view's `node_removed` fires; the root's signal does not."""
+    graph_backend.add_node_attr_key("x", pl.Float64)
+    n0 = graph_backend.add_node({"t": 0, "x": 0.0})
+    n1 = graph_backend.add_node({"t": 1, "x": 1.0})
+
+    view = graph_backend.filter().subgraph()
+
+    view_calls: list[tuple[int, dict]] = []
+    root_calls: list[tuple[int, dict]] = []
+    view.node_removed.connect(lambda nid, attrs: view_calls.append((nid, attrs)))
+    graph_backend.node_removed.connect(lambda nid, attrs: root_calls.append((nid, attrs)))
+
+    view.remove_node_from_view(n1)
+
+    assert len(root_calls) == 0
+    assert len(view_calls) == 1
+    assert view_calls[0][0] == n1
+    assert view_calls[0][1]["x"] == 1.0
+    # Root still has the node — the view-only removal did not touch it
+    assert graph_backend.has_node(n1)
+    # n0 is unaffected
+    _ = n0
+
+
+def test_remove_node_from_view_validation(graph_backend: BaseGraph) -> None:
+    """Missing node raises ValueError; sync=False raises RuntimeError."""
+    graph_backend.add_node_attr_key("x", pl.Float64)
+    n0 = graph_backend.add_node({"t": 0, "x": 0.0})
+
+    view = graph_backend.filter().subgraph()
+
+    with pytest.raises(ValueError, match=r"Node 999999 does not exist in the graph\."):
+        view.remove_node_from_view(999999)
+
+    view.sync = False
+    with pytest.raises(RuntimeError, match=r"remove_node_from_view requires sync=True"):
+        view.remove_node_from_view(n0)
+
+
+def test_remove_edge_from_view_basic(graph_backend: BaseGraph) -> None:
+    """`remove_edge_from_view` drops the edge from the view but leaves the root edge intact."""
+    graph_backend.add_node_attr_key("x", pl.Float64)
+    graph_backend.add_edge_attr_key("weight", pl.Float64)
+
+    n0 = graph_backend.add_node({"t": 0, "x": 0.0})
+    n1 = graph_backend.add_node({"t": 1, "x": 1.0})
+    n2 = graph_backend.add_node({"t": 2, "x": 2.0})
+    graph_backend.add_edge(n0, n1, {"weight": 0.2})
+    graph_backend.add_edge(n1, n2, {"weight": 0.8})
+
+    # Remove by endpoints
+    view = graph_backend.filter().subgraph()
+    view.remove_edge_from_view(n0, n1)
+    assert not view.has_edge(n0, n1)
+    assert graph_backend.has_edge(n0, n1)
+    # Other edge unaffected
+    assert view.has_edge(n1, n2)
+
+    # Remove by edge_id on a fresh view
+    view2 = graph_backend.filter().subgraph()
+    eid = graph_backend.edge_id(n1, n2)
+    view2.remove_edge_from_view(edge_id=eid)
+    assert not view2.has_edge(n1, n2)
+    assert graph_backend.has_edge(n1, n2)
+
+
+def test_remove_edge_from_view_traversals_still_work(graph_backend: BaseGraph) -> None:
+    """`_out_of_sync` stays False after view-only edge removal."""
+    graph_backend.add_node_attr_key("x", pl.Float64)
+    n0 = graph_backend.add_node({"t": 0, "x": 0.0})
+    n1 = graph_backend.add_node({"t": 1, "x": 1.0})
+    graph_backend.add_edge(n0, n1, {})
+
+    view = graph_backend.filter().subgraph()
+    view.remove_edge_from_view(n0, n1)
+
+    assert view._out_of_sync is False
+    view.successors(n0)
+    view.predecessors(n1)
+
+
+def test_remove_edge_from_view_validation(graph_backend: BaseGraph) -> None:
+    """Bad inputs raise ValueError; sync=False raises RuntimeError."""
+    graph_backend.add_node_attr_key("x", pl.Float64)
+    n0 = graph_backend.add_node({"t": 0, "x": 0.0})
+    n1 = graph_backend.add_node({"t": 1, "x": 1.0})
+    graph_backend.add_edge(n0, n1, {})
+
+    view = graph_backend.filter().subgraph()
+
+    with pytest.raises(ValueError, match=r"Provide either edge_id or both source_id and target_id\."):
+        view.remove_edge_from_view()
+
+    # Non-existent endpoints
+    with pytest.raises(ValueError, match=rf"Edge {n1}->{n0} does not exist in the graph\."):
+        view.remove_edge_from_view(n1, n0)
+
+    # Edge id not in view
+    with pytest.raises(ValueError, match=r"Edge 999999 does not exist in the view\."):
+        view.remove_edge_from_view(edge_id=999999)
+
+    view.sync = False
+    with pytest.raises(RuntimeError, match=r"remove_edge_from_view requires sync=True"):
+        view.remove_edge_from_view(n0, n1)
+
+
 @parametrize_subgraph_tests
 def test_has_node(graph_backend: BaseGraph, use_subgraph: bool) -> None:
     """Test has_node functionality on both original graphs and subgraphs."""
