@@ -2218,23 +2218,36 @@ def test_nodes_interface(graph_backend: BaseGraph) -> None:
     assert graph_backend.nodes[node2].to_dict() == {"t": 1, "x": 0, "y": 5}
     assert graph_backend.nodes[node3].to_dict() == {"t": 2, "x": -1, "y": -1}
 
+    # non-scalar value: setting an array attribute via the single-node interface
+    graph_backend.add_node_attr_key("pos", pl.Array(pl.Float64, 2), default_value=np.array([0.0, 0.0]))
+    graph_backend.nodes[node1]["pos"] = np.array([1.5, 2.5])
+    graph_backend.nodes[node2]["pos"] = np.array([3.0, 4.0])
+    assert list(graph_backend.nodes[node1]["pos"]) == [1.5, 2.5]
+    assert list(graph_backend.nodes[node2]["pos"]) == [3.0, 4.0]
+    assert list(graph_backend.nodes[node3]["pos"]) == [0.0, 0.0]
+
 
 def test_edges_interface(graph_backend: BaseGraph) -> None:
     """Test edge attribute access using graph.edges[edge_id]['attr'] syntax."""
     graph_backend.add_node_attr_key("x", dtype=pl.Int64, default_value=-1)
     graph_backend.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
     graph_backend.add_edge_attr_key("score", dtype=pl.Float64, default_value=-1.0)
+    graph_backend.add_edge_attr_key("vector", pl.Array(pl.Float64, 2), default_value=np.array([0.0, 0.0]))
 
     # Create nodes and edges
     node1 = graph_backend.add_node({"t": 0, "x": 1})
     node2 = graph_backend.add_node({"t": 1, "x": 2})
     node3 = graph_backend.add_node({"t": 2, "x": 3})
 
-    edge1 = graph_backend.add_edge(node1, node2, {"weight": 0.5, "score": -1.0})
-    graph_backend.add_edge(node2, node3, {"weight": 0.8, "score": -1.0})
+    edge1 = graph_backend.add_edge(node1, node2, {"weight": 0.5, "score": -1.0, "vector": np.array([0.0, 0.0])})
+    graph_backend.add_edge(node2, node3, {"weight": 0.8, "score": -1.0, "vector": np.array([0.0, 0.0])})
 
     # Test getting edge attributes
     assert graph_backend.edges[edge1]["weight"] == 0.5
+
+    # non-scalar value: setting an array attribute via the single-edge interface
+    graph_backend.edges[edge1]["vector"] = np.array([1.0, 2.0])
+    assert list(graph_backend.edges[edge1]["vector"]) == [1.0, 2.0]
 
 
 def test_custom_indices(graph_backend: BaseGraph) -> None:

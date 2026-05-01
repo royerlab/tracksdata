@@ -2180,7 +2180,7 @@ class NodeInterface:
         return self._graph.filter(node_ids=[self._node_id]).node_attrs(attr_keys=[key])[key].item()
 
     def __setitem__(self, key: str, value: Any) -> None:
-        return self._graph.update_node_attrs(attrs={key: value}, node_ids=[self._node_id])
+        return self._graph.update_node_attrs(attrs={key: [value]}, node_ids=[self._node_id])
 
     def __str__(self) -> str:
         node_attr = self._graph.filter(node_ids=[self._node_id]).node_attrs()
@@ -2254,7 +2254,7 @@ class EdgeInterface:
         value : Any
             The value to set.
         """
-        return self._graph.update_edge_attrs(attrs={key: value}, edge_ids=[self._edge_id])
+        return self._graph.update_edge_attrs(attrs={key: [value]}, edge_ids=[self._edge_id])
 
     def __str__(self) -> str:
         df = self._graph.edge_attrs()
