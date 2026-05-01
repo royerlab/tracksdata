@@ -2906,3 +2906,221 @@ def test_dividing_nodes(graph_backend: BaseGraph) -> None:
     graph_backend.add_edge(node1, node5, {})
 
     assert set(graph_backend.dividing_nodes()) == {node0, node1}
+
+
+# ---------------------------------------------------------------------------
+# SQLGraph.from_other specialization (issue #285)
+# ---------------------------------------------------------------------------
+
+
+def _populate_sql_graph(graph: SQLGraph, n_per_time: int = 4, n_times: int = 3) -> None:
+    """Populate a graph with nodes, edges, and overlaps for round-trip testing."""
+    graph.add_node_attr_key("x", dtype=pl.Float64)
+    graph.add_node_attr_key("label", dtype=pl.String, default_value="?")
+    graph.add_node_attr_key("blob", dtype=pl.Object, default_value=None)
+    graph.add_edge_attr_key("weight", dtype=pl.Float64, default_value=0.0)
+    graph.add_edge_attr_key("kind", dtype=pl.String, default_value="forward")
+
+    nodes_per_t: list[list[int]] = []
+    for t in range(n_times):
+        ids = []
+        for k in range(n_per_time):
+            node_id = graph.add_node(
+                {
+                    "t": t,
+                    "x": float(t * 10 + k),
+                    "label": f"t{t}_n{k}",
+                    "blob": {"t": t, "k": k},
+                }
+            )
+            ids.append(node_id)
+        nodes_per_t.append(ids)
+
+    # Edges between consecutive time points (full bipartite for some, sparse for others).
+    for t in range(n_times - 1):
+        for src in nodes_per_t[t]:
+            for dst in nodes_per_t[t + 1]:
+                graph.add_edge(
+                    src,
+                    dst,
+                    {"weight": float(src + dst), "kind": "forward" if src <= dst else "skip"},
+                )
+
+    # Overlaps within each time point.
+    for ids in nodes_per_t:
+        for i in range(len(ids)):
+            for j in range(i + 1, len(ids)):
+                graph.add_overlap(ids[i], ids[j])
+
+
+def _assert_graphs_equivalent(src: BaseGraph, dst: BaseGraph) -> None:
+    """Assert that two graphs match in structure, schemas, and overlaps."""
+    assert dst.num_nodes() == src.num_nodes()
+    assert dst.num_edges() == src.num_edges()
+    assert set(dst.node_attr_keys()) == set(src.node_attr_keys())
+    assert set(dst.edge_attr_keys()) == set(src.edge_attr_keys())
+    assert dst._node_attr_schemas() == src._node_attr_schemas()
+    assert dst._edge_attr_schemas() == src._edge_attr_schemas()
+    assert dst.metadata == src.metadata
+
+    # Compare node payloads keyed on (t, x) which is unique in our fixtures.
+    src_nodes = src.node_attrs().sort([DEFAULT_ATTR_KEYS.T, "x"])
+    dst_nodes = dst.node_attrs().sort([DEFAULT_ATTR_KEYS.T, "x"])
+    assert src_nodes.select(["t", "x", "label"]).equals(dst_nodes.select(["t", "x", "label"]))
+
+    # Edge attributes (ignoring auto-generated edge_id ordering).
+    src_edges = src.edge_attrs(attr_keys=["weight", "kind"]).sort(["weight", "kind"])
+    dst_edges = dst.edge_attrs(attr_keys=["weight", "kind"]).sort(["weight", "kind"])
+    assert src_edges.select(["weight", "kind"]).equals(dst_edges.select(["weight", "kind"]))
+
+    src_overlaps = {tuple(sorted(o)) for o in src.overlaps()}
+    dst_overlaps = {tuple(sorted(o)) for o in dst.overlaps()}
+    assert src_overlaps == dst_overlaps
+
+
+def test_sql_from_other_uses_attach_dump_for_sqlite(tmp_path: Path) -> None:
+    """SQLGraph→SQLGraph on disk should use the ATTACH-based fast path and skip
+    the generic BaseGraph copy.
+    """
+    src_db = tmp_path / "src.db"
+    dst_db = tmp_path / "dst.db"
+
+    src = SQLGraph(drivername="sqlite", database=str(src_db))
+    _populate_sql_graph(src, n_per_time=3, n_times=4)
+    src.metadata.update(experiment="issue-285")
+
+    # Spy on the BaseGraph.from_other to confirm we don't fall back to it.
+    from tracksdata.graph import _base_graph as _bg
+
+    base_calls: list[tuple] = []
+    original = _bg.BaseGraph.from_other.__func__
+
+    def _tracking(cls, other, **kwargs):  # type: ignore[no-untyped-def]
+        base_calls.append((cls, type(other).__name__))
+        return original(cls, other, **kwargs)
+
+    _bg.BaseGraph.from_other = classmethod(_tracking)
+    try:
+        dst = SQLGraph.from_other(src, drivername="sqlite", database=str(dst_db))
+    finally:
+        _bg.BaseGraph.from_other = classmethod(original)
+
+    assert base_calls == [], f"specialized path should bypass BaseGraph.from_other, got {base_calls}"
+    assert dst_db.exists()
+    _assert_graphs_equivalent(src, dst)
+    dst._engine.dispose()
+
+
+def test_sql_from_other_subgraph_view_with_overlaps(tmp_path: Path) -> None:
+    """Reproduce issue #285: filtering a SQLGraph then ``from_other`` to a new
+    on-disk SQLGraph must work even when the selection contains many node ids
+    and overlaps.
+    """
+    src_db = tmp_path / "src.db"
+    dst_db = tmp_path / "dst.db"
+
+    src = SQLGraph(drivername="sqlite", database=str(src_db))
+    src.add_node_attr_key("verification_status", dtype=pl.Int32, default_value=0)
+
+    # Force enough nodes to push the overlap query past sqlite's variable limit
+    # if it were submitted as a single IN(...) clause (default 999).
+    n_per_time = 80
+    n_times = 30
+    expected_verified = 0
+    for t in range(n_times):
+        for k in range(n_per_time):
+            status = 1 if (t + k) % 2 == 0 else 0
+            node_id = src.add_node({"t": t, "verification_status": status})
+            if status == 1:
+                expected_verified += 1
+            # Add a few overlaps within each time point.
+            if k > 0:
+                prev = node_id - 1
+                src.add_overlap(prev, node_id)
+
+    assert expected_verified > 999, "test must exceed sqlite's variable limit to be meaningful"
+
+    subgraph = src.filter(NodeAttr("verification_status") == 1).subgraph()
+    dst = SQLGraph.from_other(subgraph, drivername="sqlite", database=str(dst_db))
+
+    assert dst.num_nodes() == expected_verified
+    # Only overlaps between two verified nodes survive.
+    expected_overlaps = {
+        tuple(sorted(o))
+        for o in src.overlaps()
+        if all(src.filter(node_ids=[nid]).node_attrs(attr_keys=["verification_status"]).item(0, 0) == 1 for nid in o)
+    }
+    actual_overlaps = {tuple(sorted(o)) for o in dst.overlaps()}
+    assert actual_overlaps == expected_overlaps
+    dst._engine.dispose()
+
+
+def test_sql_from_other_full_copy_preserves_node_ids(tmp_path: Path) -> None:
+    """The fast SQLite path must preserve node ids for full copies."""
+    src_db = tmp_path / "src.db"
+    dst_db = tmp_path / "dst.db"
+
+    src = SQLGraph(drivername="sqlite", database=str(src_db))
+    _populate_sql_graph(src, n_per_time=2, n_times=3)
+
+    dst = SQLGraph.from_other(src, drivername="sqlite", database=str(dst_db))
+
+    assert sorted(dst.node_ids()) == sorted(src.node_ids())
+    dst._engine.dispose()
+
+
+def test_sql_from_other_falls_back_for_in_memory_destination() -> None:
+    """`:memory:` destinations cannot be ATTACHed across connections, so the
+    generic path must still be used.
+    """
+    src = SQLGraph(drivername="sqlite", database=":memory:")
+    _populate_sql_graph(src, n_per_time=2, n_times=2)
+
+    dst = SQLGraph.from_other(
+        src,
+        drivername="sqlite",
+        database=":memory:",
+        engine_kwargs={"connect_args": {"check_same_thread": False}},
+    )
+
+    _assert_graphs_equivalent(src, dst)
+
+
+def test_sql_from_other_falls_back_for_non_sql_source(tmp_path: Path) -> None:
+    """A non-SQL source must still produce a populated SQLGraph via the base path."""
+    src = RustWorkXGraph()
+    src.add_node_attr_key("x", dtype=pl.Float64)
+    n0 = src.add_node({"t": 0, "x": 1.0})
+    n1 = src.add_node({"t": 1, "x": 2.0})
+    src.add_edge(n0, n1, {})
+    src.add_overlap(n0, n0)  # self-overlap is allowed by the API
+
+    dst = SQLGraph.from_other(src, drivername="sqlite", database=str(tmp_path / "dst.db"))
+    assert dst.num_nodes() == src.num_nodes()
+    assert dst.num_edges() == src.num_edges()
+    assert {tuple(sorted(o)) for o in dst.overlaps()} == {tuple(sorted(o)) for o in src.overlaps()}
+    dst._engine.dispose()
+
+
+def test_sql_overlaps_chunks_large_node_id_filter(tmp_path: Path) -> None:
+    """`SQLGraph.overlaps(node_ids=...)` must not hit the bound-parameter limit."""
+    db_path = tmp_path / "g.db"
+    graph = SQLGraph(drivername="sqlite", database=str(db_path))
+
+    # Add enough nodes for the IN(...) clause to overflow if not chunked.
+    pairs = []
+    for t in range(20):
+        last = None
+        for _ in range(120):
+            current = graph.add_node({"t": t})
+            if last is not None:
+                graph.add_overlap(last, current)
+                pairs.append(tuple(sorted((last, current))))
+            last = current
+
+    all_node_ids = graph.node_ids()
+    assert len(all_node_ids) > 999  # exceed the default sqlite variable limit
+
+    overlaps = graph.overlaps(node_ids=all_node_ids)
+    assert {tuple(sorted(o)) for o in overlaps} == set(pairs)
+    graph._engine.dispose()
