@@ -43,10 +43,11 @@ def test_view_node_signals_fire_with_consistent_state(graph_backend: BaseGraph) 
     view.remove_node(new_id)
 
     inconsistent = [obs for obs in observations if obs[3] != obs[4]]
-    assert not inconsistent, "Listener saw root and view in inconsistent state at signal time:\n" + "\n".join(
+    detail = "\n".join(
         f"  {source}.{signal}(node={nid}): root.has_node={rh}, view.has_node={vh}"
         for source, signal, nid, rh, vh in inconsistent
     )
+    assert not inconsistent, f"Listener saw root and view in inconsistent state at signal time:\n{detail}"
 
 
 def test_view_update_node_attrs_signal_fires_with_consistent_value(graph_backend: BaseGraph) -> None:
@@ -79,9 +80,7 @@ def test_view_update_node_attrs_signal_fires_with_consistent_value(graph_backend
     view.update_node_attrs(attrs={"x": 5.0}, node_ids=[node_id])
 
     inconsistent = [obs for obs in observations if obs[2] != obs[3]]
-    assert not inconsistent, (
-        "Listener saw root and view holding different attribute values at signal time:\n"
-        + "\n".join(
-            f"  {source}.node_updated(node={nid}): root.x={rx}, view.x={vx}" for source, nid, rx, vx in inconsistent
-        )
+    detail = "\n".join(
+        f"  {source}.node_updated(node={nid}): root.x={rx}, view.x={vx}" for source, nid, rx, vx in inconsistent
     )
+    assert not inconsistent, f"Listener saw root and view holding different attribute values at signal time:\n{detail}"
