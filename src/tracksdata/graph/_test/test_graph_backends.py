@@ -225,6 +225,20 @@ def test_filter_nodes_by_membership(graph_backend: BaseGraph) -> None:
     assert set(np_members) == {node_b}
 
 
+def test_filter_nodes_by_struct_field(graph_backend: BaseGraph) -> None:
+    graph_backend.add_node_attr_key("measurements", pl.Struct({"score": pl.Int64, "name": pl.String}))
+
+    node_a = graph_backend.add_node({"t": 0, "measurements": {"score": 1, "name": "A"}})
+    node_b = graph_backend.add_node({"t": 1, "measurements": {"score": 2, "name": "B"}})
+    node_c = graph_backend.add_node({"t": 2, "measurements": {"score": 1, "name": "C"}})
+
+    score_nodes = graph_backend.filter(NodeAttr("measurements").struct.field("score") == 1).node_ids()
+    assert set(score_nodes) == {node_a, node_c}
+
+    name_nodes = graph_backend.filter(NodeAttr("measurements").struct.field("name") == "B").node_ids()
+    assert set(name_nodes) == {node_b}
+
+
 def test_time_points(graph_backend: BaseGraph) -> None:
     """Test retrieving time points."""
     graph_backend.add_node({"t": 0})
@@ -1704,6 +1718,24 @@ def test_sql_graph_mask_update_survives_reload(tmp_path: Path) -> None:
 
     assert isinstance(stored_mask, Mask)
     np.testing.assert_array_equal(stored_mask.mask, mask_data)
+
+
+def test_sql_graph_struct_dtype_survives_reload(tmp_path: Path) -> None:
+    db_path = tmp_path / "struct_graph.db"
+    graph = SQLGraph("sqlite", str(db_path))
+    graph.add_node_attr_key("measurements", pl.Struct({"score": pl.Int64, "label": pl.String}))
+
+    node_id = graph.add_node({"t": 0, "measurements": {"score": 7, "label": "A"}})
+    graph._engine.dispose()
+
+    reloaded = SQLGraph("sqlite", str(db_path))
+
+    df = reloaded.node_attrs(attr_keys=["measurements"])
+    assert df.schema["measurements"] == pl.Struct({"score": pl.Int64, "label": pl.String})
+    assert df["measurements"].to_list() == [{"score": 7, "label": "A"}]
+
+    ids = reloaded.filter(NodeAttr("measurements").struct.field("score") == 7).node_ids()
+    assert ids == [node_id]
 
 
 def test_sql_graph_max_id_restored_per_timepoint(tmp_path: Path) -> None:

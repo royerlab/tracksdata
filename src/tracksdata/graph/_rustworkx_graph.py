@@ -88,9 +88,30 @@ def _create_filter_func(
 ) -> Callable[[dict[str, Any]], bool]:
     LOG.info(f"Creating filter function for {attr_comps}")
 
+    def _extract_field_path(value: Any, field_path: tuple[str, ...]) -> Any:
+        for field in field_path:
+            if value is None:
+                return None
+
+            if isinstance(value, dict):
+                value = value.get(field, None)
+                continue
+
+            try:
+                value = value[field]
+            except (KeyError, IndexError, TypeError):
+                try:
+                    value = getattr(value, field)
+                except AttributeError:
+                    return None
+
+        return value
+
     def _filter(attrs: dict[str, Any]) -> bool:
         for attr_op in attr_comps:
             value = attrs.get(attr_op.column, schema[attr_op.column].default_value)
+            if attr_op.attr.field_path:
+                value = _extract_field_path(value, attr_op.attr.field_path)
             if not attr_op.op(value, attr_op.other):
                 return False
         return True

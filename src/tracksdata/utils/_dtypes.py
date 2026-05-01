@@ -395,6 +395,71 @@ _POLARS_TO_SQLALCHEMY_TYPE_MAP = {
 }
 
 
+STRUCT_FIELD_SEP = "__"
+
+
+def flatten_struct_dtype(
+    key: str,
+    dtype: pl.Struct,
+    sep: str = STRUCT_FIELD_SEP,
+) -> list[tuple[str, pl.DataType]]:
+    """Recursively return ``(flat_column_name, leaf_dtype)`` for all leaves of a struct.
+
+    Parameters
+    ----------
+    key : str
+        The root column name (or already-accumulated flat prefix for nested calls).
+    dtype : pl.Struct
+        The struct dtype to flatten.
+    sep : str
+        Separator between path components.  Defaults to ``STRUCT_FIELD_SEP``.
+
+    Examples
+    --------
+    >>> flatten_struct_dtype("m", pl.Struct({"score": pl.Int64, "label": pl.String}))
+    [("m__score", Int64), ("m__label", String)]
+    """
+    results: list[tuple[str, pl.DataType]] = []
+    for field_name, field_dtype in dtype.to_schema().items():
+        flat_key = f"{key}{sep}{field_name}"
+        if isinstance(field_dtype, pl.Struct):
+            results.extend(flatten_struct_dtype(flat_key, field_dtype, sep))
+        else:
+            results.append((flat_key, field_dtype))
+    return results
+
+
+def flatten_struct_value(
+    key: str,
+    value: dict,
+    dtype: pl.Struct,
+    sep: str = STRUCT_FIELD_SEP,
+) -> dict:
+    """Flatten a struct dict value into ``{flat_col: scalar}`` pairs.
+
+    Parameters
+    ----------
+    key : str
+        The root column name.
+    value : dict
+        The struct value to flatten (may be ``None`` or empty).
+    dtype : pl.Struct
+        The struct dtype describing the expected fields.
+    sep : str
+        Separator.  Defaults to ``STRUCT_FIELD_SEP``.
+    """
+    result: dict = {}
+    value = value or {}
+    for field_name, field_dtype in dtype.to_schema().items():
+        flat_key = f"{key}{sep}{field_name}"
+        field_val = value.get(field_name)
+        if isinstance(field_dtype, pl.Struct):
+            result.update(flatten_struct_value(flat_key, field_val or {}, field_dtype, sep))
+        else:
+            result[flat_key] = field_val
+    return result
+
+
 def polars_dtype_to_sqlalchemy_type(dtype: pl.DataType) -> TypeEngine:
     """
     Convert a polars dtype to SQLAlchemy type.
