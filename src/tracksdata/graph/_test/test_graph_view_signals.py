@@ -4,8 +4,6 @@ When a node-mutation signal fires through a GraphView, listeners attached to
 either the root or the view must see the two graphs in a consistent state.
 A listener attached to root that queries the view (or vice versa) must not
 observe ghost or stale nodes.
-
-See .claude/bugs/bugs_graphview.md (P1-1) for context.
 """
 
 import polars as pl
