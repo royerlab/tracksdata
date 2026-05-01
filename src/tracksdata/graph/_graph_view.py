@@ -2,6 +2,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, Literal, cast, overload
 
 import bidict
+import numpy as np
 import polars as pl
 import rustworkx as rx
 
@@ -737,12 +738,18 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
                 self._out_of_sync = True
 
         if view_signal_on or root_signal_on:
-            new_attrs_by_id = (
-                self._root.filter(node_ids=node_ids)
-                .node_attrs(attr_keys=signal_keys)
-                .rows_by_key(key=DEFAULT_ATTR_KEYS.NODE_ID, named=True, unique=True, include_key=True)
-            )
             old_attrs_by_id = cast(dict[int, dict[str, Any]], old_attrs_by_id)  # for mypy
+            # Derive new_attrs by overlaying applied `attrs` onto old_attrs, instead of
+            # re-querying root. Mirrors the broadcasting semantics of
+            # `_root.update_node_attrs`: scalars apply to all nodes, sequences index by
+            # position in `node_ids`.
+            new_attrs_by_id: dict[int, dict[str, Any]] = {}
+            for i, node_id in enumerate(node_ids):
+                new_attrs = dict(old_attrs_by_id[node_id])
+                for k, v in attrs.items():
+                    if k in new_attrs:
+                        new_attrs[k] = v if np.isscalar(v) else v[i]
+                new_attrs_by_id[node_id] = new_attrs
             if root_signal_on:
                 for node_id in node_ids:
                     self._root.node_updated.emit(
