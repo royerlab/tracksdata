@@ -522,9 +522,7 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         if node_id not in self._external_to_local:
             raise ValueError(f"Node {node_id} does not exist in the graph.")
         if not self.sync:
-            raise RuntimeError(
-                "remove_node_from_view requires sync=True; the local view is not maintained otherwise."
-            )
+            raise RuntimeError("remove_node_from_view requires sync=True; the local view is not maintained otherwise.")
 
         view_signal_on = is_signal_on(self.node_removed)
         if view_signal_on:
@@ -661,9 +659,7 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
             If `sync=False` — view-only removal requires a maintained local view.
         """
         if not self.sync:
-            raise RuntimeError(
-                "remove_edge_from_view requires sync=True; the local view is not maintained otherwise."
-            )
+            raise RuntimeError("remove_edge_from_view requires sync=True; the local view is not maintained otherwise.")
 
         if edge_id is None:
             if source_id is None or target_id is None:
