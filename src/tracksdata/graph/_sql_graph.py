@@ -1,6 +1,8 @@
 import binascii
+import re
 from collections.abc import Callable, Sequence
 from enum import Enum
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
 
 import cloudpickle
@@ -2120,6 +2122,12 @@ class SQLGraph(BaseGraph):
             and dst_database not in ("", ":memory:")
             and source_root._url.database not in (None, "", ":memory:")
             and source_root._url.database != dst_database
+            # The dump replays the source's CREATE statements against the
+            # destination, so the destination file must start empty.
+            and (not Path(dst_database).exists() or Path(dst_database).stat().st_size == 0)
+            # ``overwrite=True`` would have the dst constructor drop tables
+            # we just populated; let the generic path handle it.
+            and not kwargs.get("overwrite", False)
         )
 
         if sqlite_dump_eligible:
@@ -2132,6 +2140,14 @@ class SQLGraph(BaseGraph):
 
         return super().from_other(other, **kwargs)
 
+    # Match the leading ``CREATE [UNIQUE] {TABLE|INDEX} [IF NOT EXISTS]``
+    # of a SQLite DDL statement so we can splice in an attached-database
+    # qualifier (``_td_dst.``) before the object name.
+    _SQLITE_DDL_QUALIFIER = re.compile(
+        r"^(\s*CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX)\s+(?:IF\s+NOT\s+EXISTS\s+)?)",
+        re.IGNORECASE,
+    )
+
     @classmethod
     def _sqlite_table_dump(
         cls: type["SQLGraph"],
@@ -2142,62 +2158,55 @@ class SQLGraph(BaseGraph):
         kwargs: dict[str, Any],
     ) -> "SQLGraph":
         """
-        Fast SQLite-to-SQLite copy.
+        Fast SQLite-to-SQLite copy via ``ATTACH DATABASE`` + raw DDL/DML.
 
-        Steps:
+        Rather than instantiate the destination upfront and ALTER it into
+        shape, this dumps the source's schema and rows straight into the
+        destination file at the SQL level and then opens the destination
+        :class:`SQLGraph` from the populated file. The constructor's normal
+        reflection path then rebuilds the in-memory state.
 
-        1. Open the destination :class:`SQLGraph` so it materializes its
-           schema (and metadata) on disk.
-        2. Mirror any extra columns/metadata from the source.
-        3. Dispose the destination engine to release the file handle.
-        4. From the source connection, ``ATTACH`` the destination database
-           and stream rows via ``INSERT INTO _td_dst.\"X\" SELECT ... FROM
-           main.\"X\"``. When a node-id subset is given, the IDs are inserted
-           into a temporary table in chunks and used as a join filter, which
-           sidesteps SQLite's bound-parameter limit.
-        5. Re-open the destination engine and refresh derived state.
+        For filtered copies (``source_node_ids`` not ``None``) the selection
+        is materialized in a temp table so the row filter joins instead of
+        using an oversized ``IN (...)`` clause that would hit SQLite's
+        bound-parameter limit.
         """
-        dst = cls(**kwargs)
+        dst_database: str = kwargs["database"]
+        dst_path = Path(dst_database)
 
-        # Mirror schema extensions onto the destination.
-        for key, schema in other._node_attr_schemas().items():
-            if key not in dst._node_attr_schemas():
-                dst.add_node_attr_key(key, schema.dtype, schema.default_value)
-        for key, schema in other._edge_attr_schemas().items():
-            if key not in dst._edge_attr_schemas():
-                dst.add_edge_attr_key(key, schema.dtype, schema.default_value)
+        # The dump replays the source's CREATE statements against the
+        # destination, so the destination must start empty. The eligibility
+        # check in :meth:`from_other` already gates on this for the
+        # well-known cases; fall back defensively for anything else.
+        if dst_path.exists() and dst_path.stat().st_size > 0:
+            return super().from_other(other, **kwargs)
 
-        # Copy metadata before handing off to raw SQL (these go through dst._engine).
-        dst.metadata.update(other.metadata)
-        dst._private_metadata.update(other._private_metadata_for_copy())
-
-        dst_database = dst._url.database
-        dst._engine.dispose()
-
-        node_cols = list(source_root.Node.__table__.columns.keys())
-        edge_cols_no_id = [c for c in source_root.Edge.__table__.columns.keys() if c != DEFAULT_ATTR_KEYS.EDGE_ID]
-        node_cols_sql = ", ".join(f'"{c}"' for c in node_cols)
-        edge_cols_sql = ", ".join(f'"{c}"' for c in edge_cols_no_id)
-
-        chunk_size = max(1, source_root._sql_chunk_size())
-        # ATTACH does not accept bound parameters in every SQLite build; escape
-        # the path safely via single-quote doubling.
+        # ATTACH does not accept bound parameters in every SQLite build, so
+        # escape the path safely via single-quote doubling.
         attach_path = dst_database.replace("'", "''")
 
         with source_root._engine.connect() as conn:
             conn.exec_driver_sql(f"ATTACH DATABASE '{attach_path}' AS _td_dst")
             try:
+                # 1. Replicate the source schema by replaying its DDL against
+                # the attached destination. ``sqlite_master.sql`` is NULL for
+                # auto-generated objects (e.g. PK indexes), which we skip;
+                # tables are created before indexes.
+                ddl_rows = conn.exec_driver_sql(
+                    "SELECT type, sql FROM main.sqlite_master "
+                    "WHERE sql IS NOT NULL AND type IN ('table', 'index') "
+                    "ORDER BY CASE type WHEN 'table' THEN 0 ELSE 1 END"
+                ).fetchall()
+                for _type, ddl in ddl_rows:
+                    qualified = cls._SQLITE_DDL_QUALIFIER.sub(r"\g<1>_td_dst.", ddl, count=1)
+                    conn.exec_driver_sql(qualified)
+
+                # 2. Copy rows. The Metadata table is included verbatim — its
+                # SQL-private schema entries describe the columns we just
+                # cloned and so are valid for the destination as-is.
                 if source_node_ids is None:
-                    conn.exec_driver_sql(
-                        f'INSERT INTO _td_dst."Node" ({node_cols_sql}) SELECT {node_cols_sql} FROM main."Node"'
-                    )
-                    conn.exec_driver_sql(
-                        f'INSERT INTO _td_dst."Edge" ({edge_cols_sql}) SELECT {edge_cols_sql} FROM main."Edge"'
-                    )
-                    conn.exec_driver_sql(
-                        'INSERT INTO _td_dst."Overlap" (source_id, target_id) '
-                        'SELECT source_id, target_id FROM main."Overlap"'
-                    )
+                    for table_name in ("Node", "Edge", "Overlap", "Metadata"):
+                        conn.exec_driver_sql(f'INSERT INTO _td_dst."{table_name}" SELECT * FROM main."{table_name}"')
                 else:
                     node_ids = list(source_node_ids)
                     if hasattr(node_ids, "tolist"):
@@ -2206,6 +2215,7 @@ class SQLGraph(BaseGraph):
                     # filter joins instead of using an oversized IN(...) clause.
                     conn.exec_driver_sql("CREATE TEMP TABLE _td_selected (node_id INTEGER PRIMARY KEY)")
                     insert_stmt = sa.text("INSERT INTO _td_selected (node_id) VALUES (:node_id)")
+                    chunk_size = max(1, source_root._sql_chunk_size())
                     for i in range(0, len(node_ids), chunk_size):
                         batch = node_ids[i : i + chunk_size]
                         conn.execute(
@@ -2214,36 +2224,30 @@ class SQLGraph(BaseGraph):
                         )
 
                     conn.exec_driver_sql(
-                        f'INSERT INTO _td_dst."Node" ({node_cols_sql}) '
-                        f'SELECT {node_cols_sql} FROM main."Node" '
-                        f"WHERE node_id IN (SELECT node_id FROM _td_selected)"
+                        'INSERT INTO _td_dst."Node" SELECT * FROM main."Node" '
+                        "WHERE node_id IN (SELECT node_id FROM _td_selected)"
                     )
                     conn.exec_driver_sql(
-                        f'INSERT INTO _td_dst."Edge" ({edge_cols_sql}) '
-                        f'SELECT {edge_cols_sql} FROM main."Edge" '
-                        f"WHERE source_id IN (SELECT node_id FROM _td_selected) "
-                        f"AND target_id IN (SELECT node_id FROM _td_selected)"
-                    )
-                    conn.exec_driver_sql(
-                        'INSERT INTO _td_dst."Overlap" (source_id, target_id) '
-                        'SELECT source_id, target_id FROM main."Overlap" '
+                        'INSERT INTO _td_dst."Edge" SELECT * FROM main."Edge" '
                         "WHERE source_id IN (SELECT node_id FROM _td_selected) "
                         "AND target_id IN (SELECT node_id FROM _td_selected)"
                     )
+                    conn.exec_driver_sql(
+                        'INSERT INTO _td_dst."Overlap" SELECT * FROM main."Overlap" '
+                        "WHERE source_id IN (SELECT node_id FROM _td_selected) "
+                        "AND target_id IN (SELECT node_id FROM _td_selected)"
+                    )
+                    conn.exec_driver_sql('INSERT INTO _td_dst."Metadata" SELECT * FROM main."Metadata"')
                     conn.exec_driver_sql("DROP TABLE _td_selected")
 
                 conn.commit()
             finally:
                 conn.exec_driver_sql("DETACH DATABASE _td_dst")
 
-        # Re-open the destination engine pointing at the now-populated DB.
-        dst._engine = sa.create_engine(dst._url, **dst._engine_kwargs)
-        dst._define_schema(overwrite=False)
-        dst._update_max_id_per_time()
-        dst._node_attr_schemas_cache = None
-        dst._edge_attr_schemas_cache = None
-
-        return dst
+        # 3. Open the destination from the now-populated file. The standard
+        # constructor reflects the schema, restores pickled column types,
+        # and recomputes ``_max_id_per_time``.
+        return cls(**kwargs)
 
     def __getstate__(self) -> dict:
         data_dict = self.__dict__.copy()
