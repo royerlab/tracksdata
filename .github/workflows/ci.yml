@@ -62,7 +62,7 @@ jobs:
 
     - name: Install dependencies
       run: |
-        uv sync --extra test
+        uv sync --locked --extra test
 
     - name: Run tests with coverage
       uses: aganders3/headless-gui@v2
