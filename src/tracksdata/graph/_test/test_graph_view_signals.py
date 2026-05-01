@@ -54,7 +54,7 @@ def test_view_update_node_attrs_signal_fires_with_consistent_value(graph_backend
     """update_node_attrs: when either signal fires, root and view must hold
     the same value for the updated attribute.
 
-    Today this fails on backends where root and view do not share attribute
+    This used to fail on backends where root and view do not share an attribute
     storage (SQLGraph): root emits with the new value while the view's local
     rx_graph still holds the old one.
     """
