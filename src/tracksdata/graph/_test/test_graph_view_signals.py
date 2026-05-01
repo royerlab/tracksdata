@@ -16,7 +16,7 @@ def test_view_node_signals_fire_with_consistent_state(graph_backend: BaseGraph) 
     """add_node / remove_node: when either signal fires (on root or view), the
     two graphs must agree on `has_node`.
 
-    Today this fails on `remove_node` because `GraphView.remove_node` does not
+    Today used to fail on `remove_node` because `GraphView.remove_node` does not
     block the root signal — root emits while the view's local rx_graph still
     holds the node.
     """
