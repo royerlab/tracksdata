@@ -1,4 +1,5 @@
 import datetime as dt
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -2977,6 +2978,9 @@ def _assert_graphs_equivalent(src: BaseGraph, dst: BaseGraph) -> None:
     dst_overlaps = {tuple(sorted(o)) for o in dst.overlaps()}
     assert src_overlaps == dst_overlaps
 
+    # Node ids are preserved because both backends support custom indices.
+    assert sorted(dst.node_ids()) == sorted(src.node_ids())
+
 
 def test_sql_from_other_uses_attach_dump_for_sqlite(tmp_path: Path) -> None:
     """SQLGraph→SQLGraph on disk should use the ATTACH-based fast path and skip
@@ -3011,15 +3015,41 @@ def test_sql_from_other_uses_attach_dump_for_sqlite(tmp_path: Path) -> None:
     dst._engine.dispose()
 
 
-def test_sql_from_other_subgraph_view_with_overlaps(tmp_path: Path) -> None:
-    """Reproduce issue #285: filtering a SQLGraph then ``from_other`` to a new
+def _make_sql_disk_source(tmp_path: Path) -> BaseGraph:
+    return SQLGraph(drivername="sqlite", database=str(tmp_path / "src.db"))
+
+
+def _make_sql_memory_source(tmp_path: Path) -> BaseGraph:
+    return SQLGraph(
+        drivername="sqlite",
+        database=":memory:",
+        engine_kwargs={"connect_args": {"check_same_thread": False}},
+    )
+
+
+def _make_rustworkx_source(tmp_path: Path) -> BaseGraph:
+    return RustWorkXGraph()
+
+
+@pytest.mark.parametrize(
+    "make_source",
+    [
+        pytest.param(_make_sql_disk_source, id="sql-disk"),
+        pytest.param(_make_sql_memory_source, id="sql-memory"),
+        pytest.param(_make_rustworkx_source, id="rustworkx"),
+    ],
+)
+def test_sql_from_other_subgraph_view_with_overlaps(
+    make_source: Callable[[Path], BaseGraph],
+    tmp_path: Path,
+) -> None:
+    """Reproduce issue #285: filtering a graph then ``from_other`` to a new
     on-disk SQLGraph must work even when the selection contains many node ids
-    and overlaps.
+    and overlaps, regardless of the source backend.
     """
-    src_db = tmp_path / "src.db"
     dst_db = tmp_path / "dst.db"
 
-    src = SQLGraph(drivername="sqlite", database=str(src_db))
+    src = make_source(tmp_path)
     src.add_node_attr_key("verification_status", dtype=pl.Int32, default_value=0)
 
     # Force enough nodes to push the overlap query past sqlite's variable limit
@@ -3052,20 +3082,6 @@ def test_sql_from_other_subgraph_view_with_overlaps(tmp_path: Path) -> None:
     }
     actual_overlaps = {tuple(sorted(o)) for o in dst.overlaps()}
     assert actual_overlaps == expected_overlaps
-    dst._engine.dispose()
-
-
-def test_sql_from_other_full_copy_preserves_node_ids(tmp_path: Path) -> None:
-    """The fast SQLite path must preserve node ids for full copies."""
-    src_db = tmp_path / "src.db"
-    dst_db = tmp_path / "dst.db"
-
-    src = SQLGraph(drivername="sqlite", database=str(src_db))
-    _populate_sql_graph(src, n_per_time=2, n_times=3)
-
-    dst = SQLGraph.from_other(src, drivername="sqlite", database=str(dst_db))
-
-    assert sorted(dst.node_ids()) == sorted(src.node_ids())
     dst._engine.dispose()
 
 
