@@ -497,3 +497,119 @@ def test_graph_array_view_invalidates_chunk_on_remove(graph_backend: BaseGraph) 
     output = np.asarray(array_view[0])
     assert output[1, 1] == 1
     assert output[5, 5] == 0
+
+
+def test_graph_array_view_custom_mask_bbox_keys(graph_backend: BaseGraph) -> None:
+    """Test GraphArrayView with custom mask_attr_key and bbox_attr_key."""
+
+    # Standard mask/bbox attributes
+    graph_backend.add_node_attr_key("label", dtype=pl.Int64)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4))
+
+    # Custom (nuclear) mask/bbox attributes
+    graph_backend.add_node_attr_key("nuc_mask", pl.Object)
+    graph_backend.add_node_attr_key("nuc_bbox", pl.Array(pl.Int64, 4), default_value=[0, 0, 0, 0])
+
+    # Create masks: membrane is 4x4, nuclear is 2x2 at same location
+    mem_mask = Mask(np.ones((4, 4), dtype=bool), bbox=np.array([10, 20, 14, 24]))
+    nuc_mask = Mask(np.ones((2, 2), dtype=bool), bbox=np.array([11, 21, 13, 23]))
+
+    graph_backend.add_node(
+        {
+            DEFAULT_ATTR_KEYS.T: 0,
+            "label": 5,
+            DEFAULT_ATTR_KEYS.MASK: mem_mask,
+            DEFAULT_ATTR_KEYS.BBOX: mem_mask.bbox,
+            "nuc_mask": nuc_mask,
+            "nuc_bbox": nuc_mask.bbox,
+        }
+    )
+
+    # Standard GAV uses default mask/bbox
+    std_view = GraphArrayView(
+        graph=graph_backend, shape=(2, 50, 50), attr_key="label"
+    )
+    # Custom GAV uses nuclear mask/bbox
+    nuc_view = GraphArrayView(
+        graph=graph_backend,
+        shape=(2, 50, 50),
+        attr_key="label",
+        mask_attr_key="nuc_mask",
+        bbox_attr_key="nuc_bbox",
+    )
+
+    std_result = np.asarray(std_view[0])
+    nuc_result = np.asarray(nuc_view[0])
+
+    # Standard view should have label painted at membrane mask area (4x4)
+    assert std_result[10, 20] == 5
+    assert std_result[13, 23] == 5
+    # Nuclear view should have label painted at nuclear mask area (2x2)
+    assert nuc_result[11, 21] == 5
+    assert nuc_result[12, 22] == 5
+
+    # Point inside membrane but outside nuclear mask
+    assert std_result[10, 20] == 5  # inside membrane
+    assert nuc_result[10, 20] == 0  # outside nuclear
+
+    # Total painted area differs
+    assert np.sum(std_result > 0) == 16  # 4x4
+    assert np.sum(nuc_result > 0) == 4  # 2x2
+
+
+def test_graph_array_view_custom_keys_survives_membrane_update(graph_backend: BaseGraph) -> None:
+    """Test that a nuclear GAV handles membrane-only updates without error.
+
+    When update_node_attrs is called with only the standard mask/bbox,
+    the nuclear GAV should handle the signal gracefully (the signal attrs
+    may or may not include 'nuc_bbox' depending on the graph backend).
+    After the update, the nuclear GAV should still return correct data.
+    """
+    graph_backend.add_node_attr_key("label", dtype=pl.Int64)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4))
+    graph_backend.add_node_attr_key("nuc_mask", pl.Object)
+    graph_backend.add_node_attr_key("nuc_bbox", pl.Array(pl.Int64, 4), default_value=[0, 0, 0, 0])
+
+    mem_mask = Mask(np.ones((2, 2), dtype=bool), bbox=np.array([1, 1, 3, 3]))
+    nuc_mask = Mask(np.ones((2, 2), dtype=bool), bbox=np.array([1, 1, 3, 3]))
+
+    node_id = graph_backend.add_node(
+        {
+            DEFAULT_ATTR_KEYS.T: 0,
+            "label": 1,
+            DEFAULT_ATTR_KEYS.MASK: mem_mask,
+            DEFAULT_ATTR_KEYS.BBOX: mem_mask.bbox,
+            "nuc_mask": nuc_mask,
+            "nuc_bbox": nuc_mask.bbox,
+        }
+    )
+
+    nuc_view = GraphArrayView(
+        graph=graph_backend,
+        shape=(2, 8, 8),
+        attr_key="label",
+        mask_attr_key="nuc_mask",
+        bbox_attr_key="nuc_bbox",
+    )
+
+    # Verify initial nuclear data is correct
+    output = np.asarray(nuc_view[0])
+    assert output[1, 1] == 1
+    assert output[2, 2] == 1
+
+    # Update only the membrane mask — should not crash the nuclear GAV
+    moved_mem_mask = Mask(np.ones((2, 2), dtype=bool), bbox=np.array([5, 5, 7, 7]))
+    graph_backend.update_node_attrs(
+        attrs={
+            DEFAULT_ATTR_KEYS.MASK: [moved_mem_mask],
+            DEFAULT_ATTR_KEYS.BBOX: [moved_mem_mask.bbox],
+        },
+        node_ids=[node_id],
+    )
+
+    # Nuclear data should still be correct after membrane-only update
+    output = np.asarray(nuc_view[0])
+    assert output[1, 1] == 1
+    assert output[2, 2] == 1

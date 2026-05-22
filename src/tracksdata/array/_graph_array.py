@@ -140,6 +140,10 @@ class GraphArrayView(BaseReadOnlyArray):
     buffer_cache_size : int, optional
         The maximum number of buffers to keep in the cache for the array.
         If None, the default buffer cache size is used.
+    mask_attr_key : str, optional
+        The node attribute key used to retrieve mask data. Defaults to "mask".
+    bbox_attr_key : str, optional
+        The node attribute key used to retrieve bounding box data. Defaults to "bbox".
     """
 
     def __init__(
@@ -152,6 +156,8 @@ class GraphArrayView(BaseReadOnlyArray):
         chunk_shape: tuple[int, ...] | int | None = None,
         buffer_cache_size: int | None = None,
         dtype: np.dtype | None = None,
+        mask_attr_key: str = DEFAULT_ATTR_KEYS.MASK,
+        bbox_attr_key: str = DEFAULT_ATTR_KEYS.BBOX,
     ):
         if attr_key not in graph.node_attr_keys(return_ids=True):
             raise ValueError(f"Attribute key '{attr_key}' not found in graph. Expected '{graph.node_attr_keys()}'")
@@ -159,6 +165,8 @@ class GraphArrayView(BaseReadOnlyArray):
         self.graph = graph
         self._attr_key = attr_key
         self._offset = offset
+        self._mask_attr_key = mask_attr_key
+        self._bbox_attr_key = bbox_attr_key
 
         if dtype is None:
             # Infer the dtype from the graph's attribute
@@ -198,7 +206,7 @@ class GraphArrayView(BaseReadOnlyArray):
 
         self._spatial_filter = self.graph.bbox_spatial_filter(
             frame_attr_key=DEFAULT_ATTR_KEYS.T,
-            bbox_attr_key=DEFAULT_ATTR_KEYS.BBOX,
+            bbox_attr_key=self._bbox_attr_key,
         )
         self.graph.node_added.connect(self._on_node_added)
         self.graph.node_removed.connect(self._on_node_removed)
@@ -348,10 +356,10 @@ class GraphArrayView(BaseReadOnlyArray):
         """
         subgraph = self._spatial_filter[(slice(time, time), *volume_slicing)]
         df = subgraph.node_attrs(
-            attr_keys=[self._attr_key, DEFAULT_ATTR_KEYS.MASK],
+            attr_keys=[self._attr_key, self._mask_attr_key],
         )
 
-        for mask, value in zip(df[DEFAULT_ATTR_KEYS.MASK], df[self._attr_key], strict=True):
+        for mask, value in zip(df[self._mask_attr_key], df[self._attr_key], strict=True):
             mask: Mask
             mask.paint_buffer(buffer, value, offset=self._offset)
 
@@ -394,13 +402,18 @@ class GraphArrayView(BaseReadOnlyArray):
         Invalidate cache region touched by node attributes.
 
         Falls back to larger invalidation windows when metadata is incomplete.
+        When the bbox attribute key is not present in the attrs dict (e.g. when
+        using a non-default bbox key and the update doesn't affect this view),
+        the method returns without invalidating.
         """
 
         time_value = attrs.get(DEFAULT_ATTR_KEYS.T)
         if time_value is None:
             raise ValueError(f"Node attributes must contain '{DEFAULT_ATTR_KEYS.T}' key for cache invalidation.")
-        if DEFAULT_ATTR_KEYS.BBOX not in attrs:
-            raise ValueError(f"Node attributes must contain '{DEFAULT_ATTR_KEYS.BBOX}' key for cache invalidation.")
+        if self._bbox_attr_key not in attrs:
+            # The update doesn't involve this view's bbox attribute —
+            # nothing to invalidate (e.g. a nuclear GAV seeing a membrane-only update).
+            return
 
         try:
             time = int(np.asarray(time_value).item())
@@ -411,7 +424,7 @@ class GraphArrayView(BaseReadOnlyArray):
         if not (0 <= time < self.original_shape[0]):
             return
 
-        slices = self._bbox_to_slices(attrs[DEFAULT_ATTR_KEYS.BBOX])
+        slices = self._bbox_to_slices(attrs[self._bbox_attr_key])
         if slices is not None:
             self._cache.invalidate(time=time, volume_slicing=slices)
 
