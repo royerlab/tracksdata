@@ -85,7 +85,7 @@ def _resolve_attr_filter_column(
     flat_col = STRUCT_FIELD_SEP.join([str(attr_filter.column), *attr_filter.attr.field_path])
     return getattr(table, flat_col)
 
-  
+
 # Module-level (not methods) so they can be registered with ``weakref.finalize``
 # without holding a bound reference to the owning object, which would prevent
 # it from ever being collected.
@@ -157,7 +157,7 @@ def _close_id_set(id_set: "_SQLIDSet") -> None:
     except Exception as exc:
         LOG.debug("Failed to close _SQLIDSet: %s", exc)
 
-        
+
 def _filter_query(
     query: sa.Select,
     table: type[DeclarativeBase],
