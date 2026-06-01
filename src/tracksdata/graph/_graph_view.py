@@ -517,8 +517,14 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         root_signal_on = is_signal_on(self._root.node_removed)
         old_attrs_per_node: dict[int, dict[str, Any]] = {}
         if view_signal_on or root_signal_on:
-            for nid in node_ids:
-                old_attrs_per_node[nid] = self.nodes[nid].to_dict()
+            # Single batched query instead of one filter+materialize per node.
+            # include_key defaults to False, so NODE_ID is excluded from each attrs
+            # dict, matching the previous per-node NodeInterface.to_dict() behaviour.
+            old_attrs_per_node = (
+                self.filter(node_ids=node_ids)
+                .node_attrs()
+                .rows_by_key(key=DEFAULT_ATTR_KEYS.NODE_ID, named=True, unique=True)
+            )
 
         with self._root.node_removed.blocked():
             self._root.bulk_remove_nodes(node_ids)
