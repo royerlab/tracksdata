@@ -60,7 +60,7 @@ def _data_numpy_to_native(data: dict[str, Any]) -> None:
         if np.isscalar(v) and hasattr(v, "item"):
             data[k] = v.item()
 
-            
+
 def _to_sql_clause(f: FilterInput, table: type[DeclarativeBase]) -> Any:
     """Translate an AttrComparison or AttrFilter into a SQLAlchemy clause."""
     if isinstance(f, AttrComparison):
