@@ -785,6 +785,24 @@ class AttrFilter:
     def __invert__(self) -> "AttrFilter":
         return AttrFilter("not", [self])
 
+    def to_attr(self) -> "Attr":
+        """Translate the compound filter to an `Attr` holding the polars boolean expression.
+
+        Mirrors [AttrComparison.to_attr][tracksdata.attrs.AttrComparison.to_attr]
+        and folds children polymorphically — both operand types expose `to_attr`,
+        so no parallel `(AttrComparison | AttrFilter)` walker is needed for
+        evaluation or column extraction.
+        """
+        if self.op == "not":
+            return Attr(~self.operands[0].to_attr().expr)
+        child_exprs = [o.to_attr().expr for o in self.operands]
+        if self.op == "and":
+            return Attr(functools.reduce(operator.and_, child_exprs))
+        if self.op == "or":
+            return Attr(functools.reduce(operator.or_, child_exprs))
+        # xor
+        return Attr(functools.reduce(operator.xor, child_exprs))
+
     def leaves(self) -> list["AttrComparison"]:
         """Flatten the filter tree to its leaf comparisons."""
         out: list[AttrComparison] = []
@@ -797,7 +815,7 @@ class AttrFilter:
 
     @property
     def columns(self) -> list[str]:
-        return list(dict.fromkeys(leaf.column for leaf in self.leaves()))
+        return self.to_attr().expr_columns
 
     def __repr__(self) -> str:
         if self.op == "not":
@@ -873,30 +891,9 @@ def attr_comps_to_strs(attr_comps: Sequence[FilterInput]) -> list[str]:
         The column names referenced by the filters, deduplicated while
         preserving order.
     """
-    out: list[str] = []
-    for attr_comp in attr_comps:
-        if isinstance(attr_comp, AttrFilter):
-            out.extend(attr_comp.columns)
-        else:
-            out.append(str(attr_comp.column))
-    return list(dict.fromkeys(out))
-
-
-def _polars_filter_expr(f: FilterInput, df: pl.DataFrame) -> pl.Expr | pl.Series:
-    """Translate a single AttrComparison/AttrFilter to a polars expression."""
-    if isinstance(f, AttrComparison):
-        return f.op(df[str(f.column)], f.other)
-
-    if f.op == "not":
-        return ~_polars_filter_expr(f.operands[0], df)
-
-    child_exprs = [_polars_filter_expr(o, df) for o in f.operands]
-    if f.op == "and":
-        return functools.reduce(operator.and_, child_exprs)
-    if f.op == "or":
-        return functools.reduce(operator.or_, child_exprs)
-    # xor
-    return functools.reduce(operator.xor, child_exprs)
+    # Both `AttrComparison` (via `__getattr__` → `to_attr().columns`) and
+    # `AttrFilter` (via its `columns` property) expose `.columns`.
+    return list(dict.fromkeys(c for ac in attr_comps for c in ac.columns))
 
 
 def polars_reduce_attr_comps(
@@ -912,7 +909,8 @@ def polars_reduce_attr_comps(
     Parameters
     ----------
     df : pl.DataFrame
-        The dataframe to reduce the attribute comparisons on.
+        Unused; kept for backward-compatible signature. Each filter already
+        produces a fully-formed polars expression via `to_attr`.
     attr_comps : Sequence[AttrComparison | AttrFilter]
         The filters to reduce.
     reduce_op : Callable[[Expr, Expr], Expr]
@@ -924,7 +922,6 @@ def polars_reduce_attr_comps(
         The reduced polars expression.
     """
     if not attr_comps:
-        # Return True for all rows by using the first column as a reference
         raise ValueError("No attribute comparisons provided.")
-
-    return pl.reduce(reduce_op, [_polars_filter_expr(f, df) for f in attr_comps])
+    del df  # unused; preserved in the signature to avoid a breaking change
+    return pl.reduce(reduce_op, [f.to_attr().expr for f in attr_comps])
