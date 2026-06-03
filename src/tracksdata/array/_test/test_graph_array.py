@@ -484,8 +484,8 @@ def test_graph_array_view_invalidates_once_when_attr_key_changes_but_bbox_unchan
     _ = np.asarray(array_view[0])
     np.testing.assert_array_equal(array_view._cache._store[0].ready, np.ones((2, 2), dtype=bool))
 
-    mock_invalidate = MagicMock(wraps=array_view._invalidate_from_attrs)
-    with patch.object(array_view, "_invalidate_from_attrs", mock_invalidate):
+    mock_invalidate = MagicMock(wraps=array_view._invalidate_bbox)
+    with patch.object(array_view, "_invalidate_bbox", mock_invalidate):
         graph_backend.update_node_attrs(
             attrs={"label": [7]},
             node_ids=[node_id],
@@ -522,8 +522,8 @@ def test_graph_array_view_invalidates_twice_when_attr_key_and_bbox_change(graph_
     np.testing.assert_array_equal(array_view._cache._store[0].ready, np.ones((2, 2), dtype=bool))
 
     moved_mask = _make_square_mask(5, 5)
-    mock_invalidate = MagicMock(wraps=array_view._invalidate_from_attrs)
-    with patch.object(array_view, "_invalidate_from_attrs", mock_invalidate):
+    mock_invalidate = MagicMock(wraps=array_view._invalidate_bbox)
+    with patch.object(array_view, "_invalidate_bbox", mock_invalidate):
         graph_backend.update_node_attrs(
             attrs={
                 "label": [7],
@@ -565,8 +565,8 @@ def test_graph_array_view_no_invalidation_when_unrelated_attr_changes(graph_back
     _ = np.asarray(array_view[0])
     np.testing.assert_array_equal(array_view._cache._store[0].ready, np.ones((2, 2), dtype=bool))
 
-    mock_invalidate = MagicMock(wraps=array_view._invalidate_from_attrs)
-    with patch.object(array_view, "_invalidate_from_attrs", mock_invalidate):
+    mock_invalidate = MagicMock(wraps=array_view._invalidate_bbox)
+    with patch.object(array_view, "_invalidate_bbox", mock_invalidate):
         graph_backend.update_node_attrs(
             attrs={"score": [0.9]},
             node_ids=[node_id],
