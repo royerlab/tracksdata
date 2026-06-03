@@ -425,5 +425,15 @@ class GraphArrayView(BaseReadOnlyArray):
 
     def _on_node_updated(self, node_id: int, old_attrs: dict, new_attrs: dict) -> None:
         del node_id
-        self._invalidate_from_attrs(old_attrs)
-        self._invalidate_from_attrs(new_attrs)
+        old_t = old_attrs.get(DEFAULT_ATTR_KEYS.T)
+        new_t = new_attrs.get(DEFAULT_ATTR_KEYS.T)
+        old_bbox = old_attrs.get(DEFAULT_ATTR_KEYS.BBOX)
+        new_bbox = new_attrs.get(DEFAULT_ATTR_KEYS.BBOX)
+
+        bbox_changed = old_t != new_t or not np.array_equal(old_bbox, new_bbox)
+
+        if bbox_changed:
+            self._invalidate_from_attrs(old_attrs)
+            self._invalidate_from_attrs(new_attrs)
+        elif old_attrs.get(self._attr_key) != new_attrs.get(self._attr_key):
+            self._invalidate_from_attrs(new_attrs)
