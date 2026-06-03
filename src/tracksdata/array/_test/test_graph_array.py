@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import polars as pl
@@ -461,6 +462,122 @@ def test_graph_array_view_invalidates_old_and_new_chunks_on_update(graph_backend
     output = np.asarray(array_view[0])
     assert output[1, 1] == 0
     assert output[5, 5] == 7
+
+
+def test_graph_array_view_invalidates_once_when_attr_key_changes_but_bbox_unchanged(
+    graph_backend: BaseGraph,
+) -> None:
+    """Updating the displayed attr_key (label) without moving the node should invalidate the region exactly once."""
+    _add_graph_array_node_attrs(graph_backend)
+
+    mask = _make_square_mask(1, 1)
+    node_id = graph_backend.add_node(
+        {
+            DEFAULT_ATTR_KEYS.T: 0,
+            "label": 1,
+            DEFAULT_ATTR_KEYS.MASK: mask,
+            DEFAULT_ATTR_KEYS.BBOX: mask.bbox,
+        }
+    )
+
+    array_view = GraphArrayView(graph=graph_backend, shape=(2, 8, 8), attr_key="label", chunk_shape=(4, 4))
+    _ = np.asarray(array_view[0])
+    np.testing.assert_array_equal(array_view._cache._store[0].ready, np.ones((2, 2), dtype=bool))
+
+    mock_invalidate = MagicMock(wraps=array_view._invalidate_from_attrs)
+    with patch.object(array_view, "_invalidate_from_attrs", mock_invalidate):
+        graph_backend.update_node_attrs(
+            attrs={"label": [7]},
+            node_ids=[node_id],
+        )
+        # bbox unchanged, but the displayed attribute changed — invalidate exactly once
+        assert mock_invalidate.call_count == 1
+
+    # The affected chunk must be invalidated
+    expected_ready = np.ones((2, 2), dtype=bool)
+    expected_ready[0, 0] = False
+    np.testing.assert_array_equal(array_view._cache._store[0].ready, expected_ready)
+
+    # After recomputation, the new value should be painted
+    output = np.asarray(array_view[0])
+    assert output[1, 1] == 7
+
+
+def test_graph_array_view_invalidates_twice_when_attr_key_and_bbox_change(graph_backend: BaseGraph) -> None:
+    """Updating both the displayed attr_key and the bbox should invalidate old and new regions."""
+    _add_graph_array_node_attrs(graph_backend)
+
+    mask = _make_square_mask(1, 1)
+    node_id = graph_backend.add_node(
+        {
+            DEFAULT_ATTR_KEYS.T: 0,
+            "label": 1,
+            DEFAULT_ATTR_KEYS.MASK: mask,
+            DEFAULT_ATTR_KEYS.BBOX: mask.bbox,
+        }
+    )
+
+    array_view = GraphArrayView(graph=graph_backend, shape=(2, 8, 8), attr_key="label", chunk_shape=(4, 4))
+    _ = np.asarray(array_view[0])
+    np.testing.assert_array_equal(array_view._cache._store[0].ready, np.ones((2, 2), dtype=bool))
+
+    moved_mask = _make_square_mask(5, 5)
+    mock_invalidate = MagicMock(wraps=array_view._invalidate_from_attrs)
+    with patch.object(array_view, "_invalidate_from_attrs", mock_invalidate):
+        graph_backend.update_node_attrs(
+            attrs={
+                "label": [7],
+                DEFAULT_ATTR_KEYS.MASK: [moved_mask],
+                DEFAULT_ATTR_KEYS.BBOX: [moved_mask.bbox],
+            },
+            node_ids=[node_id],
+        )
+        # bbox changed — must invalidate both old and new regions
+        assert mock_invalidate.call_count == 2
+
+    expected_ready = np.ones((2, 2), dtype=bool)
+    expected_ready[0, 0] = False
+    expected_ready[1, 1] = False
+    np.testing.assert_array_equal(array_view._cache._store[0].ready, expected_ready)
+
+    output = np.asarray(array_view[0])
+    assert output[1, 1] == 0
+    assert output[5, 5] == 7
+
+
+def test_graph_array_view_no_invalidation_when_unrelated_attr_changes(graph_backend: BaseGraph) -> None:
+    """Updating an attribute the view doesn't display should not invalidate any chunks."""
+    _add_graph_array_node_attrs(graph_backend)
+    graph_backend.add_node_attr_key("score", dtype=pl.Float64)
+
+    mask = _make_square_mask(1, 1)
+    node_id = graph_backend.add_node(
+        {
+            DEFAULT_ATTR_KEYS.T: 0,
+            "label": 1,
+            "score": 0.5,
+            DEFAULT_ATTR_KEYS.MASK: mask,
+            DEFAULT_ATTR_KEYS.BBOX: mask.bbox,
+        }
+    )
+
+    array_view = GraphArrayView(graph=graph_backend, shape=(2, 8, 8), attr_key="label", chunk_shape=(4, 4))
+    _ = np.asarray(array_view[0])
+    np.testing.assert_array_equal(array_view._cache._store[0].ready, np.ones((2, 2), dtype=bool))
+
+    mock_invalidate = MagicMock(wraps=array_view._invalidate_from_attrs)
+    with patch.object(array_view, "_invalidate_from_attrs", mock_invalidate):
+        graph_backend.update_node_attrs(
+            attrs={"score": [0.9]},
+            node_ids=[node_id],
+        )
+        # Neither bbox nor the displayed attribute changed — no invalidation at all
+        assert mock_invalidate.call_count == 0
+
+    np.testing.assert_array_equal(
+        array_view._cache._store[0].ready,
+        np.ones((2, 2), dtype=bool),
+    )
 
 
 def test_graph_array_view_invalidates_chunk_on_remove(graph_backend: BaseGraph) -> None:
