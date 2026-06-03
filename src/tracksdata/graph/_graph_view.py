@@ -2,6 +2,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, Literal, cast, overload
 
 import bidict
+import numpy as np
 import polars as pl
 import rustworkx as rx
 
@@ -465,23 +466,20 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
             # Get the local node ID and remove from local graph
             local_node_id = self._external_to_local[node_id]
 
+            # Capture incident edges BEFORE removal. rustworkx drops them along with
+            # the node; afterwards we'd have no way to identify which entries to
+            # clean from `_edge_map_to_root` without scanning the whole bookkeeping.
+            incident_local_edge_ids = list(self.rx_graph.incident_edges(local_node_id))
+
             with self.node_removed.blocked():
                 super().remove_node(local_node_id)
 
             # Remove the node mapping
             self._remove_id_mapping(external_id=node_id)
 
-            # Update edge mappings - remove edges involving this node
-            edges_to_remove = []
-            edge_indices = self.rx_graph.edge_indices()
-            for local_edge_id, _ in list(self._edge_map_to_root.items()):
-                # Check if this edge is still in the local graph
-                if local_edge_id not in edge_indices:
-                    edges_to_remove.append(local_edge_id)
-
-            for edge_id in edges_to_remove:
-                if edge_id in self._edge_map_to_root:
-                    del self._edge_map_to_root[edge_id]
+            # Drop just the affected edges from the bookkeeping
+            for edge_id in incident_local_edge_ids:
+                self._edge_map_to_root.pop(edge_id, None)
         else:
             self._out_of_sync = True
 
@@ -740,12 +738,18 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
                 self._out_of_sync = True
 
         if view_signal_on or root_signal_on:
-            new_attrs_by_id = (
-                self._root.filter(node_ids=node_ids)
-                .node_attrs(attr_keys=signal_keys)
-                .rows_by_key(key=DEFAULT_ATTR_KEYS.NODE_ID, named=True, unique=True, include_key=True)
-            )
             old_attrs_by_id = cast(dict[int, dict[str, Any]], old_attrs_by_id)  # for mypy
+            # Derive new_attrs by overlaying applied `attrs` onto old_attrs, instead of
+            # re-querying root. Mirrors the broadcasting semantics of
+            # `_root.update_node_attrs`: scalars apply to all nodes, sequences index by
+            # position in `node_ids`.
+            new_attrs_by_id: dict[int, dict[str, Any]] = {}
+            for i, node_id in enumerate(node_ids):
+                new_attrs = dict(old_attrs_by_id[node_id])
+                for k, v in attrs.items():
+                    if k in new_attrs:
+                        new_attrs[k] = v if np.isscalar(v) else v[i]
+                new_attrs_by_id[node_id] = new_attrs
             if root_signal_on:
                 for node_id in node_ids:
                     self._root.node_updated.emit(
