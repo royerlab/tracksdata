@@ -222,8 +222,8 @@ class _StructNamespace:
     def field(self, name: str) -> "Attr":
         # preserve_field_path keeps the existing root/path before appending the new field.
         out = self._attr._wrap(self._namespace.field(name), preserve_field_path=True)
-        if isinstance(out, Attr):
-            out._append_field_path(name)
+        # _namespace.field() always returns a polars Expr, so _wrap always yields an Attr here.
+        out._append_field_path(name)
         return out
 
     def __getattr__(self, name: str) -> Any:

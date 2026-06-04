@@ -431,7 +431,7 @@ def flatten_struct_dtype(
 
 def flatten_struct_value(
     key: str,
-    value: dict,
+    value: dict | None,
     dtype: pl.Struct,
     sep: str = STRUCT_FIELD_SEP,
 ) -> dict:
@@ -454,7 +454,7 @@ def flatten_struct_value(
         flat_key = f"{key}{sep}{field_name}"
         field_val = value.get(field_name)
         if isinstance(field_dtype, pl.Struct):
-            result.update(flatten_struct_value(flat_key, field_val or {}, field_dtype, sep))
+            result.update(flatten_struct_value(flat_key, field_val, field_dtype, sep))
         else:
             result[flat_key] = field_val
     return result
