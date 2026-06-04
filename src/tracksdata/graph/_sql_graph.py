@@ -18,7 +18,7 @@ from sqlalchemy.orm import DeclarativeBase, Session, aliased, load_only
 from sqlalchemy.orm.query import Query
 from sqlalchemy.sql.type_api import TypeEngine
 
-from tracksdata.attrs import AttrComparison, Filter, split_attr_comps
+from tracksdata.attrs import AttrComparison, AttrFilter, Filter, split_attr_comps
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.graph.filters._base_filter import BaseFilter
@@ -66,6 +66,7 @@ def _to_sql_clause(f: Filter, table: type[DeclarativeBase]) -> Any:
     if isinstance(f, AttrComparison):
         return f.op(getattr(table, str(f.column)), f.other)
 
+    assert isinstance(f, AttrFilter)
     if f.op == "not":
         return sa.not_(_to_sql_clause(f.operands[0], table))
 

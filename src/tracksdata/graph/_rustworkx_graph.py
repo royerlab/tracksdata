@@ -7,7 +7,7 @@ import numpy as np
 import polars as pl
 import rustworkx as rx
 
-from tracksdata.attrs import AttrComparison, Filter, split_attr_comps
+from tracksdata.attrs import AttrComparison, AttrFilter, Filter, split_attr_comps
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.graph._mapped_graph_mixin import MappedGraphMixin
@@ -98,6 +98,7 @@ def _eval_filter(
         value = attrs.get(f.column, schema[f.column].default_value)
         return bool(f.op(value, f.other))
 
+    assert isinstance(f, AttrFilter)
     if f.op == "and":
         return all(_eval_filter(o, attrs, schema) for o in f.operands)
     if f.op == "or":
