@@ -7,7 +7,7 @@ import numpy as np
 import polars as pl
 import rustworkx as rx
 
-from tracksdata.attrs import AttrComparison, FilterInput, split_attr_comps
+from tracksdata.attrs import AttrComparison, Filter, split_attr_comps
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.graph._mapped_graph_mixin import MappedGraphMixin
@@ -23,8 +23,8 @@ if TYPE_CHECKING:
 
 
 def _pop_time_eq(
-    attrs: Sequence[FilterInput],
-) -> tuple[list[FilterInput], int | None]:
+    attrs: Sequence[Filter],
+) -> tuple[list[Filter], int | None]:
     """
     Pop the top-level time equality filter from a list of attribute filters.
     Compound (AttrFilter) entries are left untouched even if they reference
@@ -41,7 +41,7 @@ def _pop_time_eq(
     tuple[list[AttrComparison | AttrFilter], int | None]
         The attribute filters without the time equality filter and the time value.
     """
-    out_attrs: list[FilterInput] = []
+    out_attrs: list[Filter] = []
     time = None
     for attr_comp in attrs:
         if (
@@ -89,7 +89,7 @@ def _list_to_pl_series(key: str, values: list[Any], schema: AttrSchema) -> pl.Se
 
 
 def _eval_filter(
-    f: FilterInput,
+    f: Filter,
     attrs: dict[str, Any],
     schema: dict[str, AttrSchema],
 ) -> bool:
@@ -110,7 +110,7 @@ def _eval_filter(
 
 
 def _create_filter_func(
-    attr_comps: Sequence[FilterInput],
+    attr_comps: Sequence[Filter],
     schema: dict[str, AttrSchema],
 ) -> Callable[[dict[str, Any]], bool]:
     LOG.info(f"Creating filter function for {attr_comps}")
@@ -127,7 +127,7 @@ def _create_filter_func(
 class RXFilter(BaseFilter):
     def __init__(
         self,
-        *attr_comps: FilterInput,
+        *attr_comps: Filter,
         graph: "RustWorkXGraph",
         node_ids: Sequence[int] | None = None,
         include_targets: bool = False,
@@ -485,7 +485,7 @@ class RustWorkXGraph(BaseGraph):
 
     def filter(
         self,
-        *attr_filters: FilterInput,
+        *attr_filters: Filter,
         node_ids: Sequence[int] | None = None,
         include_targets: bool = False,
         include_sources: bool = False,
@@ -914,7 +914,7 @@ class RustWorkXGraph(BaseGraph):
 
     def _filter_nodes_by_attrs(
         self,
-        *attrs: FilterInput,
+        *attrs: Filter,
         node_ids: Sequence[int] | None = None,
     ) -> list[int]:
         """

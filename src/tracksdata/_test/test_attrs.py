@@ -564,7 +564,7 @@ def test_polars_reduce_attr_comps() -> None:
     comp2 = attr2 < 35
     comp3 = attr3 == True
 
-    result_expr = polars_reduce_attr_comps(df, [comp1, comp2, comp3], operator.and_)
+    result_expr = polars_reduce_attr_comps([comp1, comp2, comp3], operator.and_)
     result = df.select(result_expr).to_series()
 
     # Expected: (col1 > 2) & (col2 < 35) & (col3 == True)
@@ -580,10 +580,8 @@ def test_polars_reduce_attr_comps() -> None:
 
 def test_polars_reduce_attr_comps_empty() -> None:
     """Test reducing empty list of attribute comparisons raises ValueError."""
-    df = pl.DataFrame({"col1": [1, 2, 3]})
-
     with pytest.raises(ValueError, match="No attribute comparisons provided"):
-        polars_reduce_attr_comps(df, [], operator.and_)
+        polars_reduce_attr_comps([], operator.and_)
 
 
 def test_polars_reduce_attr_comps_single() -> None:
@@ -593,7 +591,7 @@ def test_polars_reduce_attr_comps_single() -> None:
     attr = Attr("col1")
     comp = attr > 3
 
-    result_expr = polars_reduce_attr_comps(df, [comp], operator.and_)
+    result_expr = polars_reduce_attr_comps([comp], operator.and_)
     result = df.select(result_expr).to_series()
 
     expected = [False, False, False, True, True]
@@ -697,10 +695,10 @@ def test_attr_filter_and_operator_between_comparisons() -> None:
 def test_attr_filter_logical_op_with_non_filter_raises(op: Callable) -> None:
     """Combining a comparison with a non-filter operand is not meaningful."""
     comp = NodeAttr("a") > 0
-    with pytest.raises(TypeError, match="Boolean operators on comparisons"):
+    with pytest.raises(TypeError, match="Boolean operators on filters"):
         op(comp, 5)
     # reversed operand order goes through the reflected operator
-    with pytest.raises(TypeError, match="Boolean operators on comparisons"):
+    with pytest.raises(TypeError, match="Boolean operators on filters"):
         op(5, comp)
 
 
@@ -746,14 +744,14 @@ def test_attr_filter_or_with_single_operand_raises() -> None:
 
 
 def test_attr_filter_rejects_non_filter_operands() -> None:
-    with pytest.raises(TypeError, match="must be AttrComparison or AttrFilter"):
+    with pytest.raises(TypeError, match=r"must be Filter \(AttrComparison or AttrFilter\)"):
         AttrFilter("or", [NodeAttr("a") == 1, 5])
 
 
 def test_attr_filter_polars_reduce_or() -> None:
     df = pl.DataFrame({"t": [0, 1, 2, 3, 4]})
     f = (NodeAttr("t") == 1) | (NodeAttr("t") == 3)
-    expr = polars_reduce_attr_comps(df, [f], operator.and_)
+    expr = polars_reduce_attr_comps([f], operator.and_)
     result = df.select(expr).to_series()
     assert result.to_list() == [False, True, False, True, False]
 
@@ -761,7 +759,7 @@ def test_attr_filter_polars_reduce_or() -> None:
 def test_attr_filter_polars_reduce_xor() -> None:
     df = pl.DataFrame({"a": [0, 1, 0, 1], "b": [0, 0, 1, 1]})
     f = (NodeAttr("a") == 1) ^ (NodeAttr("b") == 1)
-    expr = polars_reduce_attr_comps(df, [f], operator.and_)
+    expr = polars_reduce_attr_comps([f], operator.and_)
     result = df.select(expr).to_series()
     assert result.to_list() == [False, True, True, False]
 
@@ -769,7 +767,7 @@ def test_attr_filter_polars_reduce_xor() -> None:
 def test_attr_filter_polars_reduce_not() -> None:
     df = pl.DataFrame({"t": [0, 1, 2]})
     f = ~(NodeAttr("t") == 1)
-    expr = polars_reduce_attr_comps(df, [f], operator.and_)
+    expr = polars_reduce_attr_comps([f], operator.and_)
     result = df.select(expr).to_series()
     assert result.to_list() == [True, False, True]
 

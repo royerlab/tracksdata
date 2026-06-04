@@ -16,7 +16,7 @@ from sqlalchemy.orm import DeclarativeBase, Session, aliased, load_only
 from sqlalchemy.orm.query import Query
 from sqlalchemy.sql.type_api import TypeEngine
 
-from tracksdata.attrs import AttrComparison, FilterInput, split_attr_comps
+from tracksdata.attrs import AttrComparison, Filter, split_attr_comps
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.graph.filters._base_filter import BaseFilter
@@ -59,7 +59,7 @@ def _data_numpy_to_native(data: dict[str, Any]) -> None:
             data[k] = v.item()
 
 
-def _to_sql_clause(f: FilterInput, table: type[DeclarativeBase]) -> Any:
+def _to_sql_clause(f: Filter, table: type[DeclarativeBase]) -> Any:
     """Translate an AttrComparison or AttrFilter into a SQLAlchemy clause."""
     if isinstance(f, AttrComparison):
         return f.op(getattr(table, str(f.column)), f.other)
@@ -82,7 +82,7 @@ def _to_sql_clause(f: FilterInput, table: type[DeclarativeBase]) -> Any:
 def _filter_query(
     query: sa.Select,
     table: type[DeclarativeBase],
-    attr_filters: Sequence[FilterInput],
+    attr_filters: Sequence[Filter],
 ) -> sa.Select:
     """
     Filter a query by a list of attribute filters (AND-ed together at the top
@@ -111,7 +111,7 @@ def _filter_query(
 class SQLFilter(BaseFilter):
     def __init__(
         self,
-        *attr_filters: FilterInput,
+        *attr_filters: Filter,
         graph: "SQLGraph",
         node_ids: Sequence[int] | None = None,
         include_targets: bool = False,
@@ -749,7 +749,7 @@ class SQLGraph(BaseGraph):
 
     def filter(
         self,
-        *attr_filters: FilterInput,
+        *attr_filters: Filter,
         node_ids: Sequence[int] | None = None,
         include_targets: bool = False,
         include_sources: bool = False,

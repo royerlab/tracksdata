@@ -15,7 +15,7 @@ from numpy.typing import ArrayLike, DTypeLike
 from psygnal import Signal
 from zarr.storage import StoreLike
 
-from tracksdata.attrs import FilterInput, NodeAttr
+from tracksdata.attrs import Filter, NodeAttr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.utils._cache import cache_method
 from tracksdata.utils._dtypes import (
@@ -598,8 +598,8 @@ class BaseGraph(abc.ABC):
     def _validate_subgraph_args(
         self,
         node_ids: Sequence[int] | None = None,
-        node_attr_comps: list[FilterInput] | None = None,
-        edge_attr_comps: list[FilterInput] | None = None,
+        node_attr_comps: list[Filter] | None = None,
+        edge_attr_comps: list[Filter] | None = None,
     ) -> None:
         if node_ids is None and not node_attr_comps and not edge_attr_comps:
             raise ValueError("Either node IDs or one of the attributes' comparisons must be provided")
@@ -619,7 +619,7 @@ class BaseGraph(abc.ABC):
     @abc.abstractmethod
     def filter(
         self,
-        *attr_filters: FilterInput,
+        *attr_filters: Filter,
         node_ids: Sequence[int] | None = None,
         include_targets: bool = False,
         include_sources: bool = False,
