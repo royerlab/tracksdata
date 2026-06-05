@@ -1413,6 +1413,8 @@ def test_subgraph_bulk_remove_edges(graph_backend: BaseGraph) -> None:
     assert set(graph_with_data.edge_ids()) == remaining
     assert set(view.node_ids()) == set(original_nodes)
     assert set(graph_with_data.node_ids()) == set(original_nodes)
+
+
 def _build_chain_graph(graph: SQLGraph, n_nodes: int) -> list[int]:
     node_ids: list[int] = []
     for t in range(n_nodes):
