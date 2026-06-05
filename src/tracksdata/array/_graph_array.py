@@ -389,19 +389,8 @@ class GraphArrayView(BaseReadOnlyArray):
 
         return tuple(slice(int(s), int(e)) for s, e in zip(start, stop, strict=True))
 
-    def _invalidate_from_attrs(self, attrs: dict) -> None:
-        """
-        Invalidate cache region touched by node attributes.
-
-        Falls back to larger invalidation windows when metadata is incomplete.
-        """
-
-        time_value = attrs.get(DEFAULT_ATTR_KEYS.T)
-        if time_value is None:
-            raise ValueError(f"Node attributes must contain '{DEFAULT_ATTR_KEYS.T}' key for cache invalidation.")
-        if DEFAULT_ATTR_KEYS.BBOX not in attrs:
-            raise ValueError(f"Node attributes must contain '{DEFAULT_ATTR_KEYS.BBOX}' key for cache invalidation.")
-
+    def _invalidate_bbox(self, time_value: Any, bbox: Any) -> None:
+        """Invalidate the cache region covered by the given time and bbox."""
         try:
             time = int(np.asarray(time_value).item())
         except (TypeError, ValueError) as e:
@@ -411,19 +400,29 @@ class GraphArrayView(BaseReadOnlyArray):
         if not (0 <= time < self.original_shape[0]):
             return
 
-        slices = self._bbox_to_slices(attrs[DEFAULT_ATTR_KEYS.BBOX])
+        slices = self._bbox_to_slices(bbox)
         if slices is not None:
             self._cache.invalidate(time=time, volume_slicing=slices)
 
     def _on_node_added(self, node_id: int, new_attrs: dict) -> None:
         del node_id
-        self._invalidate_from_attrs(new_attrs)
+        self._invalidate_bbox(new_attrs[DEFAULT_ATTR_KEYS.T], new_attrs[DEFAULT_ATTR_KEYS.BBOX])
 
     def _on_node_removed(self, node_id: int, old_attrs: dict) -> None:
         del node_id
-        self._invalidate_from_attrs(old_attrs)
+        self._invalidate_bbox(old_attrs[DEFAULT_ATTR_KEYS.T], old_attrs[DEFAULT_ATTR_KEYS.BBOX])
 
     def _on_node_updated(self, node_id: int, old_attrs: dict, new_attrs: dict) -> None:
         del node_id
-        self._invalidate_from_attrs(old_attrs)
-        self._invalidate_from_attrs(new_attrs)
+        old_t = old_attrs[DEFAULT_ATTR_KEYS.T]
+        new_t = new_attrs[DEFAULT_ATTR_KEYS.T]
+        old_bbox = old_attrs[DEFAULT_ATTR_KEYS.BBOX]
+        new_bbox = new_attrs[DEFAULT_ATTR_KEYS.BBOX]
+
+        bbox_changed = old_t != new_t or not np.array_equal(old_bbox, new_bbox)
+
+        if bbox_changed:
+            self._invalidate_bbox(old_t, old_bbox)
+            self._invalidate_bbox(new_t, new_bbox)
+        elif old_attrs.get(self._attr_key) != new_attrs.get(self._attr_key):
+            self._invalidate_bbox(new_t, new_bbox)

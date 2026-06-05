@@ -2110,15 +2110,6 @@ class SQLGraph(BaseGraph):
             for node_id in updated_node_ids:
                 self.node_updated.emit(node_id, old_attrs_by_id[node_id], new_attrs_by_id[node_id])
 
-            new_df = self.filter(node_ids=updated_node_ids).node_attrs(
-                attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, *attr_keys]
-            )
-            new_attrs_by_id = new_df.rows_by_key(
-                key=DEFAULT_ATTR_KEYS.NODE_ID, named=True, unique=True, include_key=True
-            )
-            for node_id in updated_node_ids:
-                self.node_updated.emit(node_id, old_attrs_by_id[node_id], new_attrs_by_id[node_id])
-
     def update_edge_attrs(
         self,
         *,
