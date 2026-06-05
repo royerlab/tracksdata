@@ -13,6 +13,8 @@ and it is independent of machine speed.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 import polars as pl
 import sqlalchemy as sa
@@ -20,8 +22,13 @@ import sqlalchemy as sa
 from benchmarks.common import IS_CI
 from tracksdata.array import GraphArrayView
 from tracksdata.constants import DEFAULT_ATTR_KEYS
-from tracksdata.graph import SQLGraph
 from tracksdata.nodes._mask import Mask
+
+if TYPE_CHECKING:
+    # Imported only for type hints: a module-level ``SQLGraph`` name would be
+    # picked up by asv's discovery (it has a ``time_points`` method) and asv
+    # would try to instantiate the bare class, which requires constructor args.
+    from tracksdata.graph import SQLGraph
 
 FRAME_SIZE = 512
 CHUNK = 128
@@ -38,6 +45,8 @@ COLD_FRAME = 1
 
 
 def _build_graph() -> SQLGraph:
+    from tracksdata.graph import SQLGraph
+
     graph = SQLGraph(drivername="sqlite", database=":memory:", overwrite=True)
     graph.add_node_attr_key("label", dtype=pl.Int64)
     graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
