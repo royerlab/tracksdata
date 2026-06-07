@@ -70,7 +70,7 @@ jobs:
         run: uv run pytest --cov=tracksdata --cov-report=xml src/tracksdata
 
     - name: Upload coverage to Codecov
-      if: matrix.python-version == '3.12'
+      if: matrix.python-version == '3.12' && github.event.pull_request.head.repo.full_name == github.repository
       uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
