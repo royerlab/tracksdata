@@ -750,7 +750,7 @@ class AttrFilter(Filter):
 
         Mirrors [AttrComparison.to_attr][tracksdata.attrs.AttrComparison.to_attr]
         and folds children polymorphically — both operand types expose `to_attr`,
-        so no parallel `(AttrComparison | AttrFilter)` walker is needed for
+        so no parallel `(Filter)` walker is needed for
         evaluation or column extraction.
         """
         if self.op == "not":
@@ -816,12 +816,12 @@ def split_attr_comps(
 
     Parameters
     ----------
-    attr_comps : Sequence[AttrComparison | AttrFilter]
+    attr_comps : Sequence[Filter]
         The attribute comparisons or compound filters to split.
 
     Returns
     -------
-    tuple[list[AttrComparison | AttrFilter], list[AttrComparison | AttrFilter]]
+    tuple[list[Filter], list[Filter]]
         A tuple of lists of node and edge filters.
     """
     node_attr_comps: list[Filter] = []
@@ -844,7 +844,7 @@ def attr_comps_to_strs(attr_comps: Sequence[Filter]) -> list[str]:
 
     Parameters
     ----------
-    attr_comps : Sequence[AttrComparison | AttrFilter]
+    attr_comps : Sequence[Filter]
         The filters to extract column names from.
 
     Returns
@@ -868,7 +868,7 @@ def polars_reduce_attr_comps(
 
     Parameters
     ----------
-    attr_comps : Sequence[AttrComparison | AttrFilter]
+    attr_comps : Sequence[Filter]
         The filters to reduce.
     reduce_op : Callable[[Expr, Expr], Expr]
         The operation to reduce the top-level filters with.

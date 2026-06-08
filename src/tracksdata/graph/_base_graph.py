@@ -633,7 +633,7 @@ class BaseGraph(abc.ABC):
 
         Parameters
         ----------
-        *attr_filters : AttrComparison | AttrFilter
+        *attr_filters : Filter
             The attribute filters to apply. Positional args are AND-ed.
         node_ids : Sequence[int] | None
             The IDs of the nodes to include in the filter.

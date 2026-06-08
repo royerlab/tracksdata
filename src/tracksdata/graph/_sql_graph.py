@@ -170,7 +170,7 @@ def _filter_query(
         The query to filter.
     table : type[DeclarativeBase]
         The table to filter.
-    attr_filters : Sequence[AttrComparison | AttrFilter]
+    attr_filters : Sequence[Filter]
         The attribute filters to apply.
 
     Returns

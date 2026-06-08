@@ -33,12 +33,12 @@ def _pop_time_eq(
 
     Parameters
     ----------
-    attrs : Sequence[AttrComparison | AttrFilter]
+    attrs : Sequence[Filter]
         The attribute filters to pop the time equality filter from.
 
     Returns
     -------
-    tuple[list[AttrComparison | AttrFilter], int | None]
+    tuple[list[Filter], int | None]
         The attribute filters without the time equality filter and the time value.
     """
     out_attrs: list[Filter] = []
@@ -923,7 +923,7 @@ class RustWorkXGraph(BaseGraph):
 
         Parameters
         ----------
-        *attrs : AttrComparison | AttrFilter
+        *attrs : Filter
             The attributes to filter by, for example:
         node_ids : list[int] | None
             The IDs of the nodes to include in the filter.
