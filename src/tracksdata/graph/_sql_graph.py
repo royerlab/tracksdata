@@ -34,6 +34,7 @@ from tracksdata.utils._dtypes import (
 from tracksdata.utils._logging import LOG
 from tracksdata.utils._signal import (
     emit_node_added_events,
+    emit_node_removed_events,
     emit_node_updated_events,
     is_signal_on,
 )
@@ -1041,8 +1042,7 @@ class SQLGraph(BaseGraph):
             session.commit()
 
         if emit_signal:
-            for nid in node_ids:
-                self.node_removed.emit(nid, old_attrs_per_node[nid])
+            emit_node_removed_events(self.node_removed, ((nid, old_attrs_per_node[nid]) for nid in node_ids))
 
     def add_edge(
         self,
@@ -2577,20 +2577,31 @@ class SQLGraph(BaseGraph):
             return
 
         chunk_size = self._sql_chunk_size()
+        unique_ids = set(edge_ids)
         with Session(self._engine) as session:
-            existing: set[int] = set()
+            # Delete and count in a single pass; the delete rowcount tells us how
+            # many of the requested edges actually existed, avoiding a separate
+            # existence query on the happy path.
+            deleted = 0
             for i in range(0, len(edge_ids), chunk_size):
                 chunk = edge_ids[i : i + chunk_size]
-                existing.update(
-                    row[0] for row in session.query(self.Edge.edge_id).filter(self.Edge.edge_id.in_(chunk)).all()
+                deleted += (
+                    session.query(self.Edge).filter(self.Edge.edge_id.in_(chunk)).delete(synchronize_session=False)
                 )
-            missing = [eid for eid in edge_ids if eid not in existing]
-            if missing:
+
+            if deleted != len(unique_ids):
+                # Some requested edges were missing: discard the deletes instead
+                # of committing, then identify a missing id for the error message.
+                session.rollback()
+                existing: set[int] = set()
+                for i in range(0, len(edge_ids), chunk_size):
+                    chunk = edge_ids[i : i + chunk_size]
+                    existing.update(
+                        row[0] for row in session.query(self.Edge.edge_id).filter(self.Edge.edge_id.in_(chunk)).all()
+                    )
+                missing = [eid for eid in edge_ids if eid not in existing]
                 raise ValueError(f"Edge {missing[0]} does not exist in the graph.")
 
-            for i in range(0, len(edge_ids), chunk_size):
-                chunk = edge_ids[i : i + chunk_size]
-                session.query(self.Edge).filter(self.Edge.edge_id.in_(chunk)).delete(synchronize_session=False)
             session.commit()
 
     def _metadata(self) -> dict[str, Any]:

@@ -18,6 +18,7 @@ from tracksdata.utils._dtypes import AttrSchema, process_attr_key_args
 from tracksdata.utils._logging import LOG
 from tracksdata.utils._signal import (
     emit_node_added_events,
+    emit_node_removed_events,
     emit_node_updated_events,
     is_signal_on,
 )
@@ -669,8 +670,7 @@ class RustWorkXGraph(BaseGraph):
         emit = is_signal_on(self.node_removed)
         captured = self._bulk_remove_nodes_local(node_ids, capture_attrs=emit)
         if emit:
-            for nid in node_ids:
-                self.node_removed.emit(nid, captured[nid])
+            emit_node_removed_events(self.node_removed, ((nid, captured[nid]) for nid in node_ids))
 
     def add_edge(
         self,
@@ -2158,8 +2158,7 @@ class IndexedRXGraph(MappedGraphMixin, RustWorkXGraph):
             self._remove_id_mapping(external_id=nid)
 
         if emit:
-            for nid in node_ids:
-                self.node_removed.emit(nid, old_attrs_per_node[nid])
+            emit_node_removed_events(self.node_removed, ((nid, old_attrs_per_node[nid]) for nid in node_ids))
 
     def filter(
         self,

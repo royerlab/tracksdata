@@ -14,6 +14,7 @@ from tracksdata.graph.filters._indexed_filter import IndexRXFilter
 from tracksdata.utils._dtypes import AttrSchema
 from tracksdata.utils._signal import (
     emit_node_added_events,
+    emit_node_removed_events,
     emit_node_updated_events,
     is_signal_on,
 )
@@ -543,11 +544,9 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
             self._out_of_sync = True
 
         if root_signal_on:
-            for nid in node_ids:
-                self._root.node_removed.emit(nid, old_attrs_per_node[nid])
+            emit_node_removed_events(self._root.node_removed, ((nid, old_attrs_per_node[nid]) for nid in node_ids))
         if view_signal_on:
-            for nid in node_ids:
-                self.node_removed.emit(nid, old_attrs_per_node[nid])
+            emit_node_removed_events(self.node_removed, ((nid, old_attrs_per_node[nid]) for nid in node_ids))
 
     def add_edge(
         self,
