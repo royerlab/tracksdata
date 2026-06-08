@@ -239,6 +239,16 @@ def test_filter_nodes_by_struct_field(graph_backend: BaseGraph) -> None:
     name_nodes = graph_backend.filter(NodeAttr("measurements").struct.field("name") == "B").node_ids()
     assert set(name_nodes) == {node_b}
 
+    measurements = graph_backend.filter(node_ids=[node_a, node_c]).node_attrs(attr_keys=["measurements"])
+    assert measurements.schema["measurements"] == pl.Struct({"score": pl.Int64, "name": pl.String})
+    assert {m["name"] for m in measurements["measurements"].to_list()} == {"A", "C"}
+
+    subgraph = graph_backend.filter(NodeAttr("measurements").struct.field("score") == 1).subgraph(
+        node_attr_keys=["measurements"]
+    )
+    subgraph_measurements = subgraph.node_attrs(attr_keys=["measurements"])
+    assert {m["name"] for m in subgraph_measurements["measurements"].to_list()} == {"A", "C"}
+
 
 def test_time_points(graph_backend: BaseGraph) -> None:
     """Test retrieving time points."""

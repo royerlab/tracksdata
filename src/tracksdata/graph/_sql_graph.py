@@ -377,23 +377,27 @@ class SQLFilter(BaseFilter):
             attr_keys=attr_keys,
         )
 
-        with Session(self._graph._engine) as session:
-            nodes_attrs = pl.read_database(
-                self._graph._raw_query(query),
-                connection=session.connection(),
-                schema_overrides=self._graph._polars_schema_override(self._graph.Node),
-            )
+        nodes_attrs = self._read_attr_dataframe(query, self._graph.Node)
 
         if attr_keys is not None:
+            attr_keys = list(dict.fromkeys(attr_keys))
             nodes_attrs = nodes_attrs.select(attr_keys)
-
-        nodes_attrs = unpickle_bytes_columns(nodes_attrs)
-        nodes_attrs = self._graph._cast_columns(self._graph.Node, nodes_attrs)
 
         if unpack:
             nodes_attrs = unpack_array_attrs(nodes_attrs)
 
         return nodes_attrs
+
+    def _read_attr_dataframe(self, query: sa.Select, table: type[DeclarativeBase]) -> pl.DataFrame:
+        with Session(self._graph._engine) as session:
+            df = pl.read_database(
+                self._graph._raw_query(query),
+                connection=session.connection(),
+                schema_overrides=self._graph._polars_schema_override(table),
+            )
+
+        df = unpickle_bytes_columns(df)
+        return self._graph._cast_columns(table, df)
 
     def _query_from_attr_keys(
         self,
@@ -439,15 +443,7 @@ class SQLFilter(BaseFilter):
             ],
         )
 
-        with Session(self._graph._engine) as session:
-            edges_df = pl.read_database(
-                self._graph._raw_query(query),
-                connection=session.connection(),
-                schema_overrides=self._graph._polars_schema_override(self._graph.Edge),
-            )
-
-        edges_df = unpickle_bytes_columns(edges_df)
-        edges_df = self._graph._cast_columns(self._graph.Edge, edges_df)
+        edges_df = self._read_attr_dataframe(query, self._graph.Edge)
 
         if unpack:
             edges_df = unpack_array_attrs(edges_df)
@@ -492,26 +488,23 @@ class SQLFilter(BaseFilter):
             ],
         )
 
-        with Session(self._graph._engine) as session:
-            node_query = session.execute(node_query)
-            edge_query = session.execute(edge_query)
+        nodes_df = self._read_attr_dataframe(node_query, self._graph.Node)
+        edges_df = self._read_attr_dataframe(edge_query, self._graph.Edge)
 
-            node_map_to_root = {}
-            node_map_from_root = {}
-            rx_graph = rx.PyDiGraph()
+        node_map_to_root = {}
+        node_map_from_root = {}
+        rx_graph = rx.PyDiGraph()
 
-            for row in node_query.mappings().all():
-                data = dict(row)
-                root_node_id = data.pop(DEFAULT_ATTR_KEYS.NODE_ID)
-                node_id = rx_graph.add_node(data)
-                node_map_to_root[node_id] = root_node_id
-                node_map_from_root[root_node_id] = node_id
+        for data in nodes_df.iter_rows(named=True):
+            root_node_id = data.pop(DEFAULT_ATTR_KEYS.NODE_ID)
+            node_id = rx_graph.add_node(data)
+            node_map_to_root[node_id] = root_node_id
+            node_map_from_root[root_node_id] = node_id
 
-            for row in edge_query.mappings().all():
-                data = dict(row)
-                source_id = node_map_from_root[data.pop(DEFAULT_ATTR_KEYS.EDGE_SOURCE)]
-                target_id = node_map_from_root[data.pop(DEFAULT_ATTR_KEYS.EDGE_TARGET)]
-                rx_graph.add_edge(source_id, target_id, data)
+        for data in edges_df.iter_rows(named=True):
+            source_id = node_map_from_root[data.pop(DEFAULT_ATTR_KEYS.EDGE_SOURCE)]
+            target_id = node_map_from_root[data.pop(DEFAULT_ATTR_KEYS.EDGE_TARGET)]
+            rx_graph.add_edge(source_id, target_id, data)
 
         graph = GraphView(
             rx_graph=rx_graph,
