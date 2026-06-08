@@ -427,6 +427,9 @@ class BBoxSpatialFilter:
         new_attrs : dict[str, Any]
             Current node attributes to insert into the spatial index.
         """
+        if self._bbox_attr_key not in new_attrs:
+            return
+
         from spatial_graph import PointRTree
 
         if self._node_rtree is None:
@@ -470,6 +473,8 @@ class BBoxSpatialFilter:
         """
         if self._node_rtree is None:
             return
+        if self._bbox_attr_key not in old_attrs:
+            return
 
         positions_min, positions_max = self._attrs_to_bb_window(old_attrs)
 
@@ -485,6 +490,8 @@ class BBoxSpatialFilter:
         old_attrs: dict[str, Any],
         new_attrs: dict[str, Any],
     ) -> None:
+        if self._bbox_attr_key not in old_attrs:
+            return
         self._remove_node(node_id, old_attrs=old_attrs)
         self._add_node(node_id, new_attrs=new_attrs)
 
