@@ -30,6 +30,10 @@ N_OPS = 50
 N_LINEAGES = 50
 
 
+def _noop(*_args) -> None:
+    """No-op slot to enable the `node_updated` signal-payload path in benchmarks."""
+
+
 def _build_graph(backend_name: str, n_nodes: int) -> td.graph.BaseGraph:
     graph = BACKENDS[backend_name]()
     graph.add_node_attr_key("score", dtype=pl.Float64)
@@ -60,6 +64,16 @@ class GraphMutationsBenchmark:
         self.removal_targets = all_ids[:N_OPS]
         self.update_targets = all_ids[: N_OPS * 4]
 
+        # Separate view with a no-op listener attached. Without a listener,
+        # update_node_attrs skips the signal-payload computation entirely, so
+        # the P2-2 optimization (deriving new_attrs from old + applied) isn't
+        # exercised. This view is the BBoxSpatialFilter / GraphArrayView use case.
+        self.listened_view = self.graph.filter().subgraph()
+        self.listened_view.node_updated.connect(_noop)
+        # Smaller batch, representative of interactive editing where the saved
+        # query overhead is a larger fraction of the total work.
+        self.listener_update_targets = all_ids[:N_OPS]
+
     # --- remove_node ------------------------------------------------------
 
     def time_remove_node_root(self, backend_name: str, n_nodes: int) -> None:
@@ -77,6 +91,9 @@ class GraphMutationsBenchmark:
 
     def time_update_node_attrs_view(self, backend_name: str, n_nodes: int) -> None:
         self.view.update_node_attrs(node_ids=self.update_targets, attrs={"score": 1.0})
+
+    def time_update_node_attrs_view_with_listener(self, backend_name: str, n_nodes: int) -> None:
+        self.listened_view.update_node_attrs(node_ids=self.listener_update_targets, attrs={"score": 1.0})
 
     # --- filter (standalone, materialized to ids) ------------------------
 
