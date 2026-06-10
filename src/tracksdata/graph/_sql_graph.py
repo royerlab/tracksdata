@@ -68,6 +68,7 @@ def _to_sql_clause(f: Filter, table: type[DeclarativeBase]) -> Any:
 
     assert isinstance(f, AttrFilter)
     if f.op == "not":
+        # AttrFilter.__init__ enforces exactly one operand for "not"
         return sa.not_(_to_sql_clause(f.operands[0], table))
 
     clauses = [_to_sql_clause(o, table) for o in f.operands]
