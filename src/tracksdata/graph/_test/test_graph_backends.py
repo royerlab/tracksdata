@@ -519,6 +519,38 @@ def test_update_node_attrs(graph_backend: BaseGraph) -> None:
         graph_backend.update_node_attrs(node_ids=[node_1, node_2], attrs={"x": [1.0]})
 
 
+def test_bulk_add_nodes_emits_batched_node_added_callback(graph_backend: BaseGraph) -> None:
+    graph_backend.add_node_attr_key("x", pl.Float64)
+
+    calls: list[tuple[Any, Any]] = []
+    graph_backend.node_added.connect(lambda node_ids, attrs: calls.append((node_ids, attrs)))
+
+    nodes = [{"t": 0, "x": 1.0}, {"t": 1, "x": 2.0}, {"t": 1, "x": 3.0}]
+    node_ids = graph_backend.bulk_add_nodes(nodes)
+
+    assert len(calls) == 1
+    assert calls[0][0] == node_ids
+    assert calls[0][1] == nodes
+
+
+def test_update_node_attrs_emits_batched_node_updated_callback(graph_backend: BaseGraph) -> None:
+    graph_backend.add_node_attr_key("x", pl.Float64)
+
+    node_ids = graph_backend.bulk_add_nodes([{"t": 0, "x": 1.0}, {"t": 1, "x": 2.0}, {"t": 1, "x": 3.0}])
+
+    calls: list[tuple[Any, Any, Any]] = []
+    graph_backend.node_updated.connect(
+        lambda node_ids, old_attrs, new_attrs: calls.append((node_ids, old_attrs, new_attrs))
+    )
+
+    graph_backend.update_node_attrs(node_ids=node_ids, attrs={"x": [10.0, 20.0, 30.0]})
+
+    assert len(calls) == 1
+    assert calls[0][0] == node_ids
+    assert [attrs["x"] for attrs in calls[0][1]] == [1.0, 2.0, 3.0]
+    assert [attrs["x"] for attrs in calls[0][2]] == [10.0, 20.0, 30.0]
+
+
 def test_update_edge_attrs(graph_backend: BaseGraph) -> None:
     """Test updating edge attributes."""
     node1 = graph_backend.add_node({"t": 0})
@@ -2509,6 +2541,108 @@ def test_remove_all_nodes_in_time_point(graph_backend: BaseGraph) -> None:
     graph_backend.remove_node(node3)
     time_points_after_two = set(graph_backend.time_points())
     assert time_points_after_two == {0, 2}  # t=1 should be gone
+
+
+def test_bulk_remove_nodes(graph_backend: BaseGraph) -> None:
+    """bulk_remove_nodes drops nodes, incident edges, and overlaps in one call."""
+    graph_backend.add_node_attr_key("x", dtype=pl.Float64)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
+
+    n1 = graph_backend.add_node({"t": 0, "x": 1.0})
+    n2 = graph_backend.add_node({"t": 1, "x": 2.0})
+    n3 = graph_backend.add_node({"t": 2, "x": 3.0})
+    n4 = graph_backend.add_node({"t": 3, "x": 4.0})
+
+    e12 = graph_backend.add_edge(n1, n2, {"weight": 0.1})
+    graph_backend.add_edge(n2, n3, {"weight": 0.2})
+    e34 = graph_backend.add_edge(n3, n4, {"weight": 0.3})
+
+    graph_backend.add_overlap(n2, n3)
+    graph_backend.add_overlap(n1, n4)
+
+    graph_backend.bulk_remove_nodes([n2, n3])
+
+    assert set(graph_backend.node_ids()) == {n1, n4}
+    remaining_edges = set(graph_backend.edge_ids())
+    assert e12 not in remaining_edges
+    assert e34 not in remaining_edges
+    assert graph_backend.num_edges() == 0
+
+    overlaps = graph_backend.overlaps()
+    assert [n1, n4] in overlaps
+    assert all(n2 not in pair and n3 not in pair for pair in overlaps)
+
+
+def test_bulk_remove_nodes_empty_is_noop(graph_backend: BaseGraph) -> None:
+    n1 = graph_backend.add_node({"t": 0})
+    graph_backend.bulk_remove_nodes([])
+    assert graph_backend.num_nodes() == 1
+    assert n1 in graph_backend.node_ids()
+
+
+def test_bulk_remove_nodes_raises_when_missing(graph_backend: BaseGraph) -> None:
+    """bulk_remove_nodes is atomic: missing IDs raise without mutating the graph."""
+    n1 = graph_backend.add_node({"t": 0})
+    n2 = graph_backend.add_node({"t": 1})
+
+    with pytest.raises(ValueError, match=r"Node .* does not exist in the graph."):
+        graph_backend.bulk_remove_nodes([n1, 99999])
+
+    assert set(graph_backend.node_ids()) == {n1, n2}
+
+
+def test_bulk_remove_nodes_emits_signal(graph_backend: BaseGraph) -> None:
+    n1 = graph_backend.add_node({"t": 0})
+    n2 = graph_backend.add_node({"t": 1})
+
+    observed: list[int] = []
+    graph_backend.node_removed.connect(lambda node_ids, _attrs: observed.extend(node_ids))
+
+    graph_backend.bulk_remove_nodes([n1, n2])
+    assert observed == [n1, n2]
+
+
+def test_bulk_remove_edges(graph_backend: BaseGraph) -> None:
+    graph_backend.add_node_attr_key("x", dtype=pl.Float64)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
+
+    n1 = graph_backend.add_node({"t": 0, "x": 1.0})
+    n2 = graph_backend.add_node({"t": 1, "x": 2.0})
+    n3 = graph_backend.add_node({"t": 2, "x": 3.0})
+
+    e12 = graph_backend.add_edge(n1, n2, {"weight": 0.1})
+    e23 = graph_backend.add_edge(n2, n3, {"weight": 0.2})
+    e13 = graph_backend.add_edge(n1, n3, {"weight": 0.3})
+
+    graph_backend.bulk_remove_edges([e12, e23])
+
+    assert set(graph_backend.node_ids()) == {n1, n2, n3}
+    assert set(graph_backend.edge_ids()) == {e13}
+    assert not graph_backend.has_edge(n1, n2)
+    assert not graph_backend.has_edge(n2, n3)
+    assert graph_backend.has_edge(n1, n3)
+
+
+def test_bulk_remove_edges_empty_is_noop(graph_backend: BaseGraph) -> None:
+    n1 = graph_backend.add_node({"t": 0})
+    n2 = graph_backend.add_node({"t": 1})
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
+    e = graph_backend.add_edge(n1, n2, {"weight": 0.1})
+
+    graph_backend.bulk_remove_edges([])
+    assert set(graph_backend.edge_ids()) == {e}
+
+
+def test_bulk_remove_edges_raises_when_missing(graph_backend: BaseGraph) -> None:
+    n1 = graph_backend.add_node({"t": 0})
+    n2 = graph_backend.add_node({"t": 1})
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
+    e = graph_backend.add_edge(n1, n2, {"weight": 0.1})
+
+    with pytest.raises(ValueError, match=r"Edge .* does not exist in the graph."):
+        graph_backend.bulk_remove_edges([e, 99999])
+
+    assert set(graph_backend.edge_ids()) == {e}
 
 
 def _fill_mock_geff_graph(graph_backend: BaseGraph) -> None:

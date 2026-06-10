@@ -16,7 +16,12 @@ from tracksdata.utils._cache import cache_method
 from tracksdata.utils._dataframe import unpack_array_attrs
 from tracksdata.utils._dtypes import AttrSchema, process_attr_key_args
 from tracksdata.utils._logging import LOG
-from tracksdata.utils._signal import is_signal_on
+from tracksdata.utils._signal import (
+    emit_node_added_events,
+    emit_node_removed_events,
+    emit_node_updated_events,
+    is_signal_on,
+)
 
 if TYPE_CHECKING:
     from tracksdata.graph._graph_view import GraphView
@@ -472,47 +477,87 @@ class RustWorkXGraph(BaseGraph):
             include_sources=include_sources,
         )
 
-    def add_node(
+    # ------------------------------------------------------------------
+    # Local primitives — pure rx_graph mutation + bookkeeping.
+    # No validation, no signal emission, no policy. Subclasses must NOT
+    # override these; override the public methods (or their bulk forms)
+    # instead. Callers that want to bypass virtual dispatch on the public
+    # methods (e.g. GraphView routing its local layer) call these.
+    # ------------------------------------------------------------------
+
+    def _bulk_add_nodes_local(self, nodes: list[dict[str, Any]]) -> list[int]:
+        """Append `nodes` to rx_graph and update _time_to_nodes. Returns new local ids."""
+        node_indices = list(self.rx_graph.add_nodes_from(nodes))
+        for node, idx in zip(nodes, node_indices, strict=True):
+            self._time_to_nodes.setdefault(node["t"], []).append(idx)
+        return node_indices
+
+    def _bulk_remove_nodes_local(
         self,
-        attrs: dict[str, Any],
-        validate_keys: bool = True,
-        index: int | None = None,
-    ) -> int:
+        node_ids: list[int],
+        *,
+        capture_attrs: bool = False,
+    ) -> dict[int, dict[str, Any]]:
         """
-        Add a node to the graph at time t.
+        Remove `node_ids` from rx_graph, refresh _time_to_nodes and _overlaps.
 
-        Parameters
-        ----------
-        attrs : Any
-            The attributes of the node to be added, must have a "t" key.
-            The keys of the attributes will be used as the attributes of the node.
-            For example:
-            ```python
-            graph.add_node(dict(t=0, label="A", intensity=100))
-            ```
-        validate_keys : bool
-            Whether to check if the attributes keys are valid.
-            If False, the attributes keys will not be checked,
-            useful to speed up the operation when doing bulk insertions.
-        index : int | None
-            Optional node index. RustWorkXGraph does not support custom indices
-            and will raise an error if this parameter is provided.
+        Raises ValueError before any mutation if any id is missing.
+        Returns a {node_id: attrs} snapshot iff `capture_attrs` is True (else `{}`),
+        so callers that need to emit signals can do so without re-querying.
         """
-        if index is not None:
-            raise ValueError("RustWorkXGraph does not support custom node indices. Use IndexedRXGraph instead.")
+        rx_indices = set(self.rx_graph.node_indices())
+        missing = [nid for nid in node_ids if nid not in rx_indices]
+        if missing:
+            raise ValueError(f"Node {missing[0]} does not exist in the graph.")
 
-        # avoiding copying attributes on purpose, it could be a problem in the future
-        if validate_keys:
-            self._validate_attributes(attrs, self.node_attr_keys(), "node")
+        old_attrs_per_node = {nid: dict(self.rx_graph[nid]) for nid in node_ids} if capture_attrs else {}
+        times_per_node = [(nid, self.rx_graph[nid]["t"]) for nid in node_ids]
 
-            if "t" not in attrs:
-                raise ValueError(f"Node attributes must have a 't' key. Got {attrs.keys()}")
+        self.rx_graph.remove_nodes_from(node_ids)
 
-        node_id = self.rx_graph.add_node(attrs)
-        self._time_to_nodes.setdefault(attrs["t"], []).append(node_id)
-        if is_signal_on(self.node_added):
-            self.node_added.emit(node_id, attrs)
-        return node_id
+        by_time: dict[Any, set[int]] = {}
+        for nid, t in times_per_node:
+            by_time.setdefault(t, set()).add(nid)
+        for t, removed in by_time.items():
+            remaining = [n for n in self._time_to_nodes[t] if n not in removed]
+            if remaining:
+                self._time_to_nodes[t] = remaining
+            else:
+                del self._time_to_nodes[t]
+
+        if self._overlaps is not None:
+            nid_set = set(node_ids)
+            self._overlaps = [o for o in self._overlaps if o[0] not in nid_set and o[1] not in nid_set]
+
+        return old_attrs_per_node
+
+    def _add_edge_local(self, source_id: int, target_id: int, attrs: dict[str, Any]) -> int:
+        """Add a single edge to rx_graph and stamp EDGE_ID into `attrs`. Returns the edge id."""
+        edge_id = self.rx_graph.add_edge(source_id, target_id, attrs)
+        attrs[DEFAULT_ATTR_KEYS.EDGE_ID] = edge_id
+        return edge_id
+
+    def _bulk_add_edges_local(self, edges: list[dict[str, Any]]) -> list[int]:
+        """Loop _add_edge_local over `edges` (pops source/target from each dict)."""
+        edge_ids: list[int] = []
+        for edge in edges:
+            src = edge.pop(DEFAULT_ATTR_KEYS.EDGE_SOURCE)
+            tgt = edge.pop(DEFAULT_ATTR_KEYS.EDGE_TARGET)
+            edge_ids.append(self._add_edge_local(src, tgt, edge))
+        return edge_ids
+
+    def _bulk_remove_edges_local(self, edge_ids: list[int]) -> None:
+        """Atomic-validate then drop edges by id via rx_graph.remove_edges_from."""
+        edge_map = self.rx_graph.edge_index_map()
+        missing = [eid for eid in edge_ids if eid not in edge_map]
+        if missing:
+            raise ValueError(f"Edge {missing[0]} does not exist in the graph.")
+        endpoints = [(edge_map[eid][0], edge_map[eid][1]) for eid in edge_ids]
+        self.rx_graph.remove_edges_from(endpoints)
+
+    # ------------------------------------------------------------------
+    # Public mutation API — validation + signals on top of the locals.
+    # ------------------------------------------------------------------
 
     def bulk_add_nodes(self, nodes: list[dict[str, Any]], indices: list[int] | None = None) -> list[int]:
         """
@@ -536,89 +581,35 @@ class RustWorkXGraph(BaseGraph):
         if indices is not None:
             raise ValueError("RustWorkXGraph does not support custom node indices. Use IndexedRXGraph instead.")
 
-        node_indices = list(self.rx_graph.add_nodes_from(nodes))
-        for node, index in zip(nodes, node_indices, strict=True):
-            self._time_to_nodes.setdefault(node["t"], []).append(index)
-
-        # checking if it has connections to reduce overhead
-        if is_signal_on(self.node_added):
-            for node_id, node_attrs in zip(node_indices, nodes, strict=True):
-                self.node_added.emit(node_id, node_attrs)
-
+        node_indices = self._bulk_add_nodes_local(nodes)
+        emit_node_added_events(self.node_added, zip(node_indices, nodes, strict=True))
         return node_indices
 
-    def remove_node(self, node_id: int) -> None:
+    def bulk_remove_nodes(self, node_ids: Sequence[int]) -> None:
         """
-        Remove a node from the graph.
-
-        This method removes the specified node and all edges connected to it
-        (both incoming and outgoing edges). Also updates the time_to_nodes mapping.
+        Remove multiple nodes from the graph, along with their incident edges and overlaps.
 
         Parameters
         ----------
-        node_id : int
-            The ID of the node to remove.
+        node_ids : Sequence[int]
+            The IDs of the nodes to remove.
 
         Raises
         ------
         ValueError
-            If the node_id does not exist in the graph.
+            If any node_id does not exist in the graph.
         """
-        if node_id not in self.rx_graph.node_indices():
-            raise ValueError(f"Node {node_id} does not exist in the graph.")
+        if hasattr(node_ids, "tolist"):
+            node_ids = node_ids.tolist()
+        else:
+            node_ids = list(node_ids)
+        if len(node_ids) == 0:
+            return
 
-        old_attrs = None
-        if is_signal_on(self.node_removed):
-            old_attrs = dict(self.rx_graph[node_id])
-
-        # Get the time value before removing the node
-        t = self.rx_graph[node_id]["t"]
-
-        # Remove the node from the graph (this also removes all connected edges)
-        self.rx_graph.remove_node(node_id)
-
-        # Update the time_to_nodes mapping
-        self._time_to_nodes[t].remove(node_id)
-        # Clean up empty time entries
-        if not self._time_to_nodes[t]:
-            del self._time_to_nodes[t]
-
-        # Remove from overlaps if present
-        if self._overlaps is not None:
-            self._overlaps = [overlap for overlap in self._overlaps if node_id != overlap[0] and node_id != overlap[1]]
-
-        if is_signal_on(self.node_removed):
-            self.node_removed.emit(node_id, old_attrs)
-
-    def add_edge(
-        self,
-        source_id: int,
-        target_id: int,
-        attrs: dict[str, Any],
-        validate_keys: bool = True,
-    ) -> int:
-        """
-        Add an edge to the graph.
-
-        Parameters
-        ----------
-        source_id : int
-            The ID of the source node.
-        target_id : int
-            The ID of the target node.
-        attrs : dict[str, Any]
-            The attributes of the edge to be added.
-            The keys of the attributes will be used as the attributes of the edge.
-        validate_keys : bool
-            Whether to check if the attributes keys are valid.
-            If False, the attributes keys will not be checked,
-            useful to speed up the operation when doing bulk insertions.
-        """
-        if validate_keys:
-            self._validate_attributes(attrs, self.edge_attr_keys(), "edge")
-        edge_id = self.rx_graph.add_edge(source_id, target_id, attrs)
-        attrs[DEFAULT_ATTR_KEYS.EDGE_ID] = edge_id
-        return edge_id
+        emit = is_signal_on(self.node_removed)
+        captured = self._bulk_remove_nodes_local(node_ids, capture_attrs=emit)
+        if emit:
+            emit_node_removed_events(self.node_removed, ((nid, captured[nid]) for nid in node_ids))
 
     def bulk_add_edges(self, edges: list[dict[str, Any]], return_ids: bool = False) -> list[int] | None:
         """
@@ -649,37 +640,31 @@ class RustWorkXGraph(BaseGraph):
         list[int] | None
             The IDs of the added edges.
         """
-        # saving for historical reasons, iterating over edges is faster than using rx.add_edges_from
-        # edges_data = [(d.pop(DEFAULT_ATTR_KEYS.EDGE_SOURCE), d.pop(DEFAULT_ATTR_KEYS.EDGE_TARGET), d) for d in edges]
-        # indices = self.rx_graph.add_edges_from(edges_data)
-        # for i, d in zip(indices, edges, strict=True):
-        #     d[DEFAULT_ATTR_KEYS.EDGE_ID] = i
-        # return indices
-        return super().bulk_add_edges(edges, return_ids=return_ids)
+        # Per-edge loop is faster than rx.add_edges_from in practice; the local primitive iterates.
+        edge_ids = self._bulk_add_edges_local(edges)
+        return edge_ids if return_ids else None
 
-    def remove_edge(
-        self,
-        source_id: int | None = None,
-        target_id: int | None = None,
-        *,
-        edge_id: int | None = None,
-    ) -> None:
+    def bulk_remove_edges(self, edge_ids: Sequence[int]) -> None:
         """
-        Remove an edge by ID or by endpoints.
+        Remove multiple edges from the graph by their edge IDs.
+
+        Parameters
+        ----------
+        edge_ids : Sequence[int]
+            The IDs of the edges to remove.
+
+        Raises
+        ------
+        ValueError
+            If any edge_id does not exist in the graph.
         """
-        if edge_id is None:
-            if source_id is None or target_id is None:
-                raise ValueError("Provide either edge_id or both source_id and target_id.")
-            try:
-                self.rx_graph.remove_edge(source_id, target_id)
-            except rx.NoEdgeBetweenNodes as e:
-                raise ValueError(f"Edge {source_id}->{target_id} does not exist in the graph.") from e
+        if hasattr(edge_ids, "tolist"):
+            edge_ids = edge_ids.tolist()
         else:
-            edge_map = self.rx_graph.edge_index_map()
-            if edge_id not in edge_map:
-                raise ValueError(f"Edge {edge_id} does not exist in the graph.")
-            src, tgt, _ = edge_map[edge_id]
-            self.rx_graph.remove_edge(src, tgt)
+            edge_ids = list(edge_ids)
+        if len(edge_ids) == 0:
+            return
+        self._bulk_remove_edges_local(edge_ids)
 
     def add_overlap(
         self,
@@ -1228,6 +1213,8 @@ class RustWorkXGraph(BaseGraph):
         """
         if node_ids is None:
             node_ids = self.node_ids()
+        else:
+            node_ids = list(node_ids)
 
         if is_signal_on(self.node_updated):
             old_attrs_by_id = {node_id: dict(self._graph[node_id]) for node_id in node_ids}
@@ -1247,8 +1234,10 @@ class RustWorkXGraph(BaseGraph):
                 self._graph[node_id][key] = v
 
         if is_signal_on(self.node_updated):
-            for node_id in node_ids:
-                self.node_updated.emit(node_id, old_attrs_by_id[node_id], dict(self._graph[node_id]))
+            emit_node_updated_events(
+                self.node_updated,
+                ((node_id, old_attrs_by_id[node_id], dict(self._graph[node_id])) for node_id in node_ids),
+            )
 
     def update_edge_attrs(
         self,
@@ -1526,8 +1515,16 @@ class RustWorkXGraph(BaseGraph):
     def edge_id(self, source_id: int, target_id: int) -> int:
         """
         Return the edge id between two nodes.
+
+        Raises
+        ------
+        ValueError
+            If there is no edge between the two nodes.
         """
-        return self.rx_graph.get_edge_data(source_id, target_id)[DEFAULT_ATTR_KEYS.EDGE_ID]
+        try:
+            return self.rx_graph.get_edge_data(source_id, target_id)[DEFAULT_ATTR_KEYS.EDGE_ID]
+        except rx.NoEdgeBetweenNodes as e:
+            raise ValueError(f"Edge {source_id}->{target_id} does not exist in the graph.") from e
 
     def _metadata(self) -> dict[str, Any]:
         return self._graph.attrs
@@ -1608,44 +1605,6 @@ class IndexedRXGraph(MappedGraphMixin, RustWorkXGraph):
     def supports_custom_indices(self) -> bool:
         return True
 
-    def add_node(
-        self,
-        attrs: dict[str, Any],
-        validate_keys: bool = True,
-        index: int | None = None,
-    ) -> int:
-        """
-        Add a node to the graph.
-
-        Parameters
-        ----------
-        attrs : dict[str, Any]
-            The attributes of the node.
-        validate_keys : bool
-            Whether to validate the keys of the attributes.
-        index : int | None
-            The index of the node. If None, the next available index will be used
-            to avoid conflicts with existing node indices.
-
-        Returns
-        -------
-        int
-            The index of the node.
-        """
-        with self.node_added.blocked():
-            node_id = super().add_node(attrs, validate_keys)
-
-        if index is None:
-            index = self._get_next_available_external_id()
-        else:
-            # Update counter if explicit index is higher to avoid future collisions
-            self._next_external_id = max(self._next_external_id, index + 1)
-        # Add mapping using mixin
-        self._add_id_mapping(node_id, index)
-        if is_signal_on(self.node_added):
-            self.node_added.emit(index, attrs)
-        return index
-
     def bulk_add_nodes(
         self,
         nodes: list[dict[str, Any]],
@@ -1672,8 +1631,8 @@ class IndexedRXGraph(MappedGraphMixin, RustWorkXGraph):
 
         self._validate_indices_length(nodes, indices)
 
-        with self.node_added.blocked():
-            graph_ids = super().bulk_add_nodes(nodes)
+        # Local primitive: no signal emission, so no blocked() wrapper needed.
+        graph_ids = self._bulk_add_nodes_local(nodes)
 
         if indices is None:
             # All nodes get auto-generated indices
@@ -1688,9 +1647,7 @@ class IndexedRXGraph(MappedGraphMixin, RustWorkXGraph):
 
         self._add_id_mappings(list(zip(graph_ids, indices, strict=True)))
 
-        if is_signal_on(self.node_added):
-            for index, node_attrs in zip(indices, nodes, strict=True):
-                self.node_added.emit(index, node_attrs)
+        emit_node_added_events(self.node_added, zip(indices, nodes, strict=True))
 
         return indices
 
@@ -1832,59 +1789,21 @@ class IndexedRXGraph(MappedGraphMixin, RustWorkXGraph):
         """
         return self._map_to_external(super().dividing_nodes())
 
-    def add_edge(
+    def bulk_add_edges(
         self,
-        source_id: int,
-        target_id: int,
-        attrs: dict[str, Any],
-        validate_keys: bool = True,
-    ) -> int:
+        edges: list[dict[str, Any]],
+        return_ids: bool = False,
+    ) -> list[int] | None:
         """
-        Add an edge to the graph.
+        Map each edge's external endpoints to local rx ids, then delegate.
 
-        Parameters
-        ----------
-        source_id : int
-            The source node id.
-        target_id : int
-            The target node id.
-        attrs : dict[str, Any]
-            The attributes of the edge.
-        validate_keys : bool
-            Whether to validate the keys of the attributes.
-
-        Returns
-        -------
-        int
-            The edge id.
+        Mutates `edges` in place — same convention as the parent class, which
+        pops `source_id` / `target_id` from each dict before insert.
         """
-        source_id = self._map_to_local(source_id)
-        target_id = self._map_to_local(target_id)
-        return super().add_edge(source_id, target_id, attrs, validate_keys)
-
-    def remove_edge(
-        self,
-        source_id: int | None = None,
-        target_id: int | None = None,
-        *,
-        edge_id: int | None = None,
-    ) -> None:
-        """
-        Remove an edge by endpoints (external IDs) or by edge_id.
-        """
-        if edge_id is not None:
-            return super().remove_edge(edge_id=edge_id)
-        if source_id is None or target_id is None:
-            raise ValueError("Provide either edge_id or both source_id and target_id.")
-        try:
-            local_source = self._map_to_local(source_id)
-            local_target = self._map_to_local(target_id)
-        except KeyError as e:
-            raise ValueError(f"Edge {source_id}->{target_id} does not exist in the graph.") from e
-        try:
-            return super().remove_edge(local_source, local_target)
-        except ValueError as e:
-            raise ValueError(f"Edge {source_id}->{target_id} does not exist in the graph.") from e
+        for edge in edges:
+            edge[DEFAULT_ATTR_KEYS.EDGE_SOURCE] = self._map_to_local(edge[DEFAULT_ATTR_KEYS.EDGE_SOURCE])
+            edge[DEFAULT_ATTR_KEYS.EDGE_TARGET] = self._map_to_local(edge[DEFAULT_ATTR_KEYS.EDGE_TARGET])
+        return super().bulk_add_edges(edges, return_ids=return_ids)
 
     def add_overlap(self, source_id: int, target_id: int) -> int:
         """
@@ -1987,42 +1906,54 @@ class IndexedRXGraph(MappedGraphMixin, RustWorkXGraph):
             super().update_node_attrs(attrs=attrs, node_ids=local_node_ids)
 
         if is_signal_on(self.node_updated) and old_attrs_by_id is not None:
-            for external_node_id, local_node_id in zip(external_node_ids, local_node_ids, strict=True):
-                self.node_updated.emit(
-                    external_node_id,
-                    old_attrs_by_id[external_node_id],
-                    dict(self._graph[local_node_id]),
-                )
+            emit_node_updated_events(
+                self.node_updated,
+                (
+                    (external_node_id, old_attrs_by_id[external_node_id], dict(self._graph[local_node_id]))
+                    for external_node_id, local_node_id in zip(external_node_ids, local_node_ids, strict=True)
+                ),
+            )
 
-    def remove_node(self, node_id: int) -> None:
+    def bulk_remove_nodes(self, node_ids: Sequence[int]) -> None:
         """
-        Remove a node from the graph.
+        Remove multiple nodes from the graph, by external ID.
 
         Parameters
         ----------
-        node_id : int
-            The external ID of the node to remove.
+        node_ids : Sequence[int]
+            The external IDs of the nodes to remove.
 
         Raises
         ------
         ValueError
-            If the node_id does not exist in the graph.
+            If any node_id does not exist in the graph.
         """
-        if node_id not in self._external_to_local:
-            raise ValueError(f"Node {node_id} does not exist in the graph.")
+        if hasattr(node_ids, "tolist"):
+            node_ids = node_ids.tolist()
+        else:
+            node_ids = list(node_ids)
+        if len(node_ids) == 0:
+            return
 
-        local_node_id = self._map_to_local(node_id)
-        old_attrs = self._graph[local_node_id]
+        missing = [nid for nid in node_ids if nid not in self._external_to_local]
+        if missing:
+            raise ValueError(f"Node {missing[0]} does not exist in the graph.")
 
-        if is_signal_on(self.node_removed):
-            old_attrs = dict(self._graph[local_node_id])
+        local_ids = [self._external_to_local[nid] for nid in node_ids]
 
-        with self.node_removed.blocked():
-            super().remove_node(local_node_id)
+        emit = is_signal_on(self.node_removed)
+        old_attrs_per_node = (
+            {nid: dict(self._graph[lid]) for nid, lid in zip(node_ids, local_ids, strict=True)} if emit else {}
+        )
 
-        self._remove_id_mapping(external_id=node_id)
-        if is_signal_on(self.node_removed):
-            self.node_removed.emit(node_id, old_attrs)
+        # Local primitive: no signal emission, so no blocked() wrapper needed.
+        self._bulk_remove_nodes_local(local_ids)
+
+        for nid in node_ids:
+            self._remove_id_mapping(external_id=nid)
+
+        if emit:
+            emit_node_removed_events(self.node_removed, ((nid, old_attrs_per_node[nid]) for nid in node_ids))
 
     def filter(
         self,
@@ -2044,7 +1975,15 @@ class IndexedRXGraph(MappedGraphMixin, RustWorkXGraph):
     def edge_id(self, source_id: int, target_id: int) -> int:
         """
         Return the edge id between two nodes.
+
+        Raises
+        ------
+        ValueError
+            If either node is unknown or there is no edge between them.
         """
-        source_id = self._map_to_local(source_id)
-        target_id = self._map_to_local(target_id)
-        return super().edge_id(source_id, target_id)
+        try:
+            local_source = self._map_to_local(source_id)
+            local_target = self._map_to_local(target_id)
+            return super().edge_id(local_source, local_target)
+        except (KeyError, ValueError) as e:
+            raise ValueError(f"Edge {source_id}->{target_id} does not exist in the graph.") from e

@@ -475,6 +475,43 @@ def test_subgraph_add_node(graph_backend: BaseGraph) -> None:
         assert attributes["label"].to_list()[0] == "NEW"
 
 
+def test_subgraph_bulk_add_nodes_emits_batched_node_added_callbacks(graph_backend: BaseGraph) -> None:
+    graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
+    subgraph = graph_with_data.filter(node_ids=graph_with_data._test_nodes[:2]).subgraph()  # type: ignore
+
+    root_calls: list[tuple[object, object]] = []
+    subgraph_calls: list[tuple[object, object]] = []
+    graph_with_data.node_added.connect(lambda node_ids, attrs: root_calls.append((node_ids, attrs)))
+    subgraph.node_added.connect(lambda node_ids, attrs: subgraph_calls.append((node_ids, attrs)))
+
+    nodes = [
+        {"t": 10, "x": 10.0, "y": 10.0, "label": "A"},
+        {"t": 11, "x": 11.0, "y": 11.0, "label": "B"},
+    ]
+    node_ids = subgraph.bulk_add_nodes(nodes)
+
+    assert len(root_calls) == 1
+    assert len(subgraph_calls) == 1
+    assert root_calls[0] == (node_ids, nodes)
+    assert subgraph_calls[0] == (node_ids, nodes)
+
+
+def test_subgraph_update_node_attrs_emits_batched_node_updated_callback(graph_backend: BaseGraph) -> None:
+    graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
+    subgraph = graph_with_data.filter(node_ids=graph_with_data._test_nodes[:3]).subgraph()  # type: ignore
+    node_ids = graph_with_data._test_nodes[:2]  # type: ignore
+
+    calls: list[tuple[object, object, object]] = []
+    subgraph.node_updated.connect(lambda node_ids, old_attrs, new_attrs: calls.append((node_ids, old_attrs, new_attrs)))
+
+    subgraph.update_node_attrs(node_ids=node_ids, attrs={"x": [10.0, 20.0]})
+
+    assert len(calls) == 1
+    assert calls[0][0] == node_ids
+    assert [attrs["x"] for attrs in calls[0][1]] == [0.0, 1.0]
+    assert [attrs["x"] for attrs in calls[0][2]] == [10.0, 20.0]
+
+
 def test_subgraph_add_edge(graph_backend: BaseGraph) -> None:
     """Test adding edges to a subgraph."""
     graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
@@ -1339,6 +1376,43 @@ def test_edge_list(graph_backend: BaseGraph, use_subgraph: bool) -> None:
         )
     )
     assert edge_list == expected_edge_list
+
+
+def test_subgraph_bulk_remove_nodes(graph_backend: BaseGraph) -> None:
+    """bulk_remove_nodes on a view drops from view+root and cleans edge mappings."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
+    original_nodes = graph_with_data._test_nodes  # type: ignore
+
+    view = graph_with_data.filter().subgraph()
+
+    to_remove = [original_nodes[1], original_nodes[2]]
+    view.bulk_remove_nodes(to_remove)
+
+    remaining = set(original_nodes) - set(to_remove)
+    assert set(view.node_ids()) == remaining
+    assert set(graph_with_data.node_ids()) == remaining
+    # Edges incident to removed nodes must be gone from both layers.
+    view_edges = set(view.edge_ids())
+    root_edges = set(graph_with_data.edge_ids())
+    assert view_edges == root_edges
+
+
+def test_subgraph_bulk_remove_edges(graph_backend: BaseGraph) -> None:
+    """bulk_remove_edges on a view drops from view+root, nodes untouched."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
+    original_nodes = graph_with_data._test_nodes  # type: ignore
+    original_edges = graph_with_data._test_edges  # type: ignore
+
+    view = graph_with_data.filter().subgraph()
+
+    to_remove = original_edges[:2]
+    view.bulk_remove_edges(to_remove)
+
+    remaining = set(original_edges) - set(to_remove)
+    assert set(view.edge_ids()) == remaining
+    assert set(graph_with_data.edge_ids()) == remaining
+    assert set(view.node_ids()) == set(original_nodes)
+    assert set(graph_with_data.node_ids()) == set(original_nodes)
 
 
 def _build_chain_graph(graph: SQLGraph, n_nodes: int) -> list[int]:
