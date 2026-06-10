@@ -9,6 +9,7 @@ import pytest
 from tracksdata.attrs import (
     Attr,
     AttrComparison,
+    AttrFilter,
     EdgeAttr,
     NodeAttr,
     attr_comps_to_strs,
@@ -580,7 +581,7 @@ def test_polars_reduce_attr_comps() -> None:
     comp2 = attr2 < 35
     comp3 = attr3 == True
 
-    result_expr = polars_reduce_attr_comps(df, [comp1, comp2, comp3], operator.and_)
+    result_expr = polars_reduce_attr_comps([comp1, comp2, comp3], operator.and_)
     result = df.select(result_expr).to_series()
 
     # Expected: (col1 > 2) & (col2 < 35) & (col3 == True)
@@ -596,10 +597,8 @@ def test_polars_reduce_attr_comps() -> None:
 
 def test_polars_reduce_attr_comps_empty() -> None:
     """Test reducing empty list of attribute comparisons raises ValueError."""
-    df = pl.DataFrame({"col1": [1, 2, 3]})
-
     with pytest.raises(ValueError, match="No attribute comparisons provided"):
-        polars_reduce_attr_comps(df, [], operator.and_)
+        polars_reduce_attr_comps([], operator.and_)
 
 
 def test_polars_reduce_attr_comps_single() -> None:
@@ -609,7 +608,7 @@ def test_polars_reduce_attr_comps_single() -> None:
     attr = Attr("col1")
     comp = attr > 3
 
-    result_expr = polars_reduce_attr_comps(df, [comp], operator.and_)
+    result_expr = polars_reduce_attr_comps([comp], operator.and_)
     result = df.select(result_expr).to_series()
 
     expected = [False, False, False, True, True]
@@ -667,3 +666,130 @@ def test_attr_is_in_accepts_numpy_arrays() -> None:
 
     evaluated = comp.to_attr().evaluate(df)
     assert evaluated.to_list() == [False, True, False]
+
+
+# ---------------------------------------------------------------------------
+# AttrFilter (compound boolean filters built from AttrComparisons)
+# ---------------------------------------------------------------------------
+
+
+def test_attr_filter_or_operator_returns_filter() -> None:
+    comp1 = NodeAttr("t") == 1
+    comp2 = NodeAttr("t") == 2
+    f = comp1 | comp2
+
+    assert isinstance(f, AttrFilter)
+    assert f.op == "or"
+    assert f.operands == [comp1, comp2]
+    assert f.columns == ["t"]
+
+
+def test_attr_filter_xor_and_invert_operators() -> None:
+    comp1 = NodeAttr("a") > 0
+    comp2 = NodeAttr("b") > 0
+    xor_f = comp1 ^ comp2
+    assert isinstance(xor_f, AttrFilter)
+    assert xor_f.op == "xor"
+
+    not_f = ~comp1
+    assert isinstance(not_f, AttrFilter)
+    assert not_f.op == "not"
+    assert not_f.operands == [comp1]
+
+
+def test_attr_filter_and_operator_between_comparisons() -> None:
+    comp1 = NodeAttr("a") > 0
+    comp2 = NodeAttr("b") < 1
+    and_f = comp1 & comp2
+    assert isinstance(and_f, AttrFilter)
+    assert and_f.op == "and"
+
+
+@pytest.mark.parametrize(
+    "op",
+    [operator.and_, operator.or_, operator.xor],
+)
+def test_attr_filter_logical_op_with_non_filter_raises(op: Callable) -> None:
+    """Combining a comparison with a non-filter operand is not meaningful."""
+    comp = NodeAttr("a") > 0
+    with pytest.raises(TypeError, match="Boolean operators on filters"):
+        op(comp, 5)
+    # reversed operand order goes through the reflected operator
+    with pytest.raises(TypeError, match="Boolean operators on filters"):
+        op(5, comp)
+
+
+def test_attr_filter_nested_composition() -> None:
+    f = (NodeAttr("a") > 0) & ((NodeAttr("b") == 1) | (NodeAttr("b") == 2))
+    assert isinstance(f, AttrFilter)
+    assert f.op == "and"
+    assert isinstance(f.operands[1], AttrFilter)
+    assert f.operands[1].op == "or"
+    assert sorted({leaf.column for leaf in f.leaves()}) == ["a", "b"]
+
+
+def test_attr_filter_mixed_node_and_edge_raises_on_split() -> None:
+    """A single compound that mixes node and edge attributes must error in split."""
+    f = (NodeAttr("t") == 1) | (EdgeAttr("weight") > 0.5)
+    with pytest.raises(ValueError, match="cannot mix NodeAttr and EdgeAttr"):
+        split_attr_comps([f])
+
+
+def test_attr_filter_split_attr_comps_with_compounds() -> None:
+    node_f = (NodeAttr("t") == 1) | (NodeAttr("t") == 2)
+    edge_f = (EdgeAttr("w") > 0.5) | (EdgeAttr("w") < -0.5)
+    node_only = NodeAttr("label") == "A"
+
+    nodes, edges = split_attr_comps([node_f, edge_f, node_only])
+    assert nodes == [node_f, node_only]
+    assert edges == [edge_f]
+
+
+def test_attr_filter_invalid_op_raises() -> None:
+    with pytest.raises(ValueError, match="Unknown logical operator"):
+        AttrFilter("nor", [NodeAttr("a") == 1, NodeAttr("a") == 2])
+
+
+def test_attr_filter_not_with_multiple_operands_raises() -> None:
+    with pytest.raises(ValueError, match="'not' filter requires exactly one operand"):
+        AttrFilter("not", [NodeAttr("a") == 1, NodeAttr("a") == 2])
+
+
+def test_attr_filter_or_with_single_operand_raises() -> None:
+    with pytest.raises(ValueError, match="'or' filter requires at least two operands"):
+        AttrFilter("or", [NodeAttr("a") == 1])
+
+
+def test_attr_filter_rejects_non_filter_operands() -> None:
+    with pytest.raises(TypeError, match=r"must be Filter \(AttrComparison or AttrFilter\)"):
+        AttrFilter("or", [NodeAttr("a") == 1, 5])
+
+
+def test_attr_filter_polars_reduce_or() -> None:
+    df = pl.DataFrame({"t": [0, 1, 2, 3, 4]})
+    f = (NodeAttr("t") == 1) | (NodeAttr("t") == 3)
+    expr = polars_reduce_attr_comps([f], operator.and_)
+    result = df.select(expr).to_series()
+    assert result.to_list() == [False, True, False, True, False]
+
+
+def test_attr_filter_polars_reduce_xor() -> None:
+    df = pl.DataFrame({"a": [0, 1, 0, 1], "b": [0, 0, 1, 1]})
+    f = (NodeAttr("a") == 1) ^ (NodeAttr("b") == 1)
+    expr = polars_reduce_attr_comps([f], operator.and_)
+    result = df.select(expr).to_series()
+    assert result.to_list() == [False, True, True, False]
+
+
+def test_attr_filter_polars_reduce_not() -> None:
+    df = pl.DataFrame({"t": [0, 1, 2]})
+    f = ~(NodeAttr("t") == 1)
+    expr = polars_reduce_attr_comps([f], operator.and_)
+    result = df.select(expr).to_series()
+    assert result.to_list() == [True, False, True]
+
+
+def test_attr_filter_attr_comps_to_strs_with_compound() -> None:
+    f = (NodeAttr("a") == 1) | (NodeAttr("b") == 2)
+    plain = NodeAttr("c") == 3
+    assert attr_comps_to_strs([f, plain]) == ["a", "b", "c"]

@@ -202,7 +202,11 @@ class MappedGraphMixin:
         mappings : Sequence[tuple[int, int]]
             Sequence of (local_id, external_id) pairs
         """
-        self._local_to_external.putall(mappings)
+        try:
+            self._local_to_external.putall(mappings)
+        except bidict.ValueDuplicationError as e:
+            # Match the single-add path: an external_id collision is the user-facing "key" duplication.
+            raise bidict.KeyDuplicationError(e.args[0]) from e
 
     def _remove_id_mapping(
         self,

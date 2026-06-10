@@ -205,48 +205,50 @@ class SpatialFilter:
 
     def _add_node(
         self,
-        node_id: int,
-        new_attrs: dict[str, Any],
+        node_ids: list[int],
+        new_attrs: list[dict[str, Any]],
     ) -> None:
         from spatial_graph import PointRTree
 
-        if self._df_filter._node_rtree is None:
-            self._df_filter._node_rtree = PointRTree(
-                item_dtype="int64",
-                coord_dtype="float32",
-                dims=len(self._attr_keys),
-            )
-            self._df_filter._ndims = len(self._attr_keys)
+        for node_id, attrs in zip(node_ids, new_attrs, strict=True):
+            if self._df_filter._node_rtree is None:
+                self._df_filter._node_rtree = PointRTree(
+                    item_dtype="int64",
+                    coord_dtype="float32",
+                    dims=len(self._attr_keys),
+                )
+                self._df_filter._ndims = len(self._attr_keys)
 
-        positions = self._attrs_to_point(new_attrs)
-        self._df_filter._node_rtree.insert_point_items(
-            np.atleast_1d(node_id).astype(np.int64),
-            positions,
-        )
+            positions = self._attrs_to_point(attrs)
+            self._df_filter._node_rtree.insert_point_items(
+                np.atleast_1d(node_id).astype(np.int64),
+                positions,
+            )
 
     def _remove_node(
         self,
-        node_id: int,
-        old_attrs: dict[str, Any],
+        node_ids: list[int],
+        old_attrs: list[dict[str, Any]],
     ) -> None:
         # required by static type checking
         if self._df_filter._node_rtree is None:
             return
 
-        positions = self._attrs_to_point(old_attrs)
-        self._df_filter._node_rtree.delete_items(
-            np.atleast_1d(node_id).astype(np.int64),
-            positions,
-        )
+        for node_id, attrs in zip(node_ids, old_attrs, strict=True):
+            positions = self._attrs_to_point(attrs)
+            self._df_filter._node_rtree.delete_items(
+                np.atleast_1d(node_id).astype(np.int64),
+                positions,
+            )
 
     def _update_node(
         self,
-        node_id: int,
-        old_attrs: dict[str, Any],
-        new_attrs: dict[str, Any],
+        node_ids: list[int],
+        old_attrs: list[dict[str, Any]],
+        new_attrs: list[dict[str, Any]],
     ) -> None:
-        self._remove_node(node_id, old_attrs=old_attrs)
-        self._add_node(node_id, new_attrs=new_attrs)
+        self._remove_node(node_ids, old_attrs)
+        self._add_node(node_ids, new_attrs)
 
 
 class BBoxSpatialFilter:
@@ -414,79 +416,81 @@ class BBoxSpatialFilter:
 
     def _add_node(
         self,
-        node_id: int,
-        new_attrs: dict[str, Any],
+        node_ids: list[int],
+        new_attrs: list[dict[str, Any]],
     ) -> None:
         """
-        Add a node to the spatial filter.
+        Add nodes to the spatial filter.
 
         Parameters
         ----------
-        node_id : int
-            The ID of the node to add.
-        new_attrs : dict[str, Any]
+        node_ids : list[int]
+            The IDs of the nodes to add.
+        new_attrs : list[dict[str, Any]]
             Current node attributes to insert into the spatial index.
         """
         from spatial_graph import PointRTree
 
-        if self._node_rtree is None:
-            bbox = new_attrs[self._bbox_attr_key]
-            if len(bbox) % 2 != 0:
-                raise ValueError(f"Bounding box coordinates must have even number of dimensions, got {len(bbox)}")
-            num_dims = len(bbox) // 2
-            if self._frame_attr_key is None:
-                self._ndims = num_dims
-            else:
-                self._ndims = num_dims + 1  # +1 for the frame dimension
+        for node_id, attrs in zip(node_ids, new_attrs, strict=True):
+            if self._node_rtree is None:
+                bbox = attrs[self._bbox_attr_key]
+                if len(bbox) % 2 != 0:
+                    raise ValueError(f"Bounding box coordinates must have even number of dimensions, got {len(bbox)}")
+                num_dims = len(bbox) // 2
+                if self._frame_attr_key is None:
+                    self._ndims = num_dims
+                else:
+                    self._ndims = num_dims + 1  # +1 for the frame dimension
 
-            self._node_rtree = PointRTree(
-                item_dtype="int64",
-                coord_dtype="float32",
-                dims=self._ndims,
+                self._node_rtree = PointRTree(
+                    item_dtype="int64",
+                    coord_dtype="float32",
+                    dims=self._ndims,
+                )
+
+            positions_min, positions_max = self._attrs_to_bb_window(attrs)
+
+            self._node_rtree.insert_bb_items(
+                np.atleast_1d(node_id).astype(np.int64),
+                positions_min,
+                positions_max,
             )
-
-        positions_min, positions_max = self._attrs_to_bb_window(new_attrs)
-
-        self._node_rtree.insert_bb_items(
-            np.atleast_1d(node_id).astype(np.int64),
-            positions_min,
-            positions_max,
-        )
 
     def _remove_node(
         self,
-        node_id: int,
-        old_attrs: dict[str, Any],
+        node_ids: list[int],
+        old_attrs: list[dict[str, Any]],
     ) -> None:
         """
-        Remove a node from the spatial filter.
+        Remove nodes from the spatial filter.
 
         Parameters
         ----------
-        node_id : int
-            The ID of the node to remove.
-        old_attrs : dict[str, Any]
+        node_ids : list[int]
+            The IDs of the nodes to remove.
+        old_attrs : list[dict[str, Any]]
             Previous node attributes used to remove the exact indexed bbox.
         """
         if self._node_rtree is None:
             return
 
-        positions_min, positions_max = self._attrs_to_bb_window(old_attrs)
+        for node_id, attrs in zip(node_ids, old_attrs, strict=True):
+            positions_min, positions_max = self._attrs_to_bb_window(attrs)
 
-        self._node_rtree.delete_items(
-            np.atleast_1d(node_id).astype(np.int64),
-            positions_min,
-            positions_max,
-        )
+            self._node_rtree.delete_items(
+                np.atleast_1d(node_id).astype(np.int64),
+                positions_min,
+                positions_max,
+            )
 
     def _update_node(
         self,
-        node_id: int,
-        old_attrs: dict[str, Any],
-        new_attrs: dict[str, Any],
+        node_ids: list[int],
+        old_attrs: list[dict[str, Any]],
+        new_attrs: list[dict[str, Any]],
     ) -> None:
-        self._remove_node(node_id, old_attrs=old_attrs)
-        self._add_node(node_id, new_attrs=new_attrs)
+        self._remove_node(node_ids, old_attrs)
+        self._add_node(node_ids, new_attrs)
 
     @staticmethod
     def _bboxes_to_array(bbox_series: pl.Series) -> np.ndarray:

@@ -27,8 +27,9 @@ def test_view_node_signals_fire_with_consistent_state(graph_backend: BaseGraph) 
     observations: list = []
 
     def make_slot(source: str, signal: str):
-        def slot(node_id: int, *_args) -> None:
-            observations.append((source, signal, node_id, graph_backend.has_node(node_id), view.has_node(node_id)))
+        def slot(node_ids: list[int], *_args) -> None:
+            for node_id in node_ids:
+                observations.append((source, signal, node_id, graph_backend.has_node(node_id), view.has_node(node_id)))
 
         return slot
 
@@ -67,8 +68,9 @@ def test_view_update_node_attrs_signal_fires_with_consistent_value(graph_backend
         return df.filter(pl.col(DEFAULT_ATTR_KEYS.NODE_ID) == nid)["x"].item()
 
     def make_slot(source: str):
-        def slot(nid: int, _old: dict, _new: dict) -> None:
-            observations.append((source, nid, attr_value(graph_backend, nid), attr_value(view, nid)))
+        def slot(node_ids: list[int], _old: list[dict], _new: list[dict]) -> None:
+            for nid in node_ids:
+                observations.append((source, nid, attr_value(graph_backend, nid), attr_value(view, nid)))
 
         return slot
 

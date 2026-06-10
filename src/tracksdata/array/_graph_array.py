@@ -415,15 +415,24 @@ class GraphArrayView(BaseReadOnlyArray):
         if slices is not None:
             self._cache.invalidate(time=time, volume_slicing=slices)
 
-    def _on_node_added(self, node_id: int, new_attrs: dict) -> None:
-        del node_id
-        self._invalidate_from_attrs(new_attrs)
+    def _on_node_added(
+        self,
+        node_ids: list[int],
+        new_attrs: list[dict],
+    ) -> None:
+        for attrs in new_attrs:
+            self._invalidate_from_attrs(attrs)
 
-    def _on_node_removed(self, node_id: int, old_attrs: dict) -> None:
-        del node_id
-        self._invalidate_from_attrs(old_attrs)
+    def _on_node_removed(self, node_ids: list[int], old_attrs: list[dict]) -> None:
+        for attrs in old_attrs:
+            self._invalidate_from_attrs(attrs)
 
-    def _on_node_updated(self, node_id: int, old_attrs: dict, new_attrs: dict) -> None:
-        del node_id
-        self._invalidate_from_attrs(old_attrs)
-        self._invalidate_from_attrs(new_attrs)
+    def _on_node_updated(
+        self,
+        node_ids: list[int],
+        old_attrs: list[dict],
+        new_attrs: list[dict],
+    ) -> None:
+        for old_attr, new_attr in zip(old_attrs, new_attrs, strict=True):
+            self._invalidate_from_attrs(old_attr)
+            self._invalidate_from_attrs(new_attr)
