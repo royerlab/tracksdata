@@ -110,9 +110,9 @@ class BaseGraph(abc.ABC):
     """
 
     _PRIVATE_METADATA_PREFIX = "__private_"
-    node_added = Signal(int, dict)
-    node_removed = Signal(int, dict)
-    node_updated = Signal(int, dict, dict)
+    node_added = Signal(list, list)
+    node_removed = Signal(list, list)
+    node_updated = Signal(list, list, list)
 
     def __init__(self) -> None:
         self._cache = {}

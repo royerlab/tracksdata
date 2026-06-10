@@ -2596,7 +2596,7 @@ def test_bulk_remove_nodes_emits_signal(graph_backend: BaseGraph) -> None:
     n2 = graph_backend.add_node({"t": 1})
 
     observed: list[int] = []
-    graph_backend.node_removed.connect(lambda nid, _attrs: observed.append(nid))
+    graph_backend.node_removed.connect(lambda node_ids, _attrs: observed.extend(node_ids))
 
     graph_backend.bulk_remove_nodes([n1, n2])
     assert observed == [n1, n2]

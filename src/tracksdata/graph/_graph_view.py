@@ -401,10 +401,8 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         else:
             self._out_of_sync = True
 
-        if is_signal_on(self._root.node_added):
-            self._root.node_added.emit(parent_node_id, attrs)
-        if is_signal_on(self.node_added):
-            self.node_added.emit(parent_node_id, attrs)
+        emit_node_added_events(self._root.node_added, [(parent_node_id, attrs)])
+        emit_node_added_events(self.node_added, [(parent_node_id, attrs)])
 
         return parent_node_id
 
