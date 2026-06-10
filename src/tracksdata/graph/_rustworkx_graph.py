@@ -611,34 +611,6 @@ class RustWorkXGraph(BaseGraph):
         if emit:
             emit_node_removed_events(self.node_removed, ((nid, captured[nid]) for nid in node_ids))
 
-    def add_edge(
-        self,
-        source_id: int,
-        target_id: int,
-        attrs: dict[str, Any],
-        validate_keys: bool = True,
-    ) -> int:
-        """
-        Add an edge to the graph.
-
-        Parameters
-        ----------
-        source_id : int
-            The ID of the source node.
-        target_id : int
-            The ID of the target node.
-        attrs : dict[str, Any]
-            The attributes of the edge to be added.
-            The keys of the attributes will be used as the attributes of the edge.
-        validate_keys : bool
-            Whether to check if the attributes keys are valid.
-            If False, the attributes keys will not be checked,
-            useful to speed up the operation when doing bulk insertions.
-        """
-        if validate_keys:
-            self._validate_attributes(attrs, self.edge_attr_keys(), "edge")
-        return self._add_edge_local(source_id, target_id, attrs)
-
     def bulk_add_edges(self, edges: list[dict[str, Any]], return_ids: bool = False) -> list[int] | None:
         """
         Faster method to add multiple edges to the graph with less overhead and fewer checks.
@@ -1829,36 +1801,6 @@ class IndexedRXGraph(MappedGraphMixin, RustWorkXGraph):
         Get the node ids of dividing nodes (nodes with out-degree == 2).
         """
         return self._map_to_external(super().dividing_nodes())
-
-    def add_edge(
-        self,
-        source_id: int,
-        target_id: int,
-        attrs: dict[str, Any],
-        validate_keys: bool = True,
-    ) -> int:
-        """
-        Add an edge to the graph.
-
-        Parameters
-        ----------
-        source_id : int
-            The source node id.
-        target_id : int
-            The target node id.
-        attrs : dict[str, Any]
-            The attributes of the edge.
-        validate_keys : bool
-            Whether to validate the keys of the attributes.
-
-        Returns
-        -------
-        int
-            The edge id.
-        """
-        source_id = self._map_to_local(source_id)
-        target_id = self._map_to_local(target_id)
-        return super().add_edge(source_id, target_id, attrs, validate_keys)
 
     def bulk_add_edges(
         self,

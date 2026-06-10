@@ -970,61 +970,6 @@ class SQLGraph(BaseGraph):
         if emit_signal:
             emit_node_removed_events(self.node_removed, ((nid, old_attrs_per_node[nid]) for nid in node_ids))
 
-    def add_edge(
-        self,
-        source_id: int,
-        target_id: int,
-        attrs: dict[str, Any],
-        validate_keys: bool = True,
-    ) -> int:
-        """
-        Add an edge to the graph.
-
-        Parameters
-        ----------
-        source_id : int
-            The ID of the source node.
-        target_id : int
-            The ID of the target node.
-        attrs : dict[str, Any]
-            Additional attributes for the edge (e.g., weight, distance).
-        validate_keys : bool, default True
-            Whether to check if the attribute keys are valid against the
-            current schema. If False, validation is skipped for performance.
-
-        Returns
-        -------
-        int
-            The ID of the newly added edge.
-
-        Raises
-        ------
-        ValueError
-            If validate_keys is True and the attributes contain invalid keys.
-
-        Examples
-        --------
-        ```python
-        edge_id = graph.add_edge(node1_id, node2_id, {"weight": 0.8})
-        edge_id = graph.add_edge(node1_id, node2_id, {"weight": 0.9, "distance": 5.2, "confidence": 0.95})
-        ```
-        """
-        if validate_keys:
-            self._validate_attributes(attrs, self.edge_attr_keys(), "edge")
-
-        if hasattr(source_id, "item"):
-            source_id = source_id.item()
-
-        if hasattr(target_id, "item"):
-            target_id = target_id.item()
-
-        edge = {
-            DEFAULT_ATTR_KEYS.EDGE_SOURCE: source_id,
-            DEFAULT_ATTR_KEYS.EDGE_TARGET: target_id,
-            **attrs,
-        }
-        return self.bulk_add_edges([edge], return_ids=True)[0]
-
     def bulk_add_edges(
         self,
         edges: list[dict[str, Any]],

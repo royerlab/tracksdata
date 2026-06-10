@@ -282,7 +282,6 @@ class BaseGraph(abc.ABC):
             If any node_id does not exist in the graph.
         """
 
-    @abc.abstractmethod
     def add_edge(
         self,
         source_id: int,
@@ -292,6 +291,10 @@ class BaseGraph(abc.ABC):
     ) -> int:
         """
         Add an edge to the graph.
+
+        Validates the attributes (when ``validate_keys`` is set) and then delegates
+        to :meth:`bulk_add_edges`; backends implement the bulk form and inherit this
+        single-edge wrapper.
 
         Parameters
         ----------
@@ -311,6 +314,17 @@ class BaseGraph(abc.ABC):
         int
             The ID of the added edge.
         """
+        if validate_keys:
+            self._validate_attributes(attrs, self.edge_attr_keys(), "edge")
+
+        # Normalise numpy scalar endpoints to native ints (required by the SQL backend).
+        if hasattr(source_id, "item"):
+            source_id = source_id.item()
+        if hasattr(target_id, "item"):
+            target_id = target_id.item()
+
+        edge = {DEFAULT_ATTR_KEYS.EDGE_SOURCE: source_id, DEFAULT_ATTR_KEYS.EDGE_TARGET: target_id, **attrs}
+        return self.bulk_add_edges([edge], return_ids=True)[0]
 
     @abc.abstractmethod
     def remove_edge(
