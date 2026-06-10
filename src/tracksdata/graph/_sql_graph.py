@@ -2398,33 +2398,6 @@ class SQLGraph(BaseGraph):
                 raise ValueError(f"Edge {source_id}->{target_id} does not exist in the graph.")
             return edge_id
 
-    def remove_edge(
-        self,
-        source_id: int | None = None,
-        target_id: int | None = None,
-        *,
-        edge_id: int | None = None,
-    ) -> None:
-        """
-        Remove an edge from the graph either by its ID or by its endpoints.
-        """
-        if edge_id is not None:
-            self.bulk_remove_edges([edge_id])
-            return
-
-        if source_id is None or target_id is None:
-            raise ValueError("Provide either edge_id or both source_id and target_id.")
-
-        with Session(self._engine) as session:
-            deleted = (
-                session.query(self.Edge)
-                .filter(self.Edge.source_id == source_id, self.Edge.target_id == target_id)
-                .delete()
-            )
-            if not deleted:
-                raise ValueError(f"Edge {source_id}->{target_id} does not exist in the graph.")
-            session.commit()
-
     def bulk_remove_edges(self, edge_ids: Sequence[int]) -> None:
         """
         Remove multiple edges from the graph by their edge IDs.

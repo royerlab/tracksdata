@@ -326,7 +326,6 @@ class BaseGraph(abc.ABC):
         edge = {DEFAULT_ATTR_KEYS.EDGE_SOURCE: source_id, DEFAULT_ATTR_KEYS.EDGE_TARGET: target_id, **attrs}
         return self.bulk_add_edges([edge], return_ids=True)[0]
 
-    @abc.abstractmethod
     def remove_edge(
         self,
         source_id: int | None = None,
@@ -339,6 +338,9 @@ class BaseGraph(abc.ABC):
 
         Either provide `edge_id` to remove by edge identifier, or
         provide both `source_id` and `target_id` to remove by endpoints.
+        Endpoint removal is resolved to an edge id via
+        [edge_id][tracksdata.graph.BaseGraph.edge_id]; the deletion itself is
+        delegated to [bulk_remove_edges][tracksdata.graph.BaseGraph.bulk_remove_edges].
 
         Parameters
         ----------
@@ -354,6 +356,11 @@ class BaseGraph(abc.ABC):
         ValueError
             If the specified edge does not exist or insufficient identifiers are provided.
         """
+        if edge_id is None:
+            if source_id is None or target_id is None:
+                raise ValueError("Provide either edge_id or both source_id and target_id.")
+            edge_id = self.edge_id(source_id, target_id)
+        self.bulk_remove_edges([edge_id])
 
     @abc.abstractmethod
     def bulk_remove_edges(self, edge_ids: Sequence[int]) -> None:
