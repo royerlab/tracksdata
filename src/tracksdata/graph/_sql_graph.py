@@ -936,18 +936,8 @@ class SQLGraph(BaseGraph):
         emit_signal = is_signal_on(self.node_removed)
         chunk_size = self._sql_chunk_size()
 
+        unique_ids = set(node_ids)
         with Session(self._engine) as session:
-            # Validate that all requested node ids exist before doing any destructive work.
-            existing: set[int] = set()
-            for i in range(0, len(node_ids), chunk_size):
-                chunk = node_ids[i : i + chunk_size]
-                existing.update(
-                    row[0] for row in session.query(self.Node.node_id).filter(self.Node.node_id.in_(chunk)).all()
-                )
-            missing = [nid for nid in node_ids if nid not in existing]
-            if missing:
-                raise ValueError(f"Node {missing[0]} does not exist in the graph.")
-
             old_attrs_per_node: dict[int, dict[str, Any]] = {}
             if emit_signal:
                 attr_keys = self.node_attr_keys()
@@ -956,6 +946,10 @@ class SQLGraph(BaseGraph):
                     for node in session.query(self.Node).filter(self.Node.node_id.in_(chunk)).all():
                         old_attrs_per_node[node.node_id] = {key: getattr(node, key) for key in attr_keys}
 
+            # Delete incident edges/overlaps and the nodes in a single pass; the node
+            # delete rowcount tells us how many requested nodes actually existed,
+            # avoiding a separate up-front existence query on the happy path.
+            deleted = 0
             for i in range(0, len(node_ids), chunk_size):
                 chunk = node_ids[i : i + chunk_size]
                 session.query(self.Edge).filter(
@@ -964,7 +958,23 @@ class SQLGraph(BaseGraph):
                 session.query(self.Overlap).filter(
                     sa.or_(self.Overlap.source_id.in_(chunk), self.Overlap.target_id.in_(chunk))
                 ).delete(synchronize_session=False)
-                session.query(self.Node).filter(self.Node.node_id.in_(chunk)).delete(synchronize_session=False)
+                deleted += (
+                    session.query(self.Node).filter(self.Node.node_id.in_(chunk)).delete(synchronize_session=False)
+                )
+
+            if deleted != len(unique_ids):
+                # Some requested nodes were missing: discard the deletes instead of
+                # committing, then identify a missing id for the error message.
+                session.rollback()
+                existing: set[int] = set()
+                for i in range(0, len(node_ids), chunk_size):
+                    chunk = node_ids[i : i + chunk_size]
+                    existing.update(
+                        row[0] for row in session.query(self.Node.node_id).filter(self.Node.node_id.in_(chunk)).all()
+                    )
+                missing = [nid for nid in node_ids if nid not in existing]
+                raise ValueError(f"Node {missing[0]} does not exist in the graph.")
+
             session.commit()
 
         if emit_signal:
