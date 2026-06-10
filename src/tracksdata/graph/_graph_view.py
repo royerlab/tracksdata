@@ -5,7 +5,7 @@ import bidict
 import polars as pl
 import rustworkx as rx
 
-from tracksdata.attrs import AttrComparison
+from tracksdata.attrs import Filter
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.graph._mapped_graph_mixin import MappedGraphMixin
@@ -242,7 +242,7 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
 
     def filter(
         self,
-        *attr_filters: AttrComparison,
+        *attr_filters: Filter,
         node_ids: Sequence[int] | None = None,
         include_targets: bool = False,
         include_sources: bool = False,

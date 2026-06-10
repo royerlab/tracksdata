@@ -1,4 +1,5 @@
 import binascii
+import functools
 import re
 import uuid
 import weakref
@@ -17,7 +18,7 @@ from sqlalchemy.orm import DeclarativeBase, Session, aliased, load_only
 from sqlalchemy.orm.query import Query
 from sqlalchemy.sql.type_api import TypeEngine
 
-from tracksdata.attrs import AttrComparison, split_attr_comps
+from tracksdata.attrs import AttrComparison, AttrFilter, Filter, split_attr_comps
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.graph.filters._base_filter import BaseFilter
@@ -63,6 +64,28 @@ def _data_numpy_to_native(data: dict[str, Any]) -> None:
     for k, v in data.items():
         if np.isscalar(v) and hasattr(v, "item"):
             data[k] = v.item()
+
+
+def _to_sql_clause(f: Filter, table: type[DeclarativeBase]) -> Any:
+    """Translate an AttrComparison or AttrFilter into a SQLAlchemy clause."""
+    if isinstance(f, AttrComparison):
+        return f.op(getattr(table, str(f.column)), f.other)
+
+    assert isinstance(f, AttrFilter)
+    if f.op == "not":
+        # AttrFilter.__init__ enforces exactly one operand for "not"
+        return sa.not_(_to_sql_clause(f.operands[0], table))
+
+    clauses = [_to_sql_clause(o, table) for o in f.operands]
+    if f.op == "and":
+        return sa.and_(*clauses)
+    if f.op == "or":
+        return sa.or_(*clauses)
+    # xor: reduce pairwise via (a OR b) AND NOT (a AND b)
+    return functools.reduce(
+        lambda a, b: sa.and_(sa.or_(a, b), sa.not_(sa.and_(a, b))),
+        clauses,
+    )
 
 
 # Module-level (not methods) so they can be registered with ``weakref.finalize``
@@ -140,10 +163,12 @@ def _close_id_set(id_set: "_SQLIDSet") -> None:
 def _filter_query(
     query: sa.Select,
     table: type[DeclarativeBase],
-    attr_filters: list[AttrComparison],
+    attr_filters: Sequence[Filter],
 ) -> sa.Select:
     """
-    Filter a query by a list of attribute filters.
+    Filter a query by a list of attribute filters (AND-ed together at the top
+    level). Each filter may itself be a compound AttrFilter combining
+    AttrComparisons with OR / AND / XOR / NOT.
 
     Parameters
     ----------
@@ -151,7 +176,7 @@ def _filter_query(
         The query to filter.
     table : type[DeclarativeBase]
         The table to filter.
-    attr_filters : list[AttrComparison]
+    attr_filters : Sequence[Filter]
         The attribute filters to apply.
 
     Returns
@@ -160,9 +185,7 @@ def _filter_query(
         The filtered query.
     """
     LOG.info("Filter query:\n%s", attr_filters)
-    query = query.filter(
-        *[attr_filter.op(getattr(table, str(attr_filter.column)), attr_filter.other) for attr_filter in attr_filters]
-    )
+    query = query.filter(*[_to_sql_clause(f, table) for f in attr_filters])
     return query
 
 
@@ -180,7 +203,7 @@ class SQLFilter(BaseFilter):
 
     def __init__(
         self,
-        *attr_filters: AttrComparison,
+        *attr_filters: Filter,
         graph: "SQLGraph",
         node_ids: Sequence[int] | None = None,
         include_targets: bool = False,
@@ -831,7 +854,7 @@ class SQLGraph(BaseGraph):
 
     def filter(
         self,
-        *attr_filters: AttrComparison,
+        *attr_filters: Filter,
         node_ids: Sequence[int] | None = None,
         include_targets: bool = False,
         include_sources: bool = False,

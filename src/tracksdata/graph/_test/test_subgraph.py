@@ -781,6 +781,98 @@ def test_homemorphism(graph_backend: BaseGraph) -> None:
 
 
 @parametrize_subgraph_tests
+def test_filter_nodes_with_or_attr_filter(
+    graph_backend: BaseGraph,
+    use_subgraph: bool,
+) -> None:
+    """OR-combined node filter selects the union of matching nodes."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+    node_attrs = graph_with_data.node_attrs()
+
+    nodes = graph_with_data.filter((NodeAttr("t") == 1) | (NodeAttr("t") == 3)).node_ids()
+    expected = node_attrs.filter(pl.col("t").is_in([1, 3]))[DEFAULT_ATTR_KEYS.NODE_ID].to_list()
+    assert set(nodes) == set(expected)
+
+
+@parametrize_subgraph_tests
+def test_filter_nodes_with_not_attr_filter(
+    graph_backend: BaseGraph,
+    use_subgraph: bool,
+) -> None:
+    """NOT (inverted) node filter selects the complement of matching nodes."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+    node_attrs = graph_with_data.node_attrs()
+
+    nodes = graph_with_data.filter(~(NodeAttr("label") == "A")).node_ids()
+    expected = node_attrs.filter(pl.col("label") != "A")[DEFAULT_ATTR_KEYS.NODE_ID].to_list()
+    assert set(nodes) == set(expected)
+
+
+@parametrize_subgraph_tests
+def test_filter_nodes_with_xor_attr_filter(
+    graph_backend: BaseGraph,
+    use_subgraph: bool,
+) -> None:
+    """XOR node filter selects nodes matching exactly one of the conditions."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+    node_attrs = graph_with_data.node_attrs()
+
+    nodes = graph_with_data.filter((NodeAttr("t") == 2) ^ (NodeAttr("label") == "A")).node_ids()
+    expected = node_attrs.filter((pl.col("t") == 2) ^ (pl.col("label") == "A"))[DEFAULT_ATTR_KEYS.NODE_ID].to_list()
+    assert set(nodes) == set(expected)
+
+
+@parametrize_subgraph_tests
+def test_filter_nodes_with_nested_compound(
+    graph_backend: BaseGraph,
+    use_subgraph: bool,
+) -> None:
+    """Nested AND/OR filter trees evaluate correctly."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+    node_attrs = graph_with_data.node_attrs()
+
+    nodes = graph_with_data.filter(
+        (NodeAttr("label") == "A") & ((NodeAttr("t") == 1) | (NodeAttr("t") == 3))
+    ).node_ids()
+    expected = node_attrs.filter((pl.col("label") == "A") & (pl.col("t").is_in([1, 3])))[
+        DEFAULT_ATTR_KEYS.NODE_ID
+    ].to_list()
+    assert set(nodes) == set(expected)
+
+
+def test_filter_edges_with_or_attr_filter(graph_backend: BaseGraph) -> None:
+    """OR-combined edge filter selects the union of matching edges."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
+    edge_attrs = graph_with_data.edge_attrs()
+
+    edge_filter = graph_with_data.filter((EdgeAttr("weight") < 0.4) | (EdgeAttr("weight") > 0.8))
+    selected_edges = edge_filter.edge_attrs()[DEFAULT_ATTR_KEYS.EDGE_ID].to_list()
+    expected = edge_attrs.filter((pl.col("weight") < 0.4) | (pl.col("weight") > 0.8))[
+        DEFAULT_ATTR_KEYS.EDGE_ID
+    ].to_list()
+    assert set(selected_edges) == set(expected)
+
+
+def test_filter_subgraph_with_or_attr_filter(graph_backend: BaseGraph) -> None:
+    """Building a subgraph from a compound (OR) filter yields the expected nodes/edges."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
+    node_attrs = graph_with_data.node_attrs()
+
+    sub = graph_with_data.filter((NodeAttr("t") == 1) | (NodeAttr("t") == 2)).subgraph()
+    expected = node_attrs.filter(pl.col("t").is_in([1, 2]))[DEFAULT_ATTR_KEYS.NODE_ID].to_list()
+    assert set(sub.node_ids()) == set(expected)
+
+
+def test_filter_compound_mixed_node_and_edge_raises(graph_backend: BaseGraph) -> None:
+    """A single compound filter cannot mix node and edge attributes."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
+
+    bad_filter = (NodeAttr("t") == 1) | (EdgeAttr("weight") > 0.5)
+    with pytest.raises(ValueError, match="cannot mix NodeAttr and EdgeAttr"):
+        graph_with_data.filter(bad_filter).node_ids()
+
+
+@parametrize_subgraph_tests
 def test_subgraph_overlaps_basic(graph_backend: BaseGraph, use_subgraph: bool) -> None:
     """Test basic overlap functionality in subgraphs."""
     graph_with_data = create_test_graph(graph_backend, use_subgraph)

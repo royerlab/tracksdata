@@ -15,7 +15,7 @@ from numpy.typing import ArrayLike, DTypeLike
 from psygnal import Signal
 from zarr.storage import StoreLike
 
-from tracksdata.attrs import AttrComparison, NodeAttr
+from tracksdata.attrs import Filter, NodeAttr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.utils._cache import cache_method
 from tracksdata.utils._dtypes import (
@@ -645,8 +645,8 @@ class BaseGraph(abc.ABC):
     def _validate_subgraph_args(
         self,
         node_ids: Sequence[int] | None = None,
-        node_attr_comps: list[AttrComparison] | None = None,
-        edge_attr_comps: list[AttrComparison] | None = None,
+        node_attr_comps: list[Filter] | None = None,
+        edge_attr_comps: list[Filter] | None = None,
     ) -> None:
         if node_ids is None and not node_attr_comps and not edge_attr_comps:
             raise ValueError("Either node IDs or one of the attributes' comparisons must be provided")
@@ -666,7 +666,7 @@ class BaseGraph(abc.ABC):
     @abc.abstractmethod
     def filter(
         self,
-        *attr_filters: AttrComparison,
+        *attr_filters: Filter,
         node_ids: Sequence[int] | None = None,
         include_targets: bool = False,
         include_sources: bool = False,
@@ -674,10 +674,14 @@ class BaseGraph(abc.ABC):
         """
         Creates a filter object that can be used to create a subgraph or query ids and attributes.
 
+        Multiple positional filters are implicitly AND-ed together. Each filter
+        can itself be a compound `AttrFilter` built from `AttrComparison`s using
+        `&`, `|`, `^`, `~` (e.g. `(NodeAttr("t") == 1) | (NodeAttr("t") == 2)`).
+
         Parameters
         ----------
-        *attr_filters : AttrComparison
-            The attributes to filter the nodes by.
+        *attr_filters : Filter
+            The attribute filters to apply. Positional args are AND-ed.
         node_ids : Sequence[int] | None
             The IDs of the nodes to include in the filter.
             If None, all nodes are used.
