@@ -93,6 +93,34 @@ def _list_to_pl_series(key: str, values: list[Any], schema: AttrSchema) -> pl.Se
     return s
 
 
+def _extract_field_path(value: Any, field_path: tuple[str, ...]) -> Any:
+    """Walk a struct field path through a Python attribute value.
+
+    Rustworkx stores attributes as plain Python objects (typically dicts for
+    struct attrs) rather than polars columns, so struct-field filters can't be
+    pushed down into an expression — we walk the path manually here. We also
+    accept sequence- and attribute-style access to keep this robust for users
+    who pass nested dataclasses or tuples through the attr dict.
+    """
+    for field in field_path:
+        if value is None:
+            return None
+
+        if isinstance(value, dict):
+            value = value.get(field, None)
+            continue
+
+        try:
+            value = value[field]
+        except (KeyError, IndexError, TypeError):
+            try:
+                value = getattr(value, field)
+            except AttributeError:
+                return None
+
+    return value
+
+
 def _eval_filter(
     f: Filter,
     attrs: dict[str, Any],
@@ -101,6 +129,8 @@ def _eval_filter(
     """Evaluate a single comparison or compound filter against an attrs dict."""
     if isinstance(f, AttrComparison):
         value = attrs.get(f.column, schema[f.column].default_value)
+        if f.attr.field_path:
+            value = _extract_field_path(value, f.attr.field_path)
         return bool(f.op(value, f.other))
 
     assert isinstance(f, AttrFilter)

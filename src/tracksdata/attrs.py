@@ -201,7 +201,10 @@ class AttrComparison(Filter):
             raise ValueError(f"Comparison operators are not supported for multiple columns. Found {columns}.")
 
         self.attr = attr
-        self.column = columns[0]
+        # Prefer the explicitly tracked root_column so struct-field comparisons
+        # (e.g. `NodeAttr("m").struct.field("x") == 1`) record the parent storage
+        # column ("m"), letting backends remap to their physical layout via field_path.
+        self.column = attr.root_column if attr.root_column is not None else columns[0]
         self.op = op
 
         # casting numpy scalars to python scalars
@@ -216,14 +219,18 @@ class AttrComparison(Filter):
         self.other = other
 
     def __repr__(self) -> str:
-        return f"{type(self.attr).__name__}({self.column}) {_OPS_MATH_SYMBOLS[self.op]} {self.other}"
+        if self.attr.field_path:
+            column = ".".join([str(self.column), *self.attr.field_path])
+        else:
+            column = str(self.column)
+        return f"{type(self.attr).__name__}({column}) {_OPS_MATH_SYMBOLS[self.op]} {self.other}"
 
     def to_attr(self) -> "Attr":
         """
         Transform the comparison back to an [Attr][tracksdata.attrs.Attr] object.
         This is useful for evaluating the expression on a DataFrame.
         """
-        return Attr(self.op(pl.col(self.column), self.other))
+        return Attr(self.op(self.attr.expr, self.other))
 
     @property
     def columns(self) -> list[str]:
@@ -268,6 +275,39 @@ class AttrComparison(Filter):
     def __ge__(self, other: ExprInput) -> "Attr": ...
 
 
+class _StructNamespace:
+    """Wrapper around polars struct namespace that preserves Attr semantics.
+
+    Polars' own ``Expr.struct.field(name)`` only updates the underlying expression;
+    it loses the parent column identity, which backends need to map a filter back
+    to its physical storage (e.g. SQL flat columns, dict lookups in rustworkx).
+    This wrapper proxies the namespace while threading ``root_column`` and
+    ``field_path`` through ``.field(...)`` calls.
+    """
+
+    def __init__(self, attr: "Attr") -> None:
+        self._attr = attr
+        self._namespace = attr.expr.struct
+
+    def field(self, name: str) -> "Attr":
+        # preserve_field_path keeps the existing root/path before appending the new field.
+        out = self._attr._wrap(self._namespace.field(name), preserve_field_path=True)
+        # _namespace.field() always returns a polars Expr, so _wrap always yields an Attr here.
+        out._append_field_path(name)
+        return out
+
+    def __getattr__(self, name: str) -> Any:
+        namespace_attr = getattr(self._namespace, name)
+        if callable(namespace_attr):
+
+            @functools.wraps(namespace_attr)
+            def _wrapped(*args, **kwargs):
+                return self._attr._wrap(namespace_attr(*args, **kwargs))
+
+            return _wrapped
+        return namespace_attr
+
+
 class Attr:
     """
     A class to compose an attribute expression for attribute filtering or value evaluation.
@@ -292,30 +332,43 @@ class Attr:
     def __init__(self, value: ExprInput) -> None:
         self._inf_exprs = []  # expressions multiplied by +inf
         self._neg_inf_exprs = []  # expressions multiplied by -inf
+        # Path-tracking for backend filters:
+        # - root_column: top-level column used to store the value.
+        # - field_path: nested struct path from that root column.
+        self._root_column: str | None = None
+        self._field_path: tuple[str, ...] = ()
 
         if isinstance(value, str):
             self.expr = pl.col(value)
+            self._root_column = value
         elif isinstance(value, Attr):
             self.expr = value.expr
             # Copy infinity tracking from the other AttrExpr
             self._inf_exprs = value.inf_exprs
             self._neg_inf_exprs = value.neg_inf_exprs
+            self._root_column = value.root_column
+            self._field_path = value.field_path
         elif isinstance(value, AttrComparison):
             attr = value.to_attr()
             self.expr = attr.expr
             self._inf_exprs = attr.inf_exprs
             self._neg_inf_exprs = attr.neg_inf_exprs
+            self._root_column = attr.root_column
+            self._field_path = attr.field_path
         elif isinstance(value, Expr):
             self.expr = value
         else:
             self.expr = pl.lit(value)
 
-    def _wrap(self, expr: ExprInput) -> Union["Attr", Any]:
+    def _wrap(self, expr: ExprInput, *, preserve_field_path: bool = False) -> Union["Attr", Any]:
         if isinstance(expr, Expr):
-            result = Attr(expr)
+            result = type(self)(expr)
             # Propagate infinity tracking
             result._inf_exprs = self._inf_exprs.copy()
             result._neg_inf_exprs = self._neg_inf_exprs.copy()
+            if preserve_field_path:
+                result._root_column = self._root_column
+                result._field_path = self._field_path
             return result
         return expr
 
@@ -438,6 +491,33 @@ class Attr:
         return list(dict.fromkeys(self.expr_columns + self.inf_columns + self.neg_inf_columns))
 
     @property
+    def root_column(self) -> str | None:
+        """
+        Top-level column name from which this expression originates.
+
+        Examples
+        --------
+        `Attr("t").root_column == "t"`
+        `NodeAttr("measurements").struct.field("score").root_column == "measurements"`
+        """
+        return self._root_column
+
+    @property
+    def field_path(self) -> tuple[str, ...]:
+        """
+        Nested struct-field path relative to [root_column][tracksdata.attrs.Attr.root_column].
+
+        Empty tuple means no nested access.
+
+        Examples
+        --------
+        `Attr("t").field_path == ()`
+        `NodeAttr("measurements").struct.field("score").field_path == ("score",)`
+        `NodeAttr("meta").struct.field("det").struct.field("conf").field_path == ("det", "conf")`
+        """
+        return self._field_path
+
+    @property
     def inf_exprs(self) -> list["Attr"]:
         """Get the expressions multiplied by positive infinity."""
         return self._inf_exprs.copy()
@@ -524,6 +604,9 @@ class Attr:
         if attr.startswith("_"):
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{attr}'")
 
+        if attr == "struct":
+            return _StructNamespace(self)
+
         # To auto generate operator methods such as `.log()``
         expr_attr = getattr(self.expr, attr)
         if callable(expr_attr):
@@ -534,6 +617,12 @@ class Attr:
 
             return _wrapped
         return expr_attr
+
+    def _append_field_path(self, field_name: str) -> None:
+        if self._root_column is None:
+            self._field_path = ()
+        else:
+            self._field_path = (*self._field_path, field_name)
 
     def __repr__(self) -> str:
         return f"Attr({self.expr})"
@@ -880,4 +969,9 @@ def polars_reduce_attr_comps(
     """
     if not attr_comps:
         raise ValueError("No attribute comparisons provided.")
+    # `f.to_attr().expr` lets each filter render its own expression. For
+    # `AttrComparison` over a struct field, that expression already drills into
+    # the struct (e.g. `pl.col("m").struct.field("x")`) rather than reading the
+    # bare column. For compound `AttrFilter`s, it returns the combined boolean
+    # expression.
     return pl.reduce(reduce_op, [f.to_attr().expr for f in attr_comps])
