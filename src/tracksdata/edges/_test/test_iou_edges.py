@@ -4,6 +4,7 @@ import pytest
 
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.edges import IoUEdgeAttr
+from tracksdata.edges._iou_edges import _mask_iou
 from tracksdata.graph import RustWorkXGraph
 from tracksdata.nodes import Mask
 from tracksdata.options import get_options, options_context
@@ -15,7 +16,7 @@ def test_iou_edges_init_default() -> None:
 
     assert operator.output_key == "iou_score"
     assert operator.attr_keys == DEFAULT_ATTR_KEYS.MASK
-    assert operator.func == Mask.iou
+    assert operator.func == _mask_iou
 
 
 def test_iou_edges_init_custom() -> None:
@@ -24,7 +25,7 @@ def test_iou_edges_init_custom() -> None:
 
     assert operator.output_key == "custom_iou"
     assert operator.attr_keys == "custom_mask"
-    assert operator.func == Mask.iou
+    assert operator.func == _mask_iou
 
 
 @pytest.mark.parametrize("n_workers", [1, 2])

@@ -19,6 +19,28 @@ if TYPE_CHECKING:
     from tracksdata.graph._base_graph import BaseGraph
 
 
+def _pack_mask_array(mask: NDArray) -> bytes:
+    """Compress a mask array into a blosc2 cframe."""
+    mask = np.ascontiguousarray(mask)
+    prev_nthreads = blosc2.set_nthreads(1)
+    # Bypass blosc2 printing overhead by directly creating a schunk and converting it to cframe,
+    # instead of using blosc2.pack_tensor
+    schunk = blosc2.SChunk(data=mask)
+    dtype = mask.dtype.descr if mask.dtype.kind == "V" else mask.dtype.str
+    schunk.vlmeta["__pack_tensor__"] = ("numpy", mask.shape, dtype)
+    cframe = schunk.to_cframe()
+    blosc2.set_nthreads(prev_nthreads)
+    return cframe
+
+
+def _unpack_mask_array(data: bytes) -> NDArray:
+    """Decompress a blosc2 cframe into a mask array."""
+    prev_nthreads = blosc2.set_nthreads(1)
+    mask = blosc2.unpack_tensor(data)
+    blosc2.set_nthreads(prev_nthreads)
+    return mask
+
+
 @lru_cache(maxsize=5)
 def _nd_sphere(
     radius: int,
@@ -66,20 +88,11 @@ class Mask:
 
     def __getstate__(self) -> dict:
         data_dict = self.__dict__.copy()
-        prev_nthreads = blosc2.set_nthreads(1)
-        # Bypass blosc2 printing overhead by directly creating a schunk and converting it to cframe,
-        # instead of using blosc2.pack_tensor
-        schunk = blosc2.SChunk(data=self._mask)
-        dtype = self._mask.dtype.descr if self._mask.dtype.kind == "V" else self._mask.dtype.str
-        schunk.vlmeta["__pack_tensor__"] = ("numpy", self._mask.shape, dtype)
-        data_dict["_mask"] = schunk.to_cframe()
-        blosc2.set_nthreads(prev_nthreads)
+        data_dict["_mask"] = _pack_mask_array(self._mask)
         return data_dict
 
     def __setstate__(self, state: dict) -> None:
-        prev_nthreads = blosc2.set_nthreads(1)
-        state["_mask"] = blosc2.unpack_tensor(state["_mask"])
-        blosc2.set_nthreads(prev_nthreads)
+        state["_mask"] = _unpack_mask_array(state["_mask"])
         self.__dict__.update(state)
 
     @property
@@ -497,6 +510,115 @@ class Mask:
             return False
         return np.array_equal(self.bbox, other.bbox) and np.array_equal(self.mask, other.mask)
 
+    MASK_DATA_FIELD = "data"
+
+    @staticmethod
+    def bbox_struct_fields(ndim: int) -> list[str]:
+        """
+        Names of the bounding box fields of the mask struct attribute.
+
+        Fields follow the ``bbox`` layout (start indices then end indices),
+        named after the (z), y, x axis convention, e.g. for 2D:
+        ``["min_y", "min_x", "max_y", "max_x"]``.
+
+        Parameters
+        ----------
+        ndim : int
+            The number of spatial dimensions (2 or 3).
+
+        Returns
+        -------
+        list[str]
+            The bounding box field names.
+        """
+        if ndim < 1 or ndim > 3:
+            raise ValueError(f"Mask struct attributes are only supported for 1D to 3D masks, got ndim={ndim}")
+        axes = "zyx"[-ndim:]
+        return [f"min_{a}" for a in axes] + [f"max_{a}" for a in axes]
+
+    @staticmethod
+    def struct_dtype(ndim: int) -> pl.Struct:
+        """
+        Polars struct dtype used to store a `Mask` as a struct attribute.
+
+        Bounding box coordinates are scalar integer fields so backends can
+        filter on them natively (e.g. `NodeAttr("mask").struct.field("min_y") > 5`),
+        while the binary mask is stored blosc2-compressed in the ``data`` field.
+
+        Parameters
+        ----------
+        ndim : int
+            The number of spatial dimensions (2 or 3).
+
+        Returns
+        -------
+        pl.Struct
+            The struct dtype, e.g. for 2D:
+            `pl.Struct({"min_y": Int64, "min_x": Int64, "max_y": Int64, "max_x": Int64, "data": Binary})`.
+        """
+        fields = dict.fromkeys(Mask.bbox_struct_fields(ndim), pl.Int64)
+        fields[Mask.MASK_DATA_FIELD] = pl.Binary
+        return pl.Struct(fields)
+
+    def to_struct(self) -> dict[str, Any]:
+        """
+        Convert the mask to a dict matching [struct_dtype][tracksdata.nodes.Mask.struct_dtype].
+
+        Returns
+        -------
+        dict[str, Any]
+            Scalar bounding box fields plus the blosc2-compressed mask under ``"data"``.
+        """
+        fields = self.bbox_struct_fields(self._mask.ndim)
+        value: dict[str, Any] = {f: int(b) for f, b in zip(fields, self._bbox, strict=True)}
+        value[self.MASK_DATA_FIELD] = _pack_mask_array(self._mask)
+        return value
+
+    @classmethod
+    def from_struct(cls, value: dict[str, Any]) -> "Mask":
+        """
+        Reconstruct a mask from a struct attribute value.
+
+        Parameters
+        ----------
+        value : dict[str, Any]
+            A dict as produced by [to_struct][tracksdata.nodes.Mask.to_struct].
+
+        Returns
+        -------
+        Mask
+            The reconstructed mask.
+        """
+        mask = _unpack_mask_array(value[cls.MASK_DATA_FIELD])
+        fields = cls.bbox_struct_fields(mask.ndim)
+        bbox = np.asarray([value[f] for f in fields], dtype=np.int64)
+        return cls(mask, bbox)
+
+
+def as_mask(value: "Mask | dict[str, Any]") -> Mask:
+    """
+    Coerce a mask attribute value to a `Mask` instance.
+
+    Accepts both the struct representation (dicts, as returned by graph
+    backends for struct mask attributes) and `Mask` instances
+    (legacy `pl.Object` mask attributes).
+
+    Parameters
+    ----------
+    value : Mask | dict[str, Any]
+        The mask attribute value.
+
+    Returns
+    -------
+    Mask
+        The coerced mask.
+    """
+    if isinstance(value, Mask):
+        return value
+    if isinstance(value, dict):
+        return Mask.from_struct(value)
+    raise TypeError(f"Cannot interpret {type(value)} as a Mask.")
+
 
 class MaskDiskAttrs(GenericFuncNodeAttrs):
     """
@@ -540,7 +662,7 @@ class MaskDiskAttrs(GenericFuncNodeAttrs):
                 center=np.asarray(list(kwargs.values())),
                 radius=radius,
                 image_shape=image_shape,
-            ),
+            ).to_struct(),
             output_key=output_key,
             attr_keys=attr_keys,
             batch_size=0,
@@ -551,4 +673,4 @@ class MaskDiskAttrs(GenericFuncNodeAttrs):
         Validate that the output key exists in the graph.
         """
         if self.output_key not in graph.node_attr_keys():
-            graph.add_node_attr_key(self.output_key, pl.Object)
+            graph.add_node_attr_key(self.output_key, Mask.struct_dtype(len(self._image_shape)))

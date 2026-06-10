@@ -16,7 +16,7 @@ from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph import BaseGraph, IndexedRXGraph, RustWorkXGraph, SQLGraph
 from tracksdata.io._numpy_array import from_array
 from tracksdata.nodes import RegionPropsNodes
-from tracksdata.nodes._mask import Mask
+from tracksdata.nodes._mask import Mask, as_mask
 
 
 def test_already_existing_keys(graph_backend: BaseGraph) -> None:
@@ -1621,10 +1621,8 @@ def test_form_other_regionprops_nodes(
         assert target_row["y"] == pytest.approx(source_row["y"])
         assert target_row["x"] == pytest.approx(source_row["x"])
 
-        source_mask = source_row[DEFAULT_ATTR_KEYS.MASK]
-        target_mask = target_row[DEFAULT_ATTR_KEYS.MASK]
-        assert isinstance(source_mask, Mask)
-        assert isinstance(target_mask, Mask)
+        source_mask = as_mask(source_row[DEFAULT_ATTR_KEYS.MASK])
+        target_mask = as_mask(target_row[DEFAULT_ATTR_KEYS.MASK])
         np.testing.assert_array_equal(source_mask.mask, target_mask.mask)
         np.testing.assert_array_equal(source_mask.bbox, target_mask.bbox)
 
