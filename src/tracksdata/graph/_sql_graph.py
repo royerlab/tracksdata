@@ -844,60 +844,6 @@ class SQLGraph(BaseGraph):
             include_sources=include_sources,
         )
 
-    def add_node(
-        self,
-        attrs: dict[str, Any],
-        validate_keys: bool = True,
-        index: int | None = None,
-    ) -> int:
-        """
-        Add a node to the graph at time t.
-
-        Node IDs are automatically generated based on the time point and
-        the node_id_time_multiplier to ensure uniqueness across time points,
-        unless an explicit index is provided.
-
-        Parameters
-        ----------
-        attrs : dict[str, Any]
-            The attributes of the node to be added. Must contain a "t" key
-            specifying the time point. Additional keys will be stored as
-            node attributes.
-        validate_keys : bool, default True
-            Whether to check if the attribute keys are valid against the
-            current schema. If False, validation is skipped for performance.
-        index : int | None, default None
-            Optional specific node ID to use. If provided, this will be used
-            as the node_id instead of the auto-generated value.
-
-        Returns
-        -------
-        int
-            The ID of the newly added node.
-
-        Raises
-        ------
-        ValueError
-            If validate_keys is True and the attributes contain invalid keys,
-            or if the "t" key is missing.
-
-        Examples
-        --------
-        ```python
-        node_id = graph.add_node({"t": 0, "x": 10.5, "y": 20.3})
-        node_id = graph.add_node({"t": 1, "x": 15.2, "y": 25.8, "intensity": 150.0})
-        node_id = graph.add_node({"t": 0, "x": 20.0, "y": 30.0}, index=12345)
-        ```
-        """
-        if validate_keys:
-            self._validate_attributes(attrs, self.node_attr_keys(), "node")
-
-            if "t" not in attrs:
-                raise ValueError(f"Node attributes must have a 't' key. Got {attrs.keys()}")
-
-        indices = None if index is None else [index]
-        return self.bulk_add_nodes([attrs], indices=indices)[0]
-
     def bulk_add_nodes(
         self,
         nodes: list[dict[str, Any]],
@@ -964,26 +910,6 @@ class SQLGraph(BaseGraph):
         emit_node_added_events(self.node_added, zip(node_ids, nodes, strict=True))
 
         return node_ids
-
-    def remove_node(self, node_id: int) -> None:
-        """
-        Remove a node from the graph.
-
-        This method removes the specified node and all edges connected to it
-        (both incoming and outgoing edges). Also removes any overlaps
-        involving this node.
-
-        Parameters
-        ----------
-        node_id : int
-            The ID of the node to remove.
-
-        Raises
-        ------
-        ValueError
-            If the node_id does not exist in the graph.
-        """
-        self.bulk_remove_nodes([node_id])
 
     def bulk_remove_nodes(self, node_ids: Sequence[int]) -> None:
         """

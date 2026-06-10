@@ -559,45 +559,6 @@ class RustWorkXGraph(BaseGraph):
     # Public mutation API — validation + signals on top of the locals.
     # ------------------------------------------------------------------
 
-    def add_node(
-        self,
-        attrs: dict[str, Any],
-        validate_keys: bool = True,
-        index: int | None = None,
-    ) -> int:
-        """
-        Add a node to the graph at time t.
-
-        Parameters
-        ----------
-        attrs : Any
-            The attributes of the node to be added, must have a "t" key.
-            The keys of the attributes will be used as the attributes of the node.
-            For example:
-            ```python
-            graph.add_node(dict(t=0, label="A", intensity=100))
-            ```
-        validate_keys : bool
-            Whether to check if the attributes keys are valid.
-            If False, the attributes keys will not be checked,
-            useful to speed up the operation when doing bulk insertions.
-        index : int | None
-            Optional node index. RustWorkXGraph does not support custom indices
-            and will raise an error if this parameter is provided.
-        """
-        if index is not None:
-            raise ValueError("RustWorkXGraph does not support custom node indices. Use IndexedRXGraph instead.")
-
-        if validate_keys:
-            self._validate_attributes(attrs, self.node_attr_keys(), "node")
-            if "t" not in attrs:
-                raise ValueError(f"Node attributes must have a 't' key. Got {attrs.keys()}")
-
-        node_id = self._bulk_add_nodes_local([attrs])[0]
-        if is_signal_on(self.node_added):
-            self.node_added.emit(node_id, attrs)
-        return node_id
-
     def bulk_add_nodes(self, nodes: list[dict[str, Any]], indices: list[int] | None = None) -> list[int]:
         """
         Faster method to add multiple nodes to the graph with less overhead and fewer checks.
@@ -623,28 +584,6 @@ class RustWorkXGraph(BaseGraph):
         node_indices = self._bulk_add_nodes_local(nodes)
         emit_node_added_events(self.node_added, zip(node_indices, nodes, strict=True))
         return node_indices
-
-    def remove_node(self, node_id: int) -> None:
-        """
-        Remove a node from the graph.
-
-        This method removes the specified node and all edges connected to it
-        (both incoming and outgoing edges). Also updates the time_to_nodes mapping.
-
-        Parameters
-        ----------
-        node_id : int
-            The ID of the node to remove.
-
-        Raises
-        ------
-        ValueError
-            If the node_id does not exist in the graph.
-        """
-        emit = is_signal_on(self.node_removed)
-        captured = self._bulk_remove_nodes_local([node_id], capture_attrs=emit)
-        if emit:
-            self.node_removed.emit(node_id, captured[node_id])
 
     def bulk_remove_nodes(self, node_ids: Sequence[int]) -> None:
         """
@@ -1707,39 +1646,6 @@ class IndexedRXGraph(MappedGraphMixin, RustWorkXGraph):
     def supports_custom_indices(self) -> bool:
         return True
 
-    def add_node(
-        self,
-        attrs: dict[str, Any],
-        validate_keys: bool = True,
-        index: int | None = None,
-    ) -> int:
-        """
-        Add a node to the graph.
-
-        Parameters
-        ----------
-        attrs : dict[str, Any]
-            The attributes of the node.
-        validate_keys : bool
-            Whether to validate the keys of the attributes.
-        index : int | None
-            The index of the node. If None, the next available index will be used
-            to avoid conflicts with existing node indices.
-
-        Returns
-        -------
-        int
-            The index of the node.
-        """
-        if validate_keys:
-            self._validate_attributes(attrs, self.node_attr_keys(), "node")
-
-            if "t" not in attrs:
-                raise ValueError(f"Node attributes must have a 't' key. Got {attrs.keys()}")
-
-        indices = None if index is None else [index]
-        return self.bulk_add_nodes([attrs], indices=indices)[0]
-
     def bulk_add_nodes(
         self,
         nodes: list[dict[str, Any]],
@@ -2102,22 +2008,6 @@ class IndexedRXGraph(MappedGraphMixin, RustWorkXGraph):
                     for external_node_id, local_node_id in zip(external_node_ids, local_node_ids, strict=True)
                 ),
             )
-
-    def remove_node(self, node_id: int) -> None:
-        """
-        Remove a node from the graph.
-
-        Parameters
-        ----------
-        node_id : int
-            The external ID of the node to remove.
-
-        Raises
-        ------
-        ValueError
-            If the node_id does not exist in the graph.
-        """
-        self.bulk_remove_nodes([node_id])
 
     def bulk_remove_nodes(self, node_ids: Sequence[int]) -> None:
         """

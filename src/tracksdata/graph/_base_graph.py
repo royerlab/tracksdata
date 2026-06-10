@@ -162,7 +162,6 @@ class BaseGraph(abc.ABC):
                 f"{mode} attribute keys not found in attrs: '{missing_keys}'\nRequested keys: '{reference_keys}'"
             )
 
-    @abc.abstractmethod
     def add_node(
         self,
         attrs: dict[str, Any],
@@ -171,6 +170,10 @@ class BaseGraph(abc.ABC):
     ) -> int:
         """
         Add a node to the graph at time t.
+
+        Validates the attributes (when ``validate_keys`` is set) and then delegates
+        to :meth:`bulk_add_nodes`; backends implement the bulk form and inherit this
+        single-node wrapper.
 
         Parameters
         ----------
@@ -194,7 +197,15 @@ class BaseGraph(abc.ABC):
         int
             The ID of the added node.
         """
+        if validate_keys:
+            self._validate_attributes(attrs, self.node_attr_keys(), "node")
+            if "t" not in attrs:
+                raise ValueError(f"Node attributes must have a 't' key. Got {attrs.keys()}")
 
+        indices = None if index is None else [index]
+        return self.bulk_add_nodes([attrs], indices=indices)[0]
+
+    @abc.abstractmethod
     def bulk_add_nodes(
         self,
         nodes: list[dict[str, Any]],
@@ -202,6 +213,10 @@ class BaseGraph(abc.ABC):
     ) -> list[int]:
         """
         Faster method to add multiple nodes to the graph with less overhead and fewer checks.
+
+        Validation is intentionally skipped here; use :meth:`add_node` for the
+        validated single-node path. Implementations must accept an empty ``nodes``
+        list as a no-op.
 
         Parameters
         ----------
@@ -219,30 +234,20 @@ class BaseGraph(abc.ABC):
         list[int]
             The IDs of the added nodes.
         """
-        if len(nodes) == 0:
-            return []
-
-        self._validate_indices_length(nodes, indices)
-
-        # this method benefits the SQLGraph backend
-        if indices is None:
-            return [self.add_node(node, validate_keys=False) for node in nodes]
-        else:
-            return [
-                self.add_node(node, validate_keys=False, index=idx) for node, idx in zip(nodes, indices, strict=True)
-            ]
 
     def _validate_indices_length(self, nodes: list[dict[str, Any]], indices: list[int] | None) -> None:
         if indices is not None and len(indices) != len(nodes):
             raise ValueError(f"Length of indices ({len(indices)}) must match length of nodes ({len(nodes)})")
 
-    @abc.abstractmethod
     def remove_node(self, node_id: int) -> None:
         """
         Remove a node from the graph.
 
         This method removes the specified node and all edges connected to it
         (both incoming and outgoing edges).
+
+        Delegates to :meth:`bulk_remove_nodes`; backends implement the bulk form
+        and inherit this single-node wrapper.
 
         Parameters
         ----------
@@ -254,13 +259,17 @@ class BaseGraph(abc.ABC):
         ValueError
             If the node_id does not exist in the graph.
         """
+        self.bulk_remove_nodes([node_id])
 
+    @abc.abstractmethod
     def bulk_remove_nodes(self, node_ids: Sequence[int]) -> None:
         """
         Remove multiple nodes from the graph, along with their incident edges.
 
-        Existence is validated up-front so the call either removes every node
-        in `node_ids` or raises without modifying the graph.
+        Existence must be validated up-front so the call either removes every
+        node in `node_ids` or raises without modifying the graph. Implementations
+        must accept an empty `node_ids` as a no-op and normalise array-like inputs
+        (e.g. numpy arrays) to a list.
 
         Parameters
         ----------
@@ -272,20 +281,6 @@ class BaseGraph(abc.ABC):
         ValueError
             If any node_id does not exist in the graph.
         """
-        if hasattr(node_ids, "tolist"):
-            node_ids = node_ids.tolist()
-        else:
-            node_ids = list(node_ids)
-        if len(node_ids) == 0:
-            return
-
-        existing = set(self.node_ids())
-        missing = [nid for nid in node_ids if nid not in existing]
-        if missing:
-            raise ValueError(f"Node {missing[0]} does not exist in the graph.")
-
-        for node_id in node_ids:
-            self.remove_node(node_id)
 
     @abc.abstractmethod
     def add_edge(
@@ -346,12 +341,14 @@ class BaseGraph(abc.ABC):
             If the specified edge does not exist or insufficient identifiers are provided.
         """
 
+    @abc.abstractmethod
     def bulk_remove_edges(self, edge_ids: Sequence[int]) -> None:
         """
         Remove multiple edges from the graph by their edge IDs.
 
-        Existence is validated up-front so the call either removes every edge
-        in `edge_ids` or raises without modifying the graph.
+        Existence must be validated up-front so the call either removes every edge
+        in `edge_ids` or raises without modifying the graph. Implementations must
+        accept an empty `edge_ids` as a no-op and normalise array-like inputs to a list.
 
         Parameters
         ----------
@@ -363,20 +360,6 @@ class BaseGraph(abc.ABC):
         ValueError
             If any edge_id does not exist in the graph.
         """
-        if hasattr(edge_ids, "tolist"):
-            edge_ids = edge_ids.tolist()
-        else:
-            edge_ids = list(edge_ids)
-        if len(edge_ids) == 0:
-            return
-
-        existing = set(self.edge_ids())
-        missing = [eid for eid in edge_ids if eid not in existing]
-        if missing:
-            raise ValueError(f"Edge {missing[0]} does not exist in the graph.")
-
-        for edge_id in edge_ids:
-            self.remove_edge(edge_id=edge_id)
 
     @overload
     def bulk_add_edges(
@@ -392,6 +375,7 @@ class BaseGraph(abc.ABC):
         return_ids: Literal[True],
     ) -> list[int]: ...
 
+    @abc.abstractmethod
     def bulk_add_edges(
         self,
         edges: list[dict[str, Any]],
@@ -425,28 +409,6 @@ class BaseGraph(abc.ABC):
         list[int] | None
             The IDs of the added edges.
         """
-        # this method benefits the SQLGraph backend
-        if return_ids:
-            edge_ids = []
-            for edge in edges:
-                edge_ids.append(
-                    self.add_edge(
-                        edge.pop(DEFAULT_ATTR_KEYS.EDGE_SOURCE),
-                        edge.pop(DEFAULT_ATTR_KEYS.EDGE_TARGET),
-                        edge,
-                        validate_keys=False,
-                    )
-                )
-            return edge_ids
-
-        # avoiding many ifs and appends
-        for edge in edges:
-            self.add_edge(
-                edge.pop(DEFAULT_ATTR_KEYS.EDGE_SOURCE),
-                edge.pop(DEFAULT_ATTR_KEYS.EDGE_TARGET),
-                edge,
-                validate_keys=False,
-            )
 
     def add_overlap(
         self,

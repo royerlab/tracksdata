@@ -429,66 +429,6 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
 
         return parent_node_ids
 
-    def remove_node(self, node_id: int) -> None:
-        """
-        Remove a node from the graph.
-
-        This method removes the node from both the view and the root graph,
-        along with all connected edges. Also updates the node mappings.
-
-        Parameters
-        ----------
-        node_id : int
-            The ID of the node to remove.
-
-        Raises
-        ------
-        ValueError
-            If the node_id does not exist in the graph.
-        """
-        if node_id not in self._external_to_local:
-            raise ValueError(f"Node {node_id} does not exist in the graph.")
-
-        # Capture signal state once so a slot connecting mid-call cannot reference
-        # an unbound `old_attrs`.
-        view_signal_on = is_signal_on(self.node_removed)
-        root_signal_on = is_signal_on(self._root.node_removed)
-        if view_signal_on or root_signal_on:
-            old_attrs = self.nodes[node_id].to_dict()
-
-        # Remove from root graph first, because removing bounding box requires node attrs.
-        # Block root's signal so it doesn't fire while the view is still in old state;
-        # re-emit at the end after both root and view are consistent.
-        with self._root.node_removed.blocked():
-            self._root.remove_node(node_id)
-
-        if self.sync:
-            # Local primitive: pure rx_graph + _time_to_nodes, no signal.
-            local_node_id = self._external_to_local[node_id]
-            self._bulk_remove_nodes_local([local_node_id])
-
-            # Remove the node mapping
-            self._remove_id_mapping(external_id=node_id)
-
-            # Update edge mappings - remove edges involving this node
-            edges_to_remove = []
-            edge_indices = self.rx_graph.edge_indices()
-            for local_edge_id, _ in list(self._edge_map_to_root.items()):
-                # Check if this edge is still in the local graph
-                if local_edge_id not in edge_indices:
-                    edges_to_remove.append(local_edge_id)
-
-            for edge_id in edges_to_remove:
-                if edge_id in self._edge_map_to_root:
-                    del self._edge_map_to_root[edge_id]
-        else:
-            self._out_of_sync = True
-
-        if root_signal_on:
-            self._root.node_removed.emit(node_id, old_attrs)
-        if view_signal_on:
-            self.node_removed.emit(node_id, old_attrs)
-
     def bulk_remove_nodes(self, node_ids: Sequence[int]) -> None:
         """
         Remove multiple nodes from both the view and the root graph.
