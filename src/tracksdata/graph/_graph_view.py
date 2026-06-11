@@ -533,6 +533,68 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         if view_signal_on:
             self.node_removed.emit(node_id, old_attrs)
 
+    def _add_node_local(self, node_id: int) -> None:
+        """
+        Re-insert a node that already exists in the root into this view's local
+        rx_graph and ID mappings only. No root call, no signals.
+
+        Caller guarantees `node_id` exists in the root and is not already in the view.
+
+        The attributes are obtained the same way ``subgraph()`` does for the backend:
+        for an in-memory (rustworkx-family) root the root's attribute dict is reused by
+        reference (so root↔view writes propagate without an explicit sync); for any other
+        backend (e.g. ``SQLGraph``) a fresh attribute dict is fetched via the public API,
+        matching that backend's copy-on-subgraph semantics. Inverse of
+        ``_remove_node_local``.
+        """
+        root = self._root
+        if hasattr(root, "rx_graph"):
+            root_local_id = root._map_to_local(node_id) if hasattr(root, "_map_to_local") else node_id
+            attrs = root.rx_graph[root_local_id]
+        else:
+            attrs = root.filter(node_ids=[node_id]).node_attrs().drop(DEFAULT_ATTR_KEYS.NODE_ID).rows(named=True)[0]
+
+        with self.node_added.blocked():
+            local_node_id = RustWorkXGraph.add_node(self, attrs, validate_keys=False)
+
+        self._add_id_mapping(local_node_id, node_id)
+
+    def add_node_to_view(self, node_id: int) -> None:
+        """
+                Re-surface a node that exists in the root into this view only, leaving the
+                root graph untouched. Inverse of ``remove_node_from_view``.
+        f
+                The node must exist in the root and must not already be in the view. Its
+                attributes follow the same sharing semantics as ``subgraph()`` for the backend
+                (shared by reference for rustworkx-family roots, copied for others). Incident
+                edges are NOT re-added — use ``add_edge_to_view`` for those.
+
+                Only the view's ``node_added`` signal fires — the root did not change.
+
+                Parameters
+                ----------
+                node_id : int
+                    The (root) ID of the node to re-surface in the view.
+
+                Raises
+                ------
+                ValueError
+                    If the node is already in the view, or does not exist in the root.
+                RuntimeError
+                    If ``sync=False`` — view-only mutation requires a maintained local view.
+        """
+        if not self.sync:
+            raise RuntimeError("add_node_to_view requires sync=True; the local view is not maintained otherwise.")
+        if node_id in self._external_to_local:
+            raise ValueError(f"Node {node_id} is already in the view.")
+        if not self._root.has_node(node_id):
+            raise ValueError(f"Node {node_id} does not exist in the root graph.")
+
+        self._add_node_local(node_id)
+
+        if is_signal_on(self.node_added):
+            self.node_added.emit(node_id, self.nodes[node_id].to_dict())
+
     def add_edge(
         self,
         source_id: int,
@@ -673,6 +735,87 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
             raise ValueError(f"Edge {edge_id} does not exist in the view.")
 
         self._remove_edge_local(edge_id)
+
+    def _add_edge_local(self, source_id: int, target_id: int) -> int:
+        """
+        Re-insert an edge that already exists in the root into this view's local
+        rx_graph and edge mapping only. No root call. Returns the root edge id.
+
+        Caller guarantees the root edge ``source_id -> target_id`` exists and both
+        endpoints are already in the view. Attributes are obtained the same way
+        ``subgraph()`` does for the backend: reused by reference for an in-memory
+        (rustworkx-family) root, or fetched as a fresh dict via the public API for any
+        other backend (e.g. ``SQLGraph``). Inverse of ``_remove_edge_local``.
+        """
+        parent_edge_id = self._root.edge_id(source_id, target_id)
+
+        root = self._root
+        if hasattr(root, "rx_graph"):
+            root_local_src = root._map_to_local(source_id) if hasattr(root, "_map_to_local") else source_id
+            root_local_tgt = root._map_to_local(target_id) if hasattr(root, "_map_to_local") else target_id
+            attrs = root.rx_graph.get_edge_data(root_local_src, root_local_tgt)
+        else:
+            df = root.edge_attrs()
+            drop_cols = [
+                c
+                for c in (
+                    DEFAULT_ATTR_KEYS.EDGE_ID,
+                    DEFAULT_ATTR_KEYS.EDGE_SOURCE,
+                    DEFAULT_ATTR_KEYS.EDGE_TARGET,
+                )
+                if c in df.columns
+            ]
+            attrs = df.filter(pl.col(DEFAULT_ATTR_KEYS.EDGE_ID) == parent_edge_id).drop(drop_cols).rows(named=True)[0]
+
+        local_edge_id = self.rx_graph.add_edge(
+            self._map_to_local(source_id),
+            self._map_to_local(target_id),
+            attrs,
+        )
+        self._edge_map_to_root.put(local_edge_id, parent_edge_id)
+        return parent_edge_id
+
+    def add_edge_to_view(
+        self,
+        source_id: int,
+        target_id: int,
+    ) -> None:
+        """
+        Re-surface an edge that exists in the root into this view only, leaving the
+        root graph untouched. Inverse of ``remove_edge_from_view``.
+
+        Both endpoints must already be in the view, the root edge must exist, and the
+        edge must not already be in the view. The edge's attributes follow the same
+        sharing semantics as ``subgraph()`` for the backend (shared by reference for
+        rustworkx-family roots, copied for others). No ``edge_added`` signal exists, so
+        (as with the edge-remove helper) edges have no signal analog.
+
+        Parameters
+        ----------
+        source_id, target_id : int
+            Endpoints of the (root) edge to re-surface in the view.
+
+        Raises
+        ------
+        ValueError
+            If an endpoint is missing from the view, the root edge does not exist, or
+            the edge is already in the view.
+        RuntimeError
+            If ``sync=False`` — view-only mutation requires a maintained local view.
+        """
+        if not self.sync:
+            raise RuntimeError("add_edge_to_view requires sync=True; the local view is not maintained otherwise.")
+        for endpoint in (source_id, target_id):
+            if endpoint not in self._external_to_local:
+                raise ValueError(f"Endpoint {endpoint} is not in the view.")
+        try:
+            parent_edge_id = self._root.edge_id(source_id, target_id)
+        except rx.NoEdgeBetweenNodes as e:
+            raise ValueError(f"Edge {source_id}->{target_id} does not exist in the root graph.") from e
+        if parent_edge_id in self._edge_map_from_root:
+            raise ValueError(f"Edge {source_id}->{target_id} is already in the view.")
+
+        self._add_edge_local(source_id, target_id)
 
     def _get_neighbors(
         self,

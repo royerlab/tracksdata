@@ -1302,6 +1302,170 @@ def test_remove_edge_from_view_validation(graph_backend: BaseGraph) -> None:
         view.remove_edge_from_view(n0, n1)
 
 
+def test_add_node_to_view_basic(graph_backend: BaseGraph) -> None:
+    """`add_node_to_view` re-surfaces a root node into the view without touching root."""
+    graph_backend.add_node_attr_key("x", pl.Float64)
+
+    n0 = graph_backend.add_node({"t": 0, "x": 0.0})
+    n1 = graph_backend.add_node({"t": 1, "x": 1.0})
+    n2 = graph_backend.add_node({"t": 2, "x": 2.0})
+
+    view = graph_backend.filter().subgraph()
+    assert isinstance(view, GraphView)
+
+    # Drop n1 from the view, then add it back.
+    view.remove_node_from_view(n1)
+    assert n1 not in view.node_ids()
+
+    view.add_node_to_view(n1)
+
+    # Back in the view, root never changed.
+    assert n1 in view.node_ids()
+    assert view.has_node(n1)
+    assert graph_backend.has_node(n1)
+    # Attribute value survives the round-trip (important for the copy-path backends).
+    df = view.node_attrs()
+    assert df.filter(pl.col(DEFAULT_ATTR_KEYS.NODE_ID) == n1)["x"].item() == 1.0
+    _ = (n0, n2)
+
+
+def test_add_node_to_view_roundtrip_identity(graph_backend: BaseGraph) -> None:
+    """remove + add restores the view's node/edge sets exactly (all backends)."""
+    graph_backend.add_node_attr_key("x", pl.Float64)
+    graph_backend.add_edge_attr_key("weight", pl.Float64)
+
+    n0 = graph_backend.add_node({"t": 0, "x": 0.0})
+    n1 = graph_backend.add_node({"t": 1, "x": 1.0})
+    n2 = graph_backend.add_node({"t": 2, "x": 2.0})
+    graph_backend.add_edge(n0, n1, {"weight": 0.2})
+    graph_backend.add_edge(n1, n2, {"weight": 0.8})
+
+    view = graph_backend.filter().subgraph()
+    nodes_before = set(view.node_ids())
+    edges_before = set(view._edge_map_to_root.values())
+
+    # Removing n1 also drops its two incident edges from the view.
+    view.remove_node_from_view(n1)
+    # Revive the node, then its incident edges.
+    view.add_node_to_view(n1)
+    view.add_edge_to_view(n0, n1)
+    view.add_edge_to_view(n1, n2)
+
+    assert set(view.node_ids()) == nodes_before
+    assert set(view._edge_map_to_root.values()) == edges_before
+    # Edge attributes survive the round-trip.
+    assert view.has_edge(n0, n1)
+    assert view.has_edge(n1, n2)
+    e_attrs = view.edge_attrs(attr_keys=["weight"])
+    weights = dict(
+        zip(
+            zip(e_attrs[DEFAULT_ATTR_KEYS.EDGE_SOURCE], e_attrs[DEFAULT_ATTR_KEYS.EDGE_TARGET], strict=False),
+            e_attrs["weight"],
+            strict=False,
+        )
+    )
+    assert weights[(n0, n1)] == 0.2
+    assert weights[(n1, n2)] == 0.8
+
+
+def test_add_node_to_view_signals(graph_backend: BaseGraph) -> None:
+    """Only the view's `node_added` fires; the root's signal does not."""
+    graph_backend.add_node_attr_key("x", pl.Float64)
+    n0 = graph_backend.add_node({"t": 0, "x": 0.0})
+    n1 = graph_backend.add_node({"t": 1, "x": 1.0})
+
+    view = graph_backend.filter().subgraph()
+    view.remove_node_from_view(n1)
+
+    view_calls: list[tuple[int, dict]] = []
+    root_calls: list[tuple[int, dict]] = []
+    view.node_added.connect(lambda nid, attrs: view_calls.append((nid, attrs)))
+    graph_backend.node_added.connect(lambda nid, attrs: root_calls.append((nid, attrs)))
+
+    view.add_node_to_view(n1)
+
+    assert len(root_calls) == 0
+    assert len(view_calls) == 1
+    assert view_calls[0][0] == n1
+    assert view_calls[0][1]["x"] == 1.0
+    _ = n0
+
+
+def test_add_node_to_view_validation(graph_backend: BaseGraph) -> None:
+    """Already-in-view / missing-in-root raise ValueError; sync=False raises RuntimeError."""
+    graph_backend.add_node_attr_key("x", pl.Float64)
+    n0 = graph_backend.add_node({"t": 0, "x": 0.0})
+
+    view = graph_backend.filter().subgraph()
+
+    # n0 is already in the view
+    with pytest.raises(ValueError, match=r"already in the view"):
+        view.add_node_to_view(n0)
+
+    # node that does not exist in the root
+    with pytest.raises(ValueError, match=r"does not exist in the root graph"):
+        view.add_node_to_view(999999)
+
+    view.remove_node_from_view(n0)
+    view.sync = False
+    with pytest.raises(RuntimeError, match=r"add_node_to_view requires sync=True"):
+        view.add_node_to_view(n0)
+
+
+def test_add_edge_to_view_basic(graph_backend: BaseGraph) -> None:
+    """`add_edge_to_view` re-surfaces a root edge into the view, leaving root untouched."""
+    graph_backend.add_node_attr_key("x", pl.Float64)
+    graph_backend.add_edge_attr_key("weight", pl.Float64)
+
+    n0 = graph_backend.add_node({"t": 0, "x": 0.0})
+    n1 = graph_backend.add_node({"t": 1, "x": 1.0})
+    graph_backend.add_edge(n0, n1, {"weight": 0.5})
+
+    view = graph_backend.filter().subgraph()
+    view.remove_edge_from_view(n0, n1)
+    assert not view.has_edge(n0, n1)
+
+    view.add_edge_to_view(n0, n1)
+    assert view.has_edge(n0, n1)
+    assert graph_backend.has_edge(n0, n1)
+    e_attrs = view.edge_attrs(attr_keys=["weight"])
+    row = e_attrs.filter((pl.col(DEFAULT_ATTR_KEYS.EDGE_SOURCE) == n0) & (pl.col(DEFAULT_ATTR_KEYS.EDGE_TARGET) == n1))
+    assert row["weight"].item() == 0.5
+
+
+def test_add_edge_to_view_validation(graph_backend: BaseGraph) -> None:
+    """Bad inputs raise ValueError; sync=False raises RuntimeError."""
+    graph_backend.add_node_attr_key("x", pl.Float64)
+    graph_backend.add_edge_attr_key("weight", pl.Float64)
+
+    n0 = graph_backend.add_node({"t": 0, "x": 0.0})
+    n1 = graph_backend.add_node({"t": 1, "x": 1.0})
+    n2 = graph_backend.add_node({"t": 2, "x": 2.0})
+    graph_backend.add_edge(n0, n1, {"weight": 0.5})
+
+    view = graph_backend.filter().subgraph()
+
+    # Endpoint not in the view
+    view.remove_node_from_view(n2)
+    with pytest.raises(ValueError, match=r"Endpoint .* is not in the view"):
+        view.add_edge_to_view(n0, n2)
+    view.add_node_to_view(n2)
+
+    # Root edge does not exist
+    with pytest.raises(ValueError, match=r"does not exist"):
+        view.add_edge_to_view(n1, n2)
+
+    # Edge already in the view
+    with pytest.raises(ValueError, match=r"already in the view"):
+        view.add_edge_to_view(n0, n1)
+
+    # sync=False
+    view.remove_edge_from_view(n0, n1)
+    view.sync = False
+    with pytest.raises(RuntimeError, match=r"add_edge_to_view requires sync=True"):
+        view.add_edge_to_view(n0, n1)
+
+
 @parametrize_subgraph_tests
 def test_has_node(graph_backend: BaseGraph, use_subgraph: bool) -> None:
     """Test has_node functionality on both original graphs and subgraphs."""
