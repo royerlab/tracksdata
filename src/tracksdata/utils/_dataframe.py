@@ -1,6 +1,5 @@
 import cloudpickle
 import polars as pl
-import polars.selectors as cs
 
 
 def unpack_array_attrs(df: pl.DataFrame) -> pl.DataFrame:
@@ -29,7 +28,10 @@ def unpack_array_attrs(df: pl.DataFrame) -> pl.DataFrame:
     return unpack_array_attrs(df)
 
 
-def unpickle_bytes_columns(df: pl.DataFrame) -> pl.DataFrame:
+def unpickle_bytes_columns(
+    df: pl.DataFrame,
+    schema_overrides: dict[str, pl.DataType] | None = None,
+) -> pl.DataFrame:
     """
     Unpickle bytes columns from the database.
 
@@ -37,17 +39,31 @@ def unpickle_bytes_columns(df: pl.DataFrame) -> pl.DataFrame:
     ----------
     df : pl.DataFrame
         The DataFrame to unpickle the bytes columns from.
+    schema_overrides : dict[str, pl.DataType] | None, optional
+        Optional mapping from column name to target polars dtype. When a name
+        matches a binary column, the decoded values are placed directly into a
+        Series of that dtype, skipping the intermediate ``pl.Object`` rebuild.
 
     Returns
     -------
     pl.DataFrame
         The DataFrame with the bytes columns unpickled.
     """
-    df = df.map_columns(cs.binary(), lambda x: x.map_elements(cloudpickle.loads, return_dtype=pl.Object))
-    for col, dtype in zip(df.columns, df.dtypes, strict=True):
-        if isinstance(dtype, pl.Object):
-            try:
-                df = df.with_columns(pl.Series(df[col].to_list()).alias(col))
-            except Exception:
-                pass
+    if schema_overrides is None:
+        schema_overrides = {}
+
+    new_series: list[pl.Series] = []
+    for name, dtype in zip(df.columns, df.dtypes, strict=True):
+        if dtype != pl.Binary:
+            continue
+        raw = df[name].to_list()
+        decoded = [None if v is None else cloudpickle.loads(v) for v in raw]
+        target = schema_overrides.get(name)
+        try:
+            new_series.append(pl.Series(name, decoded, dtype=target))
+        except Exception:
+            new_series.append(pl.Series(name, decoded, dtype=pl.Object))
+
+    if new_series:
+        df = df.with_columns(new_series)
     return df

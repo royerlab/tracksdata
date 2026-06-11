@@ -367,8 +367,7 @@ class SQLFilter(BaseFilter):
         if attr_keys is not None:
             nodes_attrs = nodes_attrs.select(attr_keys)
 
-        nodes_attrs = unpickle_bytes_columns(nodes_attrs)
-        nodes_attrs = self._graph._cast_array_columns(self._graph.Node, nodes_attrs)
+        nodes_attrs = unpickle_bytes_columns(nodes_attrs, self._graph._attr_dtype_overrides(self._graph.Node))
 
         if unpack:
             nodes_attrs = unpack_array_attrs(nodes_attrs)
@@ -424,8 +423,7 @@ class SQLFilter(BaseFilter):
                 schema_overrides=self._graph._polars_schema_override(self._graph.Edge),
             )
 
-        edges_df = unpickle_bytes_columns(edges_df)
-        edges_df = self._graph._cast_array_columns(self._graph.Edge, edges_df)
+        edges_df = unpickle_bytes_columns(edges_df, self._graph._attr_dtype_overrides(self._graph.Edge))
 
         if unpack:
             edges_df = unpack_array_attrs(edges_df)
@@ -627,6 +625,10 @@ class SQLGraph(BaseGraph):
         self._update_max_id_per_time()
         self._node_attr_schemas_cache: dict | None = None
         self._edge_attr_schemas_cache: dict | None = None
+        self._node_polars_override_cache: SchemaDict | None = None
+        self._edge_polars_override_cache: SchemaDict | None = None
+        self._node_pickled_overrides_cache: dict[str, pl.DataType] | None = None
+        self._edge_pickled_overrides_cache: dict[str, pl.DataType] | None = None
 
     def supports_custom_indices(self) -> bool:
         return True
@@ -775,6 +777,8 @@ class SQLGraph(BaseGraph):
         encoded_schemas = {key: serialize_attr_schema(schema) for key, schema in schemas.items()}
         self._private_metadata[self._PRIVATE_SQL_NODE_SCHEMA_STORE_KEY] = encoded_schemas
         self._node_attr_schemas_cache = None
+        self._node_polars_override_cache = None
+        self._node_pickled_overrides_cache = None
 
     @property
     def __edge_attr_schemas(self) -> dict[str, AttrSchema]:
@@ -799,6 +803,8 @@ class SQLGraph(BaseGraph):
         encoded_schemas = {key: serialize_attr_schema(schema) for key, schema in schemas.items()}
         self._private_metadata[self._PRIVATE_SQL_EDGE_SCHEMA_STORE_KEY] = encoded_schemas
         self._edge_attr_schemas_cache = None
+        self._edge_polars_override_cache = None
+        self._edge_pickled_overrides_cache = None
 
     def _restore_pickled_column_types(self, table: sa.Table) -> None:
         for column in table.columns:
@@ -806,11 +812,15 @@ class SQLGraph(BaseGraph):
                 column.type = sa.PickleType()
 
     def _polars_schema_override(self, table_class: type[DeclarativeBase]) -> SchemaDict:
-        schemas = self._attr_schemas_for_table(table_class)
+        is_node = table_class.__tablename__ == self.Node.__tablename__
+        cached = self._node_polars_override_cache if is_node else self._edge_polars_override_cache
+        if cached is not None:
+            return cached
 
-        # Return schema overrides for columns safely represented in SQL.
+        schemas = self._attr_schemas_for_table(table_class)
+        # Schema overrides for columns safely represented in SQL.
         # Pickled columns are unpickled and casted in a second pass.
-        return {
+        result = {
             key: schema.dtype
             for key, schema in schemas.items()
             if (
@@ -818,27 +828,32 @@ class SQLGraph(BaseGraph):
                 and not self._is_pickled_sql_type(table_class.__table__.columns[key].type)
             )
         }
+        if is_node:
+            self._node_polars_override_cache = result
+        else:
+            self._edge_polars_override_cache = result
+        return result
 
-    def _cast_array_columns(self, table_class: type[DeclarativeBase], df: pl.DataFrame) -> pl.DataFrame:
+    def _attr_dtype_overrides(self, table_class: type[DeclarativeBase]) -> dict[str, pl.DataType]:
+        is_node = table_class.__tablename__ == self.Node.__tablename__
+        cached = self._node_pickled_overrides_cache if is_node else self._edge_pickled_overrides_cache
+        if cached is not None:
+            return cached
+
         schemas = self._attr_schemas_for_table(table_class)
-
-        casts: list[pl.Series] = []
-        for key, schema in schemas.items():
-            if key not in df.columns or key not in table_class.__table__.columns:
-                continue
-
-            if not self._is_pickled_sql_type(table_class.__table__.columns[key].type):
-                continue
-
-            try:
-                casts.append(pl.Series(key, df[key].to_list(), dtype=schema.dtype))
-            except Exception:
-                # Keep original dtype when values cannot be casted to the target schema.
-                continue
-
-        if casts:
-            df = df.with_columns(casts)
-        return df
+        result = {
+            key: schema.dtype
+            for key, schema in schemas.items()
+            if (
+                key in table_class.__table__.columns
+                and self._is_pickled_sql_type(table_class.__table__.columns[key].type)
+            )
+        }
+        if is_node:
+            self._node_pickled_overrides_cache = result
+        else:
+            self._edge_pickled_overrides_cache = result
+        return result
 
     def _update_max_id_per_time(self) -> None:
         """
@@ -1234,8 +1249,7 @@ class SQLGraph(BaseGraph):
                     filter_node_ids,
                     self.Node,
                 )
-            node_df = unpickle_bytes_columns(node_df)
-            node_df = self._cast_array_columns(self.Node, node_df)
+            node_df = unpickle_bytes_columns(node_df, self._attr_dtype_overrides(self.Node))
 
         if single_node:
             if not return_attrs:
@@ -1427,8 +1441,7 @@ class SQLGraph(BaseGraph):
                 connection=session.connection(),
                 schema_overrides=self._polars_schema_override(self.Node),
             )
-            nodes_df = unpickle_bytes_columns(nodes_df)
-            nodes_df = self._cast_array_columns(self.Node, nodes_df)
+            nodes_df = unpickle_bytes_columns(nodes_df, self._attr_dtype_overrides(self.Node))
 
         # indices are included by default and must be removed
         if attr_keys is not None:
@@ -1472,8 +1485,7 @@ class SQLGraph(BaseGraph):
                 connection=session.connection(),
                 schema_overrides=self._polars_schema_override(self.Edge),
             )
-            edges_df = unpickle_bytes_columns(edges_df)
-            edges_df = self._cast_array_columns(self.Edge, edges_df)
+            edges_df = unpickle_bytes_columns(edges_df, self._attr_dtype_overrides(self.Edge))
 
         if unpack:
             edges_df = unpack_array_attrs(edges_df)
