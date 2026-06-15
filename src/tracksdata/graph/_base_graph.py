@@ -27,6 +27,7 @@ from tracksdata.utils._logging import LOG
 from tracksdata.utils._multiprocessing import multiprocessing_apply
 
 if TYPE_CHECKING:
+    import motile
     from traccuracy import TrackingGraph
 
     from tracksdata.graph.filters._base_filter import BaseFilter
@@ -2057,6 +2058,39 @@ class BaseGraph(abc.ABC):
         from tracksdata.metrics._traccuracy import to_traccuracy_graph
 
         return to_traccuracy_graph(self, array_view_kwargs=array_view_kwargs)
+
+    def to_motile_graph(
+        self,
+        *,
+        node_attr_keys: Sequence[str] | None = None,
+        edge_attr_keys: Sequence[str] | None = None,
+        frame_attribute: str = DEFAULT_ATTR_KEYS.T,
+    ) -> "motile.TrackGraph":
+        """
+        Convert the graph to a [`motile.TrackGraph`](https://funkelab.github.io/motile/).
+
+        Parameters
+        ----------
+        node_attr_keys : Sequence[str] | None
+            Node attribute keys to copy. If None, all node attributes are copied.
+        edge_attr_keys : Sequence[str] | None
+            Edge attribute keys to copy. If None, all edge attributes are copied.
+        frame_attribute : str
+            Node attribute used as the time/frame dimension. Defaults to ``"t"``.
+
+        Returns
+        -------
+        motile.TrackGraph
+            A `motile` track graph.
+        """
+        from tracksdata.functional._motile import to_motile_graph
+
+        return to_motile_graph(
+            self,
+            node_attr_keys=node_attr_keys,
+            edge_attr_keys=edge_attr_keys,
+            frame_attribute=frame_attribute,
+        )
 
     @abc.abstractmethod
     def has_node(self, node_id: int) -> bool:
