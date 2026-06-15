@@ -7,11 +7,16 @@
     ]
   },
   {
-    "version": "0.1.0rc4",
-    "title": "0.1.0rc4",
+    "version": "0.1.0rc5",
+    "title": "0.1.0rc5",
     "aliases": [
       "latest"
     ]
+  },
+  {
+    "version": "0.1.0rc4",
+    "title": "0.1.0rc4",
+    "aliases": []
   },
   {
     "version": "0.1.0rc3",
