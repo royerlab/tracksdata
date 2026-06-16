@@ -2041,7 +2041,9 @@ class BaseGraph(abc.ABC):
         Backend-specific metadata removal implementation without public key validation.
         """
 
-    def to_traccuracy_graph(self, array_view_kwargs: dict[str, Any] | None = None) -> "TrackingGraph":
+    def to_traccuracy_graph(
+        self, array_view_kwargs: dict[str, Any] | None = None, location_keys: list[str] | None = None
+    ) -> "TrackingGraph":
         """
         Convert the graph to a `traccuracy.TrackingGraph`.
 
@@ -2049,6 +2051,10 @@ class BaseGraph(abc.ABC):
         ----------
         array_view_kwargs : dict[str, Any] | None
             Additional keyword arguments to pass to the `GraphArrayView` constructor used to create the segmentation.
+        location_keys : list[str] | None
+            The keys of the location attributes to use for the segmentation.
+            If None, the location keys are inferred from the intersection of the graph node attributes and
+            the list [DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X].
 
         Returns
         -------
@@ -2057,7 +2063,7 @@ class BaseGraph(abc.ABC):
         """
         from tracksdata.metrics._traccuracy import to_traccuracy_graph
 
-        return to_traccuracy_graph(self, array_view_kwargs=array_view_kwargs)
+        return to_traccuracy_graph(self, array_view_kwargs=array_view_kwargs, location_keys=location_keys)
 
     def to_motile_graph(
         self,

@@ -3020,6 +3020,8 @@ def test_to_traccuracy_graph(graph_backend: BaseGraph) -> None:
 
     traccuracy_graph = graph_backend.to_traccuracy_graph()
 
+    assert traccuracy_graph.location_keys == ["y", "x"]
+
     # trivial matching with itself
     ctc_results, _ = run_metrics(
         gt_data=traccuracy_graph,
