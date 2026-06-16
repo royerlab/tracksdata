@@ -490,8 +490,9 @@ def test_graph_array_view_invalidates_once_when_attr_key_changes_but_bbox_unchan
             attrs={"label": [7]},
             node_ids=[node_id],
         )
-        # bbox unchanged, but the displayed attribute changed — invalidate exactly once
-        assert mock_invalidate.call_count == 1
+        # bbox unchanged, but the displayed attribute changed — invalidate exactly one region
+        n_regions = sum(len(call.args[0]) for call in mock_invalidate.call_args_list)
+        assert n_regions == 1
 
     # The affected chunk must be invalidated
     expected_ready = np.ones((2, 2), dtype=bool)
@@ -533,7 +534,8 @@ def test_graph_array_view_invalidates_twice_when_attr_key_and_bbox_change(graph_
             node_ids=[node_id],
         )
         # bbox changed — must invalidate both old and new regions
-        assert mock_invalidate.call_count == 2
+        n_regions = sum(len(call.args[0]) for call in mock_invalidate.call_args_list)
+        assert n_regions == 2
 
     expected_ready = np.ones((2, 2), dtype=bool)
     expected_ready[0, 0] = False
@@ -571,8 +573,9 @@ def test_graph_array_view_no_invalidation_when_unrelated_attr_changes(graph_back
             attrs={"score": [0.9]},
             node_ids=[node_id],
         )
-        # Neither bbox nor the displayed attribute changed — no invalidation at all
-        assert mock_invalidate.call_count == 0
+        # Neither bbox nor the displayed attribute changed — no region invalidated
+        n_regions = sum(len(call.args[0]) for call in mock_invalidate.call_args_list)
+        assert n_regions == 0
 
     np.testing.assert_array_equal(
         array_view._cache._store[0].ready,
@@ -614,3 +617,28 @@ def test_graph_array_view_invalidates_chunk_on_remove(graph_backend: BaseGraph) 
     output = np.asarray(array_view[0])
     assert output[1, 1] == 1
     assert output[5, 5] == 0
+
+
+def test_graph_array_view_invalidates_whole_volume_when_bbox_missing(graph_backend: BaseGraph) -> None:
+    """A node event without a bbox key has an unknown location, so the whole time volume is invalidated."""
+    _add_graph_array_node_attrs(graph_backend)
+
+    mask = _make_square_mask(1, 1)
+    graph_backend.add_node(
+        {
+            DEFAULT_ATTR_KEYS.T: 0,
+            "label": 1,
+            DEFAULT_ATTR_KEYS.MASK: mask,
+            DEFAULT_ATTR_KEYS.BBOX: mask.bbox,
+        }
+    )
+
+    array_view = GraphArrayView(graph=graph_backend, shape=(2, 8, 8), attr_key="label", chunk_shape=(4, 4))
+    _ = np.asarray(array_view[0])
+    np.testing.assert_array_equal(array_view._cache._store[0].ready, np.ones((2, 2), dtype=bool))
+
+    # Emit a node-added event whose attrs lack a bbox key: location unknown.
+    array_view._on_node_added([999], [{DEFAULT_ATTR_KEYS.T: 0, "label": 5}])
+
+    # The entire volume for time 0 must be invalidated.
+    np.testing.assert_array_equal(array_view._cache._store[0].ready, np.zeros((2, 2), dtype=bool))

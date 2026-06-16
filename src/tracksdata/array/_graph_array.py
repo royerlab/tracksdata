@@ -389,20 +389,34 @@ class GraphArrayView(BaseReadOnlyArray):
 
         return tuple(slice(int(s), int(e)) for s, e in zip(start, stop, strict=True))
 
-    def _invalidate_bbox(self, time_value: Any, bbox: Any) -> None:
-        """Invalidate the cache region covered by the given time and bbox."""
-        try:
-            time = int(np.asarray(time_value).item())
-        except (TypeError, ValueError) as e:
-            raise ValueError(
-                f"Time attribute value must be a scalar integer, got {time_value} of type {type(time_value)}"
-            ) from e
-        if not (0 <= time < self.original_shape[0]):
-            return
+    def _invalidate_bbox(self, time_values: Sequence[Any], bboxes: Sequence[np.ndarray | None]) -> None:
+        """
+        Invalidate the cache regions covered by the given times and bboxes.
 
-        slices = self._bbox_to_slices(bbox)
-        if slices is not None:
-            self._cache.invalidate(time=time, volume_slicing=slices)
+        ``time_values`` and ``bboxes`` are parallel sequences; each ``(time, bbox)``
+        pair is clipped to the array volume and the matching cache region is dropped.
+        A ``None`` bbox means the node's location is unknown, so the whole volume for
+        that time is invalidated. This is distinct from a bbox that lies outside the
+        array volume, which invalidates nothing.
+        """
+        for time_value, bbox in zip(time_values, bboxes, strict=True):
+            try:
+                time = int(np.asarray(time_value).item())
+            except (TypeError, ValueError) as e:
+                raise ValueError(
+                    f"Time attribute value must be a scalar integer, got {time_value} of type {type(time_value)}"
+                ) from e
+            if not (0 <= time < self.original_shape[0]):
+                continue
+
+            if bbox is None:
+                # Unknown location: conservatively invalidate the whole volume for this time.
+                self._cache.invalidate(time=time)
+                continue
+
+            slices = self._bbox_to_slices(bbox)
+            if slices is not None:
+                self._cache.invalidate(time=time, volume_slicing=slices)
 
     def _on_node_added(
         self,
@@ -410,13 +424,17 @@ class GraphArrayView(BaseReadOnlyArray):
         new_attrs: list[dict],
     ) -> None:
         del node_ids
-        for attrs in new_attrs:
-            self._invalidate_bbox(attrs[DEFAULT_ATTR_KEYS.T], attrs[DEFAULT_ATTR_KEYS.BBOX])
+        self._invalidate_bbox(
+            [attrs[DEFAULT_ATTR_KEYS.T] for attrs in new_attrs],
+            [attrs.get(DEFAULT_ATTR_KEYS.BBOX) for attrs in new_attrs],
+        )
 
     def _on_node_removed(self, node_ids: list[int], old_attrs: list[dict]) -> None:
         del node_ids
-        for attrs in old_attrs:
-            self._invalidate_bbox(attrs[DEFAULT_ATTR_KEYS.T], attrs[DEFAULT_ATTR_KEYS.BBOX])
+        self._invalidate_bbox(
+            [attrs[DEFAULT_ATTR_KEYS.T] for attrs in old_attrs],
+            [attrs.get(DEFAULT_ATTR_KEYS.BBOX) for attrs in old_attrs],
+        )
 
     def _on_node_updated(
         self,
@@ -425,16 +443,21 @@ class GraphArrayView(BaseReadOnlyArray):
         new_attrs: list[dict],
     ) -> None:
         del node_ids
+        time_values: list[Any] = []
+        bboxes: list[Any] = []
         for old_attr, new_attr in zip(old_attrs, new_attrs, strict=True):
             old_t = old_attr[DEFAULT_ATTR_KEYS.T]
             new_t = new_attr[DEFAULT_ATTR_KEYS.T]
-            old_bbox = old_attr[DEFAULT_ATTR_KEYS.BBOX]
-            new_bbox = new_attr[DEFAULT_ATTR_KEYS.BBOX]
+            old_bbox = old_attr.get(DEFAULT_ATTR_KEYS.BBOX)
+            new_bbox = new_attr.get(DEFAULT_ATTR_KEYS.BBOX)
 
             bbox_changed = old_t != new_t or not np.array_equal(old_bbox, new_bbox)
 
             if bbox_changed:
-                self._invalidate_bbox(old_t, old_bbox)
-                self._invalidate_bbox(new_t, new_bbox)
+                time_values.extend((old_t, new_t))
+                bboxes.extend((old_bbox, new_bbox))
             elif old_attr.get(self._attr_key) != new_attr.get(self._attr_key):
-                self._invalidate_bbox(new_t, new_bbox)
+                time_values.append(new_t)
+                bboxes.append(new_bbox)
+
+        self._invalidate_bbox(time_values, bboxes)
