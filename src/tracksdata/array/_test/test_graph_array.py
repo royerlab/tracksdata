@@ -642,3 +642,78 @@ def test_graph_array_view_invalidates_whole_volume_when_bbox_missing(graph_backe
 
     # The entire volume for time 0 must be invalidated.
     np.testing.assert_array_equal(array_view._cache._store[0].ready, np.zeros((2, 2), dtype=bool))
+
+
+def test_graph_array_view_invalidates_once_when_mask_changes_but_bbox_unchanged(graph_backend: BaseGraph) -> None:
+    """Swapping the mask pixels without moving the bbox must invalidate the region exactly once."""
+    _add_graph_array_node_attrs(graph_backend)
+
+    mask = _make_square_mask(1, 1)  # bbox [1, 1, 3, 3], fully filled
+    node_id = graph_backend.add_node(
+        {
+            DEFAULT_ATTR_KEYS.T: 0,
+            "label": 1,
+            DEFAULT_ATTR_KEYS.MASK: mask,
+            DEFAULT_ATTR_KEYS.BBOX: mask.bbox,
+        }
+    )
+
+    array_view = GraphArrayView(graph=graph_backend, shape=(2, 8, 8), attr_key="label", chunk_shape=(4, 4))
+    _ = np.asarray(array_view[0])
+    np.testing.assert_array_equal(array_view._cache._store[0].ready, np.ones((2, 2), dtype=bool))
+
+    # Same bbox [1, 1, 3, 3], but only the diagonal pixels are set.
+    new_mask = Mask(np.array([[True, False], [False, True]], dtype=bool), bbox=np.array([1, 1, 3, 3]))
+    mock_invalidate = MagicMock(wraps=array_view._invalidate_bbox)
+    with patch.object(array_view, "_invalidate_bbox", mock_invalidate):
+        graph_backend.update_node_attrs(
+            attrs={DEFAULT_ATTR_KEYS.MASK: [new_mask]},
+            node_ids=[node_id],
+        )
+        # bbox and label unchanged, but the mask pixels changed — invalidate exactly one region
+        n_regions = sum(len(call.args[0]) for call in mock_invalidate.call_args_list)
+        assert n_regions == 1
+
+    expected_ready = np.ones((2, 2), dtype=bool)
+    expected_ready[0, 0] = False
+    np.testing.assert_array_equal(array_view._cache._store[0].ready, expected_ready)
+
+    # After recomputation only the diagonal pixels carry the label.
+    output = np.asarray(array_view[0])
+    assert output[1, 1] == 1
+    assert output[2, 2] == 1
+    assert output[1, 2] == 0
+    assert output[2, 1] == 0
+
+
+def test_graph_array_view_no_invalidation_when_mask_unchanged(graph_backend: BaseGraph) -> None:
+    """Re-supplying an identical mask (same bbox and pixels) must not invalidate anything."""
+    _add_graph_array_node_attrs(graph_backend)
+
+    mask = _make_square_mask(1, 1)
+    node_id = graph_backend.add_node(
+        {
+            DEFAULT_ATTR_KEYS.T: 0,
+            "label": 1,
+            DEFAULT_ATTR_KEYS.MASK: mask,
+            DEFAULT_ATTR_KEYS.BBOX: mask.bbox,
+        }
+    )
+
+    array_view = GraphArrayView(graph=graph_backend, shape=(2, 8, 8), attr_key="label", chunk_shape=(4, 4))
+    _ = np.asarray(array_view[0])
+    np.testing.assert_array_equal(array_view._cache._store[0].ready, np.ones((2, 2), dtype=bool))
+
+    # A fresh Mask object with identical bbox and pixels: no rendered change.
+    same_mask = Mask(np.ones((2, 2), dtype=bool), bbox=np.array([1, 1, 3, 3]))
+    mock_invalidate = MagicMock(wraps=array_view._invalidate_bbox)
+    with patch.object(array_view, "_invalidate_bbox", mock_invalidate):
+        graph_backend.update_node_attrs(
+            attrs={DEFAULT_ATTR_KEYS.MASK: [same_mask]},
+            node_ids=[node_id],
+        )
+        # Nothing affecting the rendered output changed — no region invalidated
+        n_regions = sum(len(call.args[0]) for call in mock_invalidate.call_args_list)
+        assert n_regions == 0
+
+    np.testing.assert_array_equal(array_view._cache._store[0].ready, np.ones((2, 2), dtype=bool))

@@ -451,13 +451,30 @@ class GraphArrayView(BaseReadOnlyArray):
             old_bbox = old_attr.get(DEFAULT_ATTR_KEYS.BBOX)
             new_bbox = new_attr.get(DEFAULT_ATTR_KEYS.BBOX)
 
-            bbox_changed = old_t != new_t or not np.array_equal(old_bbox, new_bbox)
+            moved = old_t != new_t or not np.array_equal(old_bbox, new_bbox)
 
-            if bbox_changed:
+            if moved:
+                # Node relocated: clear the stale region and paint the new one.
                 time_values.extend((old_t, new_t))
                 bboxes.extend((old_bbox, new_bbox))
-            elif old_attr.get(self._attr_key) != new_attr.get(self._attr_key):
+            elif old_attr.get(self._attr_key) != new_attr.get(self._attr_key) or self._mask_changed(old_attr, new_attr):
                 time_values.append(new_t)
                 bboxes.append(new_bbox)
 
         self._invalidate_bbox(time_values, bboxes)
+
+    @staticmethod
+    def _mask_changed(old_attr: dict, new_attr: dict) -> bool:
+        """
+        Whether the painted output changed while the bbox stayed in place.
+
+        The rendered region depends on the displayed attribute value and the mask
+        pixels, so a mask swap with an unchanged bbox still requires invalidation.
+        """
+        old_mask = old_attr.get(DEFAULT_ATTR_KEYS.MASK)
+        new_mask = new_attr.get(DEFAULT_ATTR_KEYS.MASK)
+        if old_mask is None and new_mask is None:
+            return False
+        elif old_mask is None or new_mask is None:
+            return True
+        return old_mask != new_mask
