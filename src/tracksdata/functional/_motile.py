@@ -41,11 +41,6 @@ def to_motile_graph(
     -------
     motile.TrackGraph
         A `motile` track graph with the same nodes, edges, and copied attributes.
-
-    See Also
-    --------
-    [ILPSolver.to_motile_solver][tracksdata.solvers.ILPSolver.to_motile_solver]:
-        Build a `motile.Solver` from an `ILPSolver` configuration.
     """
     try:
         import motile
