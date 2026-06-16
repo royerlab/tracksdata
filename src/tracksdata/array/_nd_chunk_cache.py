@@ -147,16 +147,21 @@ class NDChunkCache:
         bounds = self._chunk_bounds(volume_slicing_slices)
         chunk_ranges = [range(lo, hi + 1) for lo, hi in bounds]
 
-        # For every intersected chunk, compute if not ready
-        for chunk_idx in itertools.product(*chunk_ranges):
-            if store_entry.ready[chunk_idx]:
-                continue  # already filled
+        unready: list[tuple[int, ...]] = [
+            chunk_idx for chunk_idx in itertools.product(*chunk_ranges) if not store_entry.ready[chunk_idx]
+        ]
 
-            # Absolute slice covering this chunk
-            chunk_slc = self._chunk_slice(chunk_idx)
-            # Handle the case where chunk_slc exceeds volume_slices
-            self.compute_func(time, chunk_slc, store_entry.buffer)
-            store_entry.ready[chunk_idx] = True
+        if unready:
+            unready_arr = np.asarray(unready)
+            lo_idx = tuple(int(x) for x in unready_arr.min(axis=0))
+            hi_idx = tuple(int(x) for x in unready_arr.max(axis=0))
+            lo_slc = self._chunk_slice(lo_idx)
+            hi_slc = self._chunk_slice(hi_idx)
+            # Bounding box of unready chunks; re-painting already-ready chunks inside is idempotent.
+            union_slc = tuple(slice(lo_slc[d].start, hi_slc[d].stop) for d in range(self.ndim))
+            self.compute_func(time, union_slc, store_entry.buffer)
+            for chunk_idx in unready:
+                store_entry.ready[chunk_idx] = True
 
         # Return view on the big buffer
         return store_entry.buffer[volume_slicing]

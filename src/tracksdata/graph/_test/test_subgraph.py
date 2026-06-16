@@ -1,3 +1,5 @@
+import gc
+import itertools
 import re
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -473,6 +475,43 @@ def test_subgraph_add_node(graph_backend: BaseGraph) -> None:
         assert attributes["label"].to_list()[0] == "NEW"
 
 
+def test_subgraph_bulk_add_nodes_emits_batched_node_added_callbacks(graph_backend: BaseGraph) -> None:
+    graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
+    subgraph = graph_with_data.filter(node_ids=graph_with_data._test_nodes[:2]).subgraph()  # type: ignore
+
+    root_calls: list[tuple[object, object]] = []
+    subgraph_calls: list[tuple[object, object]] = []
+    graph_with_data.node_added.connect(lambda node_ids, attrs: root_calls.append((node_ids, attrs)))
+    subgraph.node_added.connect(lambda node_ids, attrs: subgraph_calls.append((node_ids, attrs)))
+
+    nodes = [
+        {"t": 10, "x": 10.0, "y": 10.0, "label": "A"},
+        {"t": 11, "x": 11.0, "y": 11.0, "label": "B"},
+    ]
+    node_ids = subgraph.bulk_add_nodes(nodes)
+
+    assert len(root_calls) == 1
+    assert len(subgraph_calls) == 1
+    assert root_calls[0] == (node_ids, nodes)
+    assert subgraph_calls[0] == (node_ids, nodes)
+
+
+def test_subgraph_update_node_attrs_emits_batched_node_updated_callback(graph_backend: BaseGraph) -> None:
+    graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
+    subgraph = graph_with_data.filter(node_ids=graph_with_data._test_nodes[:3]).subgraph()  # type: ignore
+    node_ids = graph_with_data._test_nodes[:2]  # type: ignore
+
+    calls: list[tuple[object, object, object]] = []
+    subgraph.node_updated.connect(lambda node_ids, old_attrs, new_attrs: calls.append((node_ids, old_attrs, new_attrs)))
+
+    subgraph.update_node_attrs(node_ids=node_ids, attrs={"x": [10.0, 20.0]})
+
+    assert len(calls) == 1
+    assert calls[0][0] == node_ids
+    assert [attrs["x"] for attrs in calls[0][1]] == [0.0, 1.0]
+    assert [attrs["x"] for attrs in calls[0][2]] == [10.0, 20.0]
+
+
 def test_subgraph_add_edge(graph_backend: BaseGraph) -> None:
     """Test adding edges to a subgraph."""
     graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
@@ -739,6 +778,98 @@ def test_homemorphism(graph_backend: BaseGraph) -> None:
 
     assert same_graph.node_ids() == graph_with_data.node_ids()
     assert same_graph.edge_ids() == graph_with_data.edge_ids()
+
+
+@parametrize_subgraph_tests
+def test_filter_nodes_with_or_attr_filter(
+    graph_backend: BaseGraph,
+    use_subgraph: bool,
+) -> None:
+    """OR-combined node filter selects the union of matching nodes."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+    node_attrs = graph_with_data.node_attrs()
+
+    nodes = graph_with_data.filter((NodeAttr("t") == 1) | (NodeAttr("t") == 3)).node_ids()
+    expected = node_attrs.filter(pl.col("t").is_in([1, 3]))[DEFAULT_ATTR_KEYS.NODE_ID].to_list()
+    assert set(nodes) == set(expected)
+
+
+@parametrize_subgraph_tests
+def test_filter_nodes_with_not_attr_filter(
+    graph_backend: BaseGraph,
+    use_subgraph: bool,
+) -> None:
+    """NOT (inverted) node filter selects the complement of matching nodes."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+    node_attrs = graph_with_data.node_attrs()
+
+    nodes = graph_with_data.filter(~(NodeAttr("label") == "A")).node_ids()
+    expected = node_attrs.filter(pl.col("label") != "A")[DEFAULT_ATTR_KEYS.NODE_ID].to_list()
+    assert set(nodes) == set(expected)
+
+
+@parametrize_subgraph_tests
+def test_filter_nodes_with_xor_attr_filter(
+    graph_backend: BaseGraph,
+    use_subgraph: bool,
+) -> None:
+    """XOR node filter selects nodes matching exactly one of the conditions."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+    node_attrs = graph_with_data.node_attrs()
+
+    nodes = graph_with_data.filter((NodeAttr("t") == 2) ^ (NodeAttr("label") == "A")).node_ids()
+    expected = node_attrs.filter((pl.col("t") == 2) ^ (pl.col("label") == "A"))[DEFAULT_ATTR_KEYS.NODE_ID].to_list()
+    assert set(nodes) == set(expected)
+
+
+@parametrize_subgraph_tests
+def test_filter_nodes_with_nested_compound(
+    graph_backend: BaseGraph,
+    use_subgraph: bool,
+) -> None:
+    """Nested AND/OR filter trees evaluate correctly."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+    node_attrs = graph_with_data.node_attrs()
+
+    nodes = graph_with_data.filter(
+        (NodeAttr("label") == "A") & ((NodeAttr("t") == 1) | (NodeAttr("t") == 3))
+    ).node_ids()
+    expected = node_attrs.filter((pl.col("label") == "A") & (pl.col("t").is_in([1, 3])))[
+        DEFAULT_ATTR_KEYS.NODE_ID
+    ].to_list()
+    assert set(nodes) == set(expected)
+
+
+def test_filter_edges_with_or_attr_filter(graph_backend: BaseGraph) -> None:
+    """OR-combined edge filter selects the union of matching edges."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
+    edge_attrs = graph_with_data.edge_attrs()
+
+    edge_filter = graph_with_data.filter((EdgeAttr("weight") < 0.4) | (EdgeAttr("weight") > 0.8))
+    selected_edges = edge_filter.edge_attrs()[DEFAULT_ATTR_KEYS.EDGE_ID].to_list()
+    expected = edge_attrs.filter((pl.col("weight") < 0.4) | (pl.col("weight") > 0.8))[
+        DEFAULT_ATTR_KEYS.EDGE_ID
+    ].to_list()
+    assert set(selected_edges) == set(expected)
+
+
+def test_filter_subgraph_with_or_attr_filter(graph_backend: BaseGraph) -> None:
+    """Building a subgraph from a compound (OR) filter yields the expected nodes/edges."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
+    node_attrs = graph_with_data.node_attrs()
+
+    sub = graph_with_data.filter((NodeAttr("t") == 1) | (NodeAttr("t") == 2)).subgraph()
+    expected = node_attrs.filter(pl.col("t").is_in([1, 2]))[DEFAULT_ATTR_KEYS.NODE_ID].to_list()
+    assert set(sub.node_ids()) == set(expected)
+
+
+def test_filter_compound_mixed_node_and_edge_raises(graph_backend: BaseGraph) -> None:
+    """A single compound filter cannot mix node and edge attributes."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
+
+    bad_filter = (NodeAttr("t") == 1) | (EdgeAttr("weight") > 0.5)
+    with pytest.raises(ValueError, match="cannot mix NodeAttr and EdgeAttr"):
+        graph_with_data.filter(bad_filter).node_ids()
 
 
 @parametrize_subgraph_tests
@@ -1660,3 +1791,173 @@ def test_edge_list(graph_backend: BaseGraph, use_subgraph: bool) -> None:
         )
     )
     assert edge_list == expected_edge_list
+
+
+def test_subgraph_bulk_remove_nodes(graph_backend: BaseGraph) -> None:
+    """bulk_remove_nodes on a view drops from view+root and cleans edge mappings."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
+    original_nodes = graph_with_data._test_nodes  # type: ignore
+
+    view = graph_with_data.filter().subgraph()
+
+    to_remove = [original_nodes[1], original_nodes[2]]
+    view.bulk_remove_nodes(to_remove)
+
+    remaining = set(original_nodes) - set(to_remove)
+    assert set(view.node_ids()) == remaining
+    assert set(graph_with_data.node_ids()) == remaining
+    # Edges incident to removed nodes must be gone from both layers.
+    view_edges = set(view.edge_ids())
+    root_edges = set(graph_with_data.edge_ids())
+    assert view_edges == root_edges
+
+
+def test_subgraph_bulk_remove_edges(graph_backend: BaseGraph) -> None:
+    """bulk_remove_edges on a view drops from view+root, nodes untouched."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
+    original_nodes = graph_with_data._test_nodes  # type: ignore
+    original_edges = graph_with_data._test_edges  # type: ignore
+
+    view = graph_with_data.filter().subgraph()
+
+    to_remove = original_edges[:2]
+    view.bulk_remove_edges(to_remove)
+
+    remaining = set(original_edges) - set(to_remove)
+    assert set(view.edge_ids()) == remaining
+    assert set(graph_with_data.edge_ids()) == remaining
+    assert set(view.node_ids()) == set(original_nodes)
+    assert set(graph_with_data.node_ids()) == set(original_nodes)
+
+
+def _build_chain_graph(graph: SQLGraph, n_nodes: int) -> list[int]:
+    node_ids: list[int] = []
+    for t in range(n_nodes):
+        node_ids.append(graph.add_node({DEFAULT_ATTR_KEYS.T: t}))
+    for src, tgt in itertools.pairwise(node_ids):
+        graph.add_edge(src, tgt, {})
+    graph.add_overlap(node_ids[0], node_ids[1])
+    graph.add_overlap(node_ids[2], node_ids[3])
+    return node_ids
+
+
+def _scratch_table_count(graph: SQLGraph) -> int:
+    """Count leftover ``_tracksdata_ids_*`` scratch tables in a SQLite graph.
+
+    Scratch tables are regular (engine-wide) tables and live in
+    ``sqlite_master``; we also probe ``sqlite_temp_master`` to flag any
+    regression that creates a leaky ``TEMPORARY`` scratch table on a
+    pooled connection.
+    """
+    import sqlalchemy as sa
+
+    total = 0
+    with graph._engine.connect() as conn:
+        for view in ("sqlite_master", "sqlite_temp_master"):
+            total += conn.execute(
+                sa.text(f"SELECT COUNT(*) FROM {view} WHERE type='table' AND name LIKE '_tracksdata_ids_%'")
+            ).scalar()
+    return total
+
+
+def test_sql_graph_filter_large_node_ids(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Filtering with more ids than SQLite's variable limit must not raise.
+
+    Reproduces the ``OperationalError: too many SQL variables`` failure by
+    forcing the scratch-table code path via a tiny chunk size. ``overlaps``
+    and ``_get_degree`` use the same chunk size to drive their chunked
+    ``IN(...)`` reads, so they exercise that path without allocating scratch
+    tables.
+    """
+    graph = SQLGraph("sqlite", str(tmp_path / "scratch.db"))
+    n_nodes = 40
+    node_ids = _build_chain_graph(graph, n_nodes)
+
+    # Force the chunked / scratch-table paths on every call site by shrinking
+    # the chunk size well below ``n_nodes``.
+    monkeypatch.setattr(SQLGraph, "_sql_chunk_size", lambda self: 4)
+
+    # ``overlaps`` and the degree helpers chunk via ``_chunked_sa_read`` and
+    # do not allocate scratch tables, so the count stays at zero.
+    assert _scratch_table_count(graph) == 0
+    in_deg = graph.in_degree(node_ids)
+    assert _scratch_table_count(graph) == 0
+    out_deg = graph.out_degree(node_ids)
+    assert _scratch_table_count(graph) == 0
+    overlaps = graph.overlaps(node_ids)
+    assert _scratch_table_count(graph) == 0
+
+    assert sum(in_deg) == n_nodes - 1
+    assert sum(out_deg) == n_nodes - 1
+    assert sorted(map(tuple, overlaps)) == sorted([(node_ids[0], node_ids[1]), (node_ids[2], node_ids[3])])
+
+    filtered = graph.filter(node_ids=node_ids)
+    # The filter wraps node_ids in an _SQLIDSet, which must materialize to a
+    # scratch table given the forced tiny chunk size.
+    assert filtered._uses_scratch_table()
+    subgraph = filtered.subgraph()
+    assert subgraph.num_nodes() == n_nodes
+    assert subgraph.num_edges() == n_nodes - 1
+
+    # Once the filter is collected, the scratch table is dropped.
+    del filtered, subgraph
+    gc.collect()
+    assert _scratch_table_count(graph) == 0
+
+
+def test_sql_from_other_excludes_scratch_tables(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``from_other`` over the SQLite attach-dump path must not leak scratch
+    tables into the destination DB.
+
+    The filtered fast path creates a ``_tracksdata_ids_<uuid>`` selection
+    table on the source engine; if the DDL replay does not exclude it the
+    destination ends up with the internal helper persisted alongside
+    ``Node`` / ``Edge`` / ``Overlap`` / ``Metadata``.
+    """
+    import sqlalchemy as sa
+
+    monkeypatch.setattr(SQLGraph, "_sql_chunk_size", lambda self: 1)
+
+    src = SQLGraph("sqlite", str(tmp_path / "src.db"))
+    node_ids = _build_chain_graph(src, n_nodes=6)
+
+    subgraph = src.filter(node_ids=node_ids).subgraph()
+    dst_db = tmp_path / "dst.db"
+    dst = SQLGraph.from_other(subgraph, drivername="sqlite", database=str(dst_db))
+
+    try:
+        with dst._engine.connect() as conn:
+            names = {
+                row[0] for row in conn.execute(sa.text("SELECT name FROM sqlite_master WHERE type='table'")).fetchall()
+            }
+    finally:
+        dst._engine.dispose()
+
+    assert names == {"Node", "Edge", "Overlap", "Metadata"}, names
+
+
+def test_sql_graph_filter_borderline_node_ids(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The scratch cutoff must account for how many times ids appear per statement.
+
+    With ``_sql_chunk_size() == 12`` and ``SQLFilter`` using ``occurrences=3``,
+    a list of 5 ids would compile to ~15 bound variables — above the limit —
+    even though ``len(node_ids) <= chunk_size``. The helper must still switch
+    to the scratch-table path in that band.
+    """
+    graph = SQLGraph("sqlite", str(tmp_path / "scratch.db"))
+    n_nodes = 5
+    node_ids = _build_chain_graph(graph, n_nodes)
+
+    monkeypatch.setattr(SQLGraph, "_sql_chunk_size", lambda self: 12)
+
+    filtered = graph.filter(node_ids=node_ids)
+    # 5 ids fits under chunk_size=12 inline, but with occurrences=3 the
+    # effective cutoff is 12 // 3 == 4, so scratch must kick in.
+    assert filtered._uses_scratch_table()
+    subgraph = filtered.subgraph()
+    assert subgraph.num_nodes() == n_nodes
+    assert subgraph.num_edges() == n_nodes - 1
+
+    del filtered, subgraph
+    gc.collect()
+    assert _scratch_table_count(graph) == 0

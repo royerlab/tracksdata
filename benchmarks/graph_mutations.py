@@ -52,9 +52,15 @@ class GraphMutationsBenchmark:
     param_names = ("backend", "n_nodes")
     params = (tuple(BACKENDS), NODE_SIZES)
 
-    # ASV's default `number=10` would invoke each method 10x back-to-back,
-    # which breaks stateful mutations — force a single invocation per rep.
+    # The mutation benchmarks are destructive: a timed call removes nodes from
+    # the graph built in `setup`, so it can only run once per fresh graph. asv
+    # re-runs `setup` before each *sample* (via the timeit setup), but only if
+    # we keep it out of the warmup loop, which repeats the function without
+    # re-setup. So pin `number = 1` (one call per sample) and `warmup_time = 0`
+    # (skip warmup entirely) — otherwise the second warmup call hits an
+    # already-removed node and raises `Node N does not exist in the graph.`
     number = 1
+    warmup_time = 0
     timeout = 300
 
     def setup(self, backend_name: str, n_nodes: int) -> None:
