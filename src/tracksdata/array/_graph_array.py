@@ -399,12 +399,15 @@ class GraphArrayView(BaseReadOnlyArray):
         that time is invalidated. This is distinct from a bbox that lies outside the
         array volume, which invalidates nothing.
         """
+        if hasattr(time_values, "to_list"):
+            time_values = time_values.to_list()
+
         for time_value, bbox in zip(time_values, bboxes, strict=True):
             try:
-                time = int(np.asarray(time_value).item())
+                time = int(time_value)
             except (TypeError, ValueError) as e:
                 raise ValueError(
-                    f"Time attribute value must be a scalar integer, got {time_value} of type {type(time_value)}"
+                    f"Time attribute value must be a scalar integer, got {time_value!r} of type {type(time_value)}"
                 ) from e
             if not (0 <= time < self.original_shape[0]):
                 continue
