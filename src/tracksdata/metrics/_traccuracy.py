@@ -15,7 +15,28 @@ else:
 def to_traccuracy_graph(
     graph: BaseGraph,
     array_view_kwargs: dict[str, Any] | None = None,
+    location_keys: list[str] | None = None,
 ) -> "TrackingGraph":
+    """
+    Convert a tracksdata graph to a traccuracy graph.
+
+    Parameters
+    ----------
+    graph : BaseGraph
+        The graph to convert.
+    array_view_kwargs : dict[str, Any] | None
+        Additional keyword arguments to pass to the `GraphArrayView` constructor used to create the segmentation.
+    location_keys : list[str] | None
+        The keys of the location attributes to use for the segmentation.
+        If None, the location keys are inferred from the intersection of the graph node attributes and
+        the list [DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X].
+
+    Returns
+    -------
+    TrackingGraph
+        A traccuracy graph.
+    """
+
     try:
         from traccuracy import TrackingGraph
     except ImportError as e:
@@ -39,4 +60,9 @@ def to_traccuracy_graph(
 
     segmentation = GraphArrayView(graph, attr_key=DEFAULT_ATTR_KEYS.NODE_ID, **array_view_kwargs)
 
-    return TrackingGraph(nx_graph, segmentation)
+    if location_keys is None:
+        location_keys = [DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
+        node_attr_keys = graph.node_attr_keys()
+        location_keys = [key for key in location_keys if key in node_attr_keys]
+
+    return TrackingGraph(nx_graph, segmentation, location_keys=location_keys)

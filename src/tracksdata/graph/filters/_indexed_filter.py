@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
-from tracksdata.attrs import AttrComparison
+from tracksdata.attrs import Filter
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph._rustworkx_graph import (
     IndexedRXGraph,
@@ -21,7 +21,7 @@ class IndexRXFilter(RXFilter):
 
     def __init__(
         self,
-        *attr_comps: AttrComparison,
+        *attr_comps: Filter,
         graph: "GraphView | IndexedRXGraph",
         node_ids: Sequence[int] | None = None,
         include_targets: bool = False,

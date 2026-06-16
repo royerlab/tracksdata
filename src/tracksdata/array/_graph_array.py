@@ -404,25 +404,37 @@ class GraphArrayView(BaseReadOnlyArray):
         if slices is not None:
             self._cache.invalidate(time=time, volume_slicing=slices)
 
-    def _on_node_added(self, node_id: int, new_attrs: dict) -> None:
-        del node_id
-        self._invalidate_bbox(new_attrs[DEFAULT_ATTR_KEYS.T], new_attrs[DEFAULT_ATTR_KEYS.BBOX])
+    def _on_node_added(
+        self,
+        node_ids: list[int],
+        new_attrs: list[dict],
+    ) -> None:
+        del node_ids
+        for attrs in new_attrs:
+            self._invalidate_bbox(attrs[DEFAULT_ATTR_KEYS.T], attrs[DEFAULT_ATTR_KEYS.BBOX])
 
-    def _on_node_removed(self, node_id: int, old_attrs: dict) -> None:
-        del node_id
-        self._invalidate_bbox(old_attrs[DEFAULT_ATTR_KEYS.T], old_attrs[DEFAULT_ATTR_KEYS.BBOX])
+    def _on_node_removed(self, node_ids: list[int], old_attrs: list[dict]) -> None:
+        del node_ids
+        for attrs in old_attrs:
+            self._invalidate_bbox(attrs[DEFAULT_ATTR_KEYS.T], attrs[DEFAULT_ATTR_KEYS.BBOX])
 
-    def _on_node_updated(self, node_id: int, old_attrs: dict, new_attrs: dict) -> None:
-        del node_id
-        old_t = old_attrs[DEFAULT_ATTR_KEYS.T]
-        new_t = new_attrs[DEFAULT_ATTR_KEYS.T]
-        old_bbox = old_attrs[DEFAULT_ATTR_KEYS.BBOX]
-        new_bbox = new_attrs[DEFAULT_ATTR_KEYS.BBOX]
+    def _on_node_updated(
+        self,
+        node_ids: list[int],
+        old_attrs: list[dict],
+        new_attrs: list[dict],
+    ) -> None:
+        del node_ids
+        for old_attr, new_attr in zip(old_attrs, new_attrs, strict=True):
+            old_t = old_attr[DEFAULT_ATTR_KEYS.T]
+            new_t = new_attr[DEFAULT_ATTR_KEYS.T]
+            old_bbox = old_attr[DEFAULT_ATTR_KEYS.BBOX]
+            new_bbox = new_attr[DEFAULT_ATTR_KEYS.BBOX]
 
-        bbox_changed = old_t != new_t or not np.array_equal(old_bbox, new_bbox)
+            bbox_changed = old_t != new_t or not np.array_equal(old_bbox, new_bbox)
 
-        if bbox_changed:
-            self._invalidate_bbox(old_t, old_bbox)
-            self._invalidate_bbox(new_t, new_bbox)
-        elif old_attrs.get(self._attr_key) != new_attrs.get(self._attr_key):
-            self._invalidate_bbox(new_t, new_bbox)
+            if bbox_changed:
+                self._invalidate_bbox(old_t, old_bbox)
+                self._invalidate_bbox(new_t, new_bbox)
+            elif old_attr.get(self._attr_key) != new_attr.get(self._attr_key):
+                self._invalidate_bbox(new_t, new_bbox)
