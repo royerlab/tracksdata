@@ -144,6 +144,7 @@ class MaskMatching(Matching):
         tuple[list[int], list[int], list[int], list[int], list[float]]
             Matching data: mapped_ref, mapped_comp, rows, cols, weights (IoU values).
         """
+        # Local import: avoids the graph <-> nodes package import cycle.
         from tracksdata.nodes._mask import as_mask
         from tracksdata.utils._dtypes import column_from_bytes
 

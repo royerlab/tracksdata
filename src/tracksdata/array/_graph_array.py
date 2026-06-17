@@ -343,6 +343,8 @@ class GraphArrayView(BaseReadOnlyArray):
         np.ndarray
             The filled buffer.
         """
+        # Local import: avoids the graph <-> nodes package import cycle (importing
+        # tracksdata.nodes re-enters the partially-initialized graph package).
         from tracksdata.nodes._mask import as_mask
 
         subgraph = self._spatial_filter[(slice(time, time), *volume_slicing)]

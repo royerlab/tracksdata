@@ -1378,6 +1378,7 @@ class BaseGraph(abc.ABC):
             raise ValueError("iou_threshold must be between 0.0 and 1.0")
 
         def _estimate_overlaps(t: int) -> list[list[int, 2]]:
+            # Local import: avoids the graph <-> nodes package import cycle.
             from tracksdata.nodes._mask import as_mask
 
             node_attrs = self.filter(NodeAttr(DEFAULT_ATTR_KEYS.T) == t).node_attrs(
@@ -1941,6 +1942,7 @@ class BaseGraph(abc.ABC):
         }
 
         if DEFAULT_ATTR_KEYS.MASK in node_attrs.columns:
+            # Local import: avoids the graph <-> nodes package import cycle.
             from tracksdata.nodes._mask import as_mask
 
             node_dict[DEFAULT_ATTR_KEYS.MASK] = construct_var_len_props(
