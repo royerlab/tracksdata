@@ -475,6 +475,43 @@ def test_subgraph_add_node(graph_backend: BaseGraph) -> None:
         assert attributes["label"].to_list()[0] == "NEW"
 
 
+def test_subgraph_bulk_add_nodes_emits_batched_node_added_callbacks(graph_backend: BaseGraph) -> None:
+    graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
+    subgraph = graph_with_data.filter(node_ids=graph_with_data._test_nodes[:2]).subgraph()  # type: ignore
+
+    root_calls: list[tuple[object, object]] = []
+    subgraph_calls: list[tuple[object, object]] = []
+    graph_with_data.node_added.connect(lambda node_ids, attrs: root_calls.append((node_ids, attrs)))
+    subgraph.node_added.connect(lambda node_ids, attrs: subgraph_calls.append((node_ids, attrs)))
+
+    nodes = [
+        {"t": 10, "x": 10.0, "y": 10.0, "label": "A"},
+        {"t": 11, "x": 11.0, "y": 11.0, "label": "B"},
+    ]
+    node_ids = subgraph.bulk_add_nodes(nodes)
+
+    assert len(root_calls) == 1
+    assert len(subgraph_calls) == 1
+    assert root_calls[0] == (node_ids, nodes)
+    assert subgraph_calls[0] == (node_ids, nodes)
+
+
+def test_subgraph_update_node_attrs_emits_batched_node_updated_callback(graph_backend: BaseGraph) -> None:
+    graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
+    subgraph = graph_with_data.filter(node_ids=graph_with_data._test_nodes[:3]).subgraph()  # type: ignore
+    node_ids = graph_with_data._test_nodes[:2]  # type: ignore
+
+    calls: list[tuple[object, object, object]] = []
+    subgraph.node_updated.connect(lambda node_ids, old_attrs, new_attrs: calls.append((node_ids, old_attrs, new_attrs)))
+
+    subgraph.update_node_attrs(node_ids=node_ids, attrs={"x": [10.0, 20.0]})
+
+    assert len(calls) == 1
+    assert calls[0][0] == node_ids
+    assert [attrs["x"] for attrs in calls[0][1]] == [0.0, 1.0]
+    assert [attrs["x"] for attrs in calls[0][2]] == [10.0, 20.0]
+
+
 def test_subgraph_add_edge(graph_backend: BaseGraph) -> None:
     """Test adding edges to a subgraph."""
     graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
@@ -741,6 +778,98 @@ def test_homemorphism(graph_backend: BaseGraph) -> None:
 
     assert same_graph.node_ids() == graph_with_data.node_ids()
     assert same_graph.edge_ids() == graph_with_data.edge_ids()
+
+
+@parametrize_subgraph_tests
+def test_filter_nodes_with_or_attr_filter(
+    graph_backend: BaseGraph,
+    use_subgraph: bool,
+) -> None:
+    """OR-combined node filter selects the union of matching nodes."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+    node_attrs = graph_with_data.node_attrs()
+
+    nodes = graph_with_data.filter((NodeAttr("t") == 1) | (NodeAttr("t") == 3)).node_ids()
+    expected = node_attrs.filter(pl.col("t").is_in([1, 3]))[DEFAULT_ATTR_KEYS.NODE_ID].to_list()
+    assert set(nodes) == set(expected)
+
+
+@parametrize_subgraph_tests
+def test_filter_nodes_with_not_attr_filter(
+    graph_backend: BaseGraph,
+    use_subgraph: bool,
+) -> None:
+    """NOT (inverted) node filter selects the complement of matching nodes."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+    node_attrs = graph_with_data.node_attrs()
+
+    nodes = graph_with_data.filter(~(NodeAttr("label") == "A")).node_ids()
+    expected = node_attrs.filter(pl.col("label") != "A")[DEFAULT_ATTR_KEYS.NODE_ID].to_list()
+    assert set(nodes) == set(expected)
+
+
+@parametrize_subgraph_tests
+def test_filter_nodes_with_xor_attr_filter(
+    graph_backend: BaseGraph,
+    use_subgraph: bool,
+) -> None:
+    """XOR node filter selects nodes matching exactly one of the conditions."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+    node_attrs = graph_with_data.node_attrs()
+
+    nodes = graph_with_data.filter((NodeAttr("t") == 2) ^ (NodeAttr("label") == "A")).node_ids()
+    expected = node_attrs.filter((pl.col("t") == 2) ^ (pl.col("label") == "A"))[DEFAULT_ATTR_KEYS.NODE_ID].to_list()
+    assert set(nodes) == set(expected)
+
+
+@parametrize_subgraph_tests
+def test_filter_nodes_with_nested_compound(
+    graph_backend: BaseGraph,
+    use_subgraph: bool,
+) -> None:
+    """Nested AND/OR filter trees evaluate correctly."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph)
+    node_attrs = graph_with_data.node_attrs()
+
+    nodes = graph_with_data.filter(
+        (NodeAttr("label") == "A") & ((NodeAttr("t") == 1) | (NodeAttr("t") == 3))
+    ).node_ids()
+    expected = node_attrs.filter((pl.col("label") == "A") & (pl.col("t").is_in([1, 3])))[
+        DEFAULT_ATTR_KEYS.NODE_ID
+    ].to_list()
+    assert set(nodes) == set(expected)
+
+
+def test_filter_edges_with_or_attr_filter(graph_backend: BaseGraph) -> None:
+    """OR-combined edge filter selects the union of matching edges."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
+    edge_attrs = graph_with_data.edge_attrs()
+
+    edge_filter = graph_with_data.filter((EdgeAttr("weight") < 0.4) | (EdgeAttr("weight") > 0.8))
+    selected_edges = edge_filter.edge_attrs()[DEFAULT_ATTR_KEYS.EDGE_ID].to_list()
+    expected = edge_attrs.filter((pl.col("weight") < 0.4) | (pl.col("weight") > 0.8))[
+        DEFAULT_ATTR_KEYS.EDGE_ID
+    ].to_list()
+    assert set(selected_edges) == set(expected)
+
+
+def test_filter_subgraph_with_or_attr_filter(graph_backend: BaseGraph) -> None:
+    """Building a subgraph from a compound (OR) filter yields the expected nodes/edges."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
+    node_attrs = graph_with_data.node_attrs()
+
+    sub = graph_with_data.filter((NodeAttr("t") == 1) | (NodeAttr("t") == 2)).subgraph()
+    expected = node_attrs.filter(pl.col("t").is_in([1, 2]))[DEFAULT_ATTR_KEYS.NODE_ID].to_list()
+    assert set(sub.node_ids()) == set(expected)
+
+
+def test_filter_compound_mixed_node_and_edge_raises(graph_backend: BaseGraph) -> None:
+    """A single compound filter cannot mix node and edge attributes."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
+
+    bad_filter = (NodeAttr("t") == 1) | (EdgeAttr("weight") > 0.5)
+    with pytest.raises(ValueError, match="cannot mix NodeAttr and EdgeAttr"):
+        graph_with_data.filter(bad_filter).node_ids()
 
 
 @parametrize_subgraph_tests
@@ -1339,6 +1468,43 @@ def test_edge_list(graph_backend: BaseGraph, use_subgraph: bool) -> None:
         )
     )
     assert edge_list == expected_edge_list
+
+
+def test_subgraph_bulk_remove_nodes(graph_backend: BaseGraph) -> None:
+    """bulk_remove_nodes on a view drops from view+root and cleans edge mappings."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
+    original_nodes = graph_with_data._test_nodes  # type: ignore
+
+    view = graph_with_data.filter().subgraph()
+
+    to_remove = [original_nodes[1], original_nodes[2]]
+    view.bulk_remove_nodes(to_remove)
+
+    remaining = set(original_nodes) - set(to_remove)
+    assert set(view.node_ids()) == remaining
+    assert set(graph_with_data.node_ids()) == remaining
+    # Edges incident to removed nodes must be gone from both layers.
+    view_edges = set(view.edge_ids())
+    root_edges = set(graph_with_data.edge_ids())
+    assert view_edges == root_edges
+
+
+def test_subgraph_bulk_remove_edges(graph_backend: BaseGraph) -> None:
+    """bulk_remove_edges on a view drops from view+root, nodes untouched."""
+    graph_with_data = create_test_graph(graph_backend, use_subgraph=False)
+    original_nodes = graph_with_data._test_nodes  # type: ignore
+    original_edges = graph_with_data._test_edges  # type: ignore
+
+    view = graph_with_data.filter().subgraph()
+
+    to_remove = original_edges[:2]
+    view.bulk_remove_edges(to_remove)
+
+    remaining = set(original_edges) - set(to_remove)
+    assert set(view.edge_ids()) == remaining
+    assert set(graph_with_data.edge_ids()) == remaining
+    assert set(view.node_ids()) == set(original_nodes)
+    assert set(graph_with_data.node_ids()) == set(original_nodes)
 
 
 def _build_chain_graph(graph: SQLGraph, n_nodes: int) -> list[int]:
