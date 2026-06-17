@@ -37,6 +37,13 @@ class RegionPropsNodes(BaseNodesOperator):
         Physical spacing between pixels. If provided, affects distance-based
         measurements. Should be (row_spacing, col_spacing) for 2D or
         (depth_spacing, row_spacing, col_spacing) for 3D.
+    separate_arrays : bool, optional
+        If True, array-like properties (e.g. ``inertia_tensor`` or multi-channel
+        ``intensity_mean``) are flattened into multiple scalar attributes instead
+        of being stored as a single array attribute. The new attributes are named
+        ``<prop>_<index>`` (e.g. ``intensity_mean_0``, ``intensity_mean_1``) using
+        the same convention as ``node_attrs(unpack=True)``. This makes individual
+        components filterable. Defaults to False.
 
     Attributes
     ----------
@@ -44,6 +51,8 @@ class RegionPropsNodes(BaseNodesOperator):
         List of additional properties to compute.
     _spacing : tuple[float, float] | None
         Physical spacing between pixels.
+    _separate_arrays : bool
+        Whether array-like properties are flattened into scalar attributes.
 
     Examples
     --------
@@ -92,6 +101,7 @@ class RegionPropsNodes(BaseNodesOperator):
         self,
         extra_properties: list[str | Callable[[RegionProperties], Any]] | None = None,
         spacing: tuple[float, float] | None = None,
+        separate_arrays: bool = False,
     ):
         super().__init__()
         self._extra_properties = extra_properties or []
@@ -102,6 +112,7 @@ class RegionPropsNodes(BaseNodesOperator):
         if "bbox" in self._extra_properties:
             raise ValueError("`bbox` is not supported as an extra property. It's already included by default.")
         self._spacing = spacing
+        self._separate_arrays = separate_arrays
 
     def _axis_names(self, labels: NDArray[np.integer]) -> list[str]:
         """
@@ -123,6 +134,37 @@ class RegionPropsNodes(BaseNodesOperator):
             return [DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
         else:
             raise ValueError(f"`labels` must be 't + 2D' or 't + 3D', got '{labels.ndim}' dimensions.")
+
+    def _attr_items(self, key: str, value: Any) -> list[tuple[str, Any]]:
+        """
+        Normalize a single property value into one or more node attribute items.
+
+        Tuple/list/array-like numeric values are converted to numpy arrays so they
+        are stored consistently as fixed-shape array attributes. When
+        ``separate_arrays`` is enabled, such values are instead flattened into
+        scalar attributes named ``<key>_<index>`` (row-major), matching the
+        ``node_attrs(unpack=True)`` naming convention.
+
+        Parameters
+        ----------
+        key : str
+            The base attribute name.
+        value : Any
+            The property value returned by regionprops or a custom callable.
+
+        Returns
+        -------
+        list[tuple[str, Any]]
+            The (name, value) pairs to add to the node attributes.
+        """
+        if isinstance(value, np.ndarray | tuple | list):
+            arr = np.asarray(value)
+            if arr.dtype.kind in "biufc" and arr.ndim >= 1:
+                if self._separate_arrays:
+                    return [("_".join([key, *map(str, idx)]), arr[idx]) for idx in np.ndindex(arr.shape)]
+                return [(key, arr)]
+
+        return [(key, value)]
 
     def _init_node_attrs(self, graph: BaseGraph, node_attrs: dict[str, Any]) -> None:
         """
@@ -302,9 +344,10 @@ class RegionPropsNodes(BaseNodesOperator):
 
             for prop in self._extra_properties:
                 if callable(prop):
-                    attrs[prop.__name__] = prop(obj)
+                    key, value = prop.__name__, prop(obj)
                 else:
-                    attrs[prop] = getattr(obj, prop)
+                    key, value = prop, getattr(obj, prop)
+                attrs.update(self._attr_items(key, value))
 
             attrs[DEFAULT_ATTR_KEYS.MASK] = Mask(obj.image, obj.bbox)
             attrs[DEFAULT_ATTR_KEYS.BBOX] = np.asarray(obj.bbox, dtype=int)
