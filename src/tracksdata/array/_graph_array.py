@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from copy import copy
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
 
@@ -10,9 +10,6 @@ from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.options import get_options
 from tracksdata.utils._dtypes import polars_dtype_to_numpy_dtype
-
-if TYPE_CHECKING:
-    pass
 
 
 def _validate_shape(

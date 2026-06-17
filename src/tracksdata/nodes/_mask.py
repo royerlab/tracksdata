@@ -524,7 +524,7 @@ class Mask:
         Parameters
         ----------
         ndim : int
-            The number of spatial dimensions (2 or 3).
+            The number of spatial dimensions (1 to 3).
 
         Returns
         -------
@@ -548,7 +548,7 @@ class Mask:
         Parameters
         ----------
         ndim : int
-            The number of spatial dimensions (2 or 3).
+            The number of spatial dimensions (1 to 3).
 
         Returns
         -------

@@ -880,9 +880,10 @@ class SQLGraph(BaseGraph):
 
         Reflection reports every blob column as ``LargeBinary``, losing the
         distinction between genuinely-pickled columns and raw-binary ones. We
-        consult the stored schema (via :meth:`_pickled_physical_columns`) and
-        only re-tag the pickled ones, leaving raw-binary columns (e.g. the Mask
-        ``data`` leaf) as ``LargeBinary`` so writes store their bytes directly.
+        consult the stored schema (via :meth:`_raw_binary_physical_columns`) and
+        re-tag every blob column as ``PickleType`` except the raw-binary ones
+        (e.g. the Mask ``data`` leaf), which stay ``LargeBinary`` so writes store
+        their bytes directly.
         """
         if table_class.__tablename__ not in (self.Node.__tablename__, self.Edge.__tablename__):
             return

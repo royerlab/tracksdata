@@ -308,39 +308,6 @@ class _StructNamespace:
         return namespace_attr
 
 
-class _StructNamespace:
-    """Wrapper around polars struct namespace that preserves Attr semantics.
-
-    Polars' own ``Expr.struct.field(name)`` only updates the underlying expression;
-    it loses the parent column identity, which backends need to map a filter back
-    to its physical storage (e.g. SQL flat columns, dict lookups in rustworkx).
-    This wrapper proxies the namespace while threading ``root_column`` and
-    ``field_path`` through ``.field(...)`` calls.
-    """
-
-    def __init__(self, attr: "Attr") -> None:
-        self._attr = attr
-        self._namespace = attr.expr.struct
-
-    def field(self, name: str) -> "Attr":
-        # preserve_field_path keeps the existing root/path before appending the new field.
-        out = self._attr._wrap(self._namespace.field(name), preserve_field_path=True)
-        # _namespace.field() always returns a polars Expr, so _wrap always yields an Attr here.
-        out._append_field_path(name)
-        return out
-
-    def __getattr__(self, name: str) -> Any:
-        namespace_attr = getattr(self._namespace, name)
-        if callable(namespace_attr):
-
-            @functools.wraps(namespace_attr)
-            def _wrapped(*args, **kwargs):
-                return self._attr._wrap(namespace_attr(*args, **kwargs))
-
-            return _wrapped
-        return namespace_attr
-
-
 class Attr:
     """
     A class to compose an attribute expression for attribute filtering or value evaluation.
