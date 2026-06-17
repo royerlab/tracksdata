@@ -392,6 +392,9 @@ _POLARS_TO_SQLALCHEMY_TYPE_MAP = {
     # String types
     pl.String: sa.String,
     pl.Utf8: sa.String,
+    # Raw binary blobs are stored as-is (no pickle round-trip), e.g. the
+    # blosc2-compressed `data` leaf of a Mask struct attribute.
+    pl.Binary: sa.LargeBinary,
 }
 
 
