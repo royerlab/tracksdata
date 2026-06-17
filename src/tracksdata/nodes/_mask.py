@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from enum import IntEnum
 from functools import cached_property, lru_cache
 from typing import TYPE_CHECKING, Any
 
@@ -19,9 +20,80 @@ if TYPE_CHECKING:
     from tracksdata.graph._base_graph import BaseGraph
 
 
-def _pack_mask_array(mask: NDArray) -> bytes:
-    """Compress a mask array into a blosc2 cframe."""
-    mask = np.ascontiguousarray(mask)
+class MaskCodec(IntEnum):
+    """Codec used to encode a mask's boolean array into bytes.
+
+    The chosen codec is stored as the first byte of the packed payload, so a
+    single column can mix codecs and any encoding stays readable regardless of
+    the current default.
+
+    - ``BLOSC2``: blosc2 cframe. Best for large masks where the ~340 B fixed
+      header is amortized and RLE compression wins; slowest to encode (~300 µs).
+    - ``RAW``: the uncompressed boolean buffer. Smallest header; decodes as a
+      zero-copy view. Best when masks are tiny and incompressible.
+    - ``PACKBITS``: ``np.packbits`` (8 booleans per byte). Best all-rounder for
+      small/medium cell masks — far smaller than blosc2 without its overhead.
+    """
+
+    BLOSC2 = 0
+    RAW = 1
+    PACKBITS = 2
+
+
+# Default codec used when callers do not pass one explicitly. Mutated through
+# `set_default_mask_codec` so users can trade encode cost against stored size.
+_DEFAULT_MASK_CODEC = MaskCodec.BLOSC2
+
+
+def get_default_mask_codec() -> MaskCodec:
+    """Return the codec used to pack masks when none is given explicitly."""
+    return _DEFAULT_MASK_CODEC
+
+
+def set_default_mask_codec(codec: "MaskCodec | int | str") -> MaskCodec:
+    """Set the default codec used to pack masks.
+
+    Parameters
+    ----------
+    codec : MaskCodec | int | str
+        The codec, as a `MaskCodec`, its integer value, or its name
+        (e.g. ``"packbits"``, case-insensitive).
+
+    Returns
+    -------
+    MaskCodec
+        The resolved codec now in effect.
+    """
+    global _DEFAULT_MASK_CODEC
+    _DEFAULT_MASK_CODEC = _resolve_codec(codec)
+    return _DEFAULT_MASK_CODEC
+
+
+def _resolve_codec(codec: "MaskCodec | int | str | None") -> MaskCodec:
+    if codec is None:
+        return _DEFAULT_MASK_CODEC
+    if isinstance(codec, str):
+        try:
+            return MaskCodec[codec.upper()]
+        except KeyError:
+            raise ValueError(f"Unknown mask codec '{codec}'. Options: {[c.name.lower() for c in MaskCodec]}") from None
+    return MaskCodec(codec)
+
+
+def _encode_shape_header(mask: NDArray) -> bytes:
+    """Encode ``ndim`` and the shape so non-self-describing codecs can reshape."""
+    return bytes([mask.ndim]) + np.asarray(mask.shape, dtype="<u4").tobytes()
+
+
+def _decode_shape_header(data: bytes, offset: int) -> tuple[tuple[int, ...], int]:
+    ndim = data[offset]
+    offset += 1
+    shape = tuple(int(s) for s in np.frombuffer(data, dtype="<u4", count=ndim, offset=offset))
+    offset += 4 * ndim
+    return shape, offset
+
+
+def _blosc2_pack(mask: NDArray) -> bytes:
     prev_nthreads = blosc2.set_nthreads(1)
     # Bypass blosc2 printing overhead by directly creating a schunk and converting it to cframe,
     # instead of using blosc2.pack_tensor
@@ -33,12 +105,59 @@ def _pack_mask_array(mask: NDArray) -> bytes:
     return cframe
 
 
-def _unpack_mask_array(data: bytes) -> NDArray:
-    """Decompress a blosc2 cframe into a mask array."""
+def _blosc2_unpack(data: bytes) -> NDArray:
     prev_nthreads = blosc2.set_nthreads(1)
     mask = blosc2.unpack_tensor(data)
     blosc2.set_nthreads(prev_nthreads)
     return mask
+
+
+def _pack_mask_array(mask: NDArray, codec: "MaskCodec | int | str | None" = None) -> bytes:
+    """Encode a mask array into bytes, tagged with the codec used.
+
+    Parameters
+    ----------
+    mask : NDArray
+        The boolean mask array.
+    codec : MaskCodec | int | str | None
+        The codec to use. If None, [get_default_mask_codec][tracksdata.nodes.get_default_mask_codec] is used.
+
+    Returns
+    -------
+    bytes
+        ``bytes([codec]) + payload``; self-describing so `_unpack_mask_array`
+        needs no external metadata.
+    """
+    codec = _resolve_codec(codec)
+    mask = np.ascontiguousarray(mask, dtype=bool)
+
+    if codec == MaskCodec.BLOSC2:
+        return bytes([codec]) + _blosc2_pack(mask)
+
+    header = _encode_shape_header(mask)
+    if codec == MaskCodec.RAW:
+        return bytes([codec]) + header + mask.tobytes()
+    if codec == MaskCodec.PACKBITS:
+        return bytes([codec]) + header + np.packbits(mask.reshape(-1)).tobytes()
+    raise ValueError(f"Unsupported mask codec: {codec}")
+
+
+def _unpack_mask_array(data: bytes) -> NDArray:
+    """Decode bytes produced by `_pack_mask_array` back into a mask array."""
+    codec = MaskCodec(data[0])
+
+    if codec == MaskCodec.BLOSC2:
+        return _blosc2_unpack(data[1:])
+
+    shape, offset = _decode_shape_header(data, 1)
+    payload = data[offset:]
+    if codec == MaskCodec.RAW:
+        return np.frombuffer(payload, dtype=bool).reshape(shape)
+    if codec == MaskCodec.PACKBITS:
+        count = int(np.prod(shape)) if shape else 1
+        flat = np.unpackbits(np.frombuffer(payload, dtype=np.uint8), count=count)
+        return flat.astype(bool).reshape(shape)
+    raise ValueError(f"Unsupported mask codec: {codec}")
 
 
 @lru_cache(maxsize=5)
@@ -312,6 +431,10 @@ class Mask:
         if self.intersection(other) == 0:
             return self
 
+        # `_mask` may be a read-only zero-copy view (RAW codec); copy before mutating in place.
+        if not self._mask.flags.writeable:
+            self._mask = self._mask.copy()
+
         other_slicing = []
         self_slicing = []
         for i in range(self._mask.ndim):
@@ -560,18 +683,24 @@ class Mask:
         fields[Mask.MASK_DATA_FIELD] = pl.Binary
         return pl.Struct(fields)
 
-    def to_struct(self) -> dict[str, Any]:
+    def to_struct(self, codec: "MaskCodec | int | str | None" = None) -> dict[str, Any]:
         """
         Convert the mask to a dict matching [struct_dtype][tracksdata.nodes.Mask.struct_dtype].
+
+        Parameters
+        ----------
+        codec : MaskCodec | int | str | None
+            The codec used to encode the mask array. If None, the default set by
+            [set_default_mask_codec][tracksdata.nodes.set_default_mask_codec] is used.
 
         Returns
         -------
         dict[str, Any]
-            Scalar bounding box fields plus the blosc2-compressed mask under ``"data"``.
+            Scalar bounding box fields plus the encoded mask under ``"data"``.
         """
         fields = self.bbox_struct_fields(self._mask.ndim)
         value: dict[str, Any] = {f: int(b) for f, b in zip(fields, self._bbox, strict=True)}
-        value[self.MASK_DATA_FIELD] = _pack_mask_array(self._mask)
+        value[self.MASK_DATA_FIELD] = _pack_mask_array(self._mask, codec)
         return value
 
     @classmethod

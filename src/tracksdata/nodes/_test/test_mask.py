@@ -1,7 +1,16 @@
 import numpy as np
 import pytest
 
-from tracksdata.nodes._mask import Mask, _nd_sphere, as_mask
+from tracksdata.nodes._mask import (
+    Mask,
+    MaskCodec,
+    _nd_sphere,
+    _pack_mask_array,
+    _unpack_mask_array,
+    as_mask,
+    get_default_mask_codec,
+    set_default_mask_codec,
+)
 
 
 def test_mask_init() -> None:
@@ -685,3 +694,61 @@ def test_mask_struct_attr_in_graph(graph_backend) -> None:
     # filtering on a bbox field of the mask struct
     filtered = graph.filter(NodeAttr(DEFAULT_ATTR_KEYS.MASK).struct.field("min_y") > 2).node_ids()
     assert filtered == [node_b]
+
+
+@pytest.mark.parametrize("codec", list(MaskCodec))
+@pytest.mark.parametrize("ndim", [1, 2, 3])
+def test_pack_unpack_codec_roundtrip(codec: MaskCodec, ndim: int) -> None:
+    rng = np.random.default_rng(0)
+    shape = (7, 5, 4)[:ndim]
+    mask = rng.uniform(size=shape) > 0.5
+
+    packed = _pack_mask_array(mask, codec)
+    assert packed[0] == codec  # codec is tagged in the first byte
+    restored = _unpack_mask_array(packed)
+
+    assert restored.shape == mask.shape
+    np.testing.assert_array_equal(restored, mask)
+
+
+def test_codec_resolution_by_name_and_int() -> None:
+    mask = np.ones((3, 3), dtype=bool)
+    assert _unpack_mask_array(_pack_mask_array(mask, "packbits"))[0, 0]
+    assert _pack_mask_array(mask, "raw")[0] == MaskCodec.RAW
+    assert _pack_mask_array(mask, int(MaskCodec.BLOSC2))[0] == MaskCodec.BLOSC2
+
+    with pytest.raises(ValueError):
+        _pack_mask_array(mask, "nope")
+
+
+def test_default_mask_codec_switch() -> None:
+    original = get_default_mask_codec()
+    try:
+        set_default_mask_codec("packbits")
+        assert get_default_mask_codec() == MaskCodec.PACKBITS
+        # to_struct() with no explicit codec uses the default
+        mask = Mask(np.ones((4, 4), dtype=bool), bbox=np.array([0, 0, 4, 4]))
+        assert mask.to_struct()["data"][0] == MaskCodec.PACKBITS
+        # explicit codec overrides the default
+        assert mask.to_struct(codec="raw")["data"][0] == MaskCodec.RAW
+    finally:
+        set_default_mask_codec(original)
+
+
+def test_mixed_codecs_in_one_column_are_readable() -> None:
+    """A column may hold masks packed with different codecs; each stays readable."""
+    mask = np.array([[True, False], [True, True]], dtype=bool)
+    bbox = np.array([0, 0, 2, 2])
+    for codec in MaskCodec:
+        value = Mask(mask, bbox=bbox).to_struct(codec=codec)
+        assert as_mask(value) == Mask(mask, bbox=bbox)
+
+
+def test_raw_codec_mask_is_mutable_after_difference() -> None:
+    """RAW decodes to a read-only view; in-place difference must still work."""
+    a = Mask(np.ones((4, 4), dtype=bool), bbox=np.array([0, 0, 4, 4]))
+    decoded = as_mask(a.to_struct(codec="raw"))
+    other = Mask(np.ones((2, 2), dtype=bool), bbox=np.array([0, 0, 2, 2]))
+    decoded -= other  # would raise on a read-only array without the copy-on-write guard
+    assert not decoded.mask[0, 0]
+    assert decoded.mask[3, 3]
