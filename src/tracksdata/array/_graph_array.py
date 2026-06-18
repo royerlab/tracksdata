@@ -395,9 +395,10 @@ class GraphArrayView(BaseReadOnlyArray):
 
         ``time_values`` and ``bboxes`` are parallel sequences; each ``(time, bbox)``
         pair is clipped to the array volume and the matching cache region is dropped.
-        A ``None`` bbox means the node's location is unknown, so the whole volume for
-        that time is invalidated. This is distinct from a bbox that lies outside the
-        array volume, which invalidates nothing.
+        A bbox that lies outside the array volume invalidates nothing.
+
+        A ``GraphArrayView`` requires every node to carry a ``bbox`` attribute, so a
+        ``None`` bbox is a programming error and raises ``ValueError``.
         """
         if hasattr(time_values, "to_list"):
             time_values = time_values.to_list()
@@ -413,9 +414,10 @@ class GraphArrayView(BaseReadOnlyArray):
                 continue
 
             if bbox is None:
-                # Unknown location: conservatively invalidate the whole volume for this time.
-                self._cache.invalidate(time=time)
-                continue
+                raise ValueError(
+                    f"Node at time {time} is missing a '{DEFAULT_ATTR_KEYS.BBOX}' attribute. "
+                    "A GraphArrayView requires every node to have a bbox."
+                )
 
             slices = self._bbox_to_slices(bbox)
             if slices is not None:

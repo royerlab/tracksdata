@@ -619,8 +619,8 @@ def test_graph_array_view_invalidates_chunk_on_remove(graph_backend: BaseGraph) 
     assert output[5, 5] == 0
 
 
-def test_graph_array_view_invalidates_whole_volume_when_bbox_missing(graph_backend: BaseGraph) -> None:
-    """A node event without a bbox key has an unknown location, so the whole time volume is invalidated."""
+def test_graph_array_view_raises_when_bbox_missing(graph_backend: BaseGraph) -> None:
+    """A GraphArrayView requires every node to have a bbox, so a missing bbox must raise."""
     _add_graph_array_node_attrs(graph_backend)
 
     mask = _make_square_mask(1, 1)
@@ -637,11 +637,9 @@ def test_graph_array_view_invalidates_whole_volume_when_bbox_missing(graph_backe
     _ = np.asarray(array_view[0])
     np.testing.assert_array_equal(array_view._cache._store[0].ready, np.ones((2, 2), dtype=bool))
 
-    # Emit a node-added event whose attrs lack a bbox key: location unknown.
-    array_view._on_node_added([999], [{DEFAULT_ATTR_KEYS.T: 0, "label": 5}])
-
-    # The entire volume for time 0 must be invalidated.
-    np.testing.assert_array_equal(array_view._cache._store[0].ready, np.zeros((2, 2), dtype=bool))
+    # An event whose attrs lack a bbox key is a programming error.
+    with pytest.raises(ValueError, match=DEFAULT_ATTR_KEYS.BBOX):
+        array_view._on_node_added([999], [{DEFAULT_ATTR_KEYS.T: 0, "label": 5}])
 
 
 def test_graph_array_view_invalidates_once_when_mask_changes_but_bbox_unchanged(graph_backend: BaseGraph) -> None:
