@@ -389,43 +389,57 @@ class GraphArrayView(BaseReadOnlyArray):
 
         return tuple(slice(int(s), int(e)) for s, e in zip(start, stop, strict=True))
 
-    def _invalidate_from_attrs(self, attrs: dict) -> None:
+    def _invalidate_bbox(self, time_values: Sequence[Any], bboxes: Sequence[np.ndarray | None]) -> None:
         """
-        Invalidate cache region touched by node attributes.
+        Invalidate the cache regions covered by the given times and bboxes.
 
-        Falls back to larger invalidation windows when metadata is incomplete.
+        ``time_values`` and ``bboxes`` are parallel sequences; each ``(time, bbox)``
+        pair is clipped to the array volume and the matching cache region is dropped.
+        A bbox that lies outside the array volume invalidates nothing.
+
+        A ``GraphArrayView`` requires every node to carry a ``bbox`` attribute, so a
+        ``None`` bbox is a programming error and raises ``ValueError``.
         """
+        if hasattr(time_values, "to_list"):
+            time_values = time_values.to_list()
 
-        time_value = attrs.get(DEFAULT_ATTR_KEYS.T)
-        if time_value is None:
-            raise ValueError(f"Node attributes must contain '{DEFAULT_ATTR_KEYS.T}' key for cache invalidation.")
-        if DEFAULT_ATTR_KEYS.BBOX not in attrs:
-            raise ValueError(f"Node attributes must contain '{DEFAULT_ATTR_KEYS.BBOX}' key for cache invalidation.")
+        for time_value, bbox in zip(time_values, bboxes, strict=True):
+            try:
+                time = int(time_value)
+            except (TypeError, ValueError) as e:
+                raise ValueError(
+                    f"Time attribute value must be a scalar integer, got {time_value!r} of type {type(time_value)}"
+                ) from e
+            if not (0 <= time < self.original_shape[0]):
+                continue
 
-        try:
-            time = int(np.asarray(time_value).item())
-        except (TypeError, ValueError) as e:
-            raise ValueError(
-                f"Time attribute value must be a scalar integer, got {time_value} of type {type(time_value)}"
-            ) from e
-        if not (0 <= time < self.original_shape[0]):
-            return
+            if bbox is None:
+                raise ValueError(
+                    f"Node at time {time} is missing a '{DEFAULT_ATTR_KEYS.BBOX}' attribute. "
+                    "A GraphArrayView requires every node to have a bbox."
+                )
 
-        slices = self._bbox_to_slices(attrs[DEFAULT_ATTR_KEYS.BBOX])
-        if slices is not None:
-            self._cache.invalidate(time=time, volume_slicing=slices)
+            slices = self._bbox_to_slices(bbox)
+            if slices is not None:
+                self._cache.invalidate(time=time, volume_slicing=slices)
 
     def _on_node_added(
         self,
         node_ids: list[int],
         new_attrs: list[dict],
     ) -> None:
-        for attrs in new_attrs:
-            self._invalidate_from_attrs(attrs)
+        del node_ids
+        self._invalidate_bbox(
+            [attrs[DEFAULT_ATTR_KEYS.T] for attrs in new_attrs],
+            [attrs.get(DEFAULT_ATTR_KEYS.BBOX) for attrs in new_attrs],
+        )
 
     def _on_node_removed(self, node_ids: list[int], old_attrs: list[dict]) -> None:
-        for attrs in old_attrs:
-            self._invalidate_from_attrs(attrs)
+        del node_ids
+        self._invalidate_bbox(
+            [attrs[DEFAULT_ATTR_KEYS.T] for attrs in old_attrs],
+            [attrs.get(DEFAULT_ATTR_KEYS.BBOX) for attrs in old_attrs],
+        )
 
     def _on_node_updated(
         self,
@@ -433,6 +447,39 @@ class GraphArrayView(BaseReadOnlyArray):
         old_attrs: list[dict],
         new_attrs: list[dict],
     ) -> None:
+        del node_ids
+        time_values: list[Any] = []
+        bboxes: list[Any] = []
         for old_attr, new_attr in zip(old_attrs, new_attrs, strict=True):
-            self._invalidate_from_attrs(old_attr)
-            self._invalidate_from_attrs(new_attr)
+            old_t = old_attr[DEFAULT_ATTR_KEYS.T]
+            new_t = new_attr[DEFAULT_ATTR_KEYS.T]
+            old_bbox = old_attr.get(DEFAULT_ATTR_KEYS.BBOX)
+            new_bbox = new_attr.get(DEFAULT_ATTR_KEYS.BBOX)
+
+            moved = old_t != new_t or not np.array_equal(old_bbox, new_bbox)
+
+            if moved:
+                # Node relocated: clear the stale region and paint the new one.
+                time_values.extend((old_t, new_t))
+                bboxes.extend((old_bbox, new_bbox))
+            elif old_attr.get(self._attr_key) != new_attr.get(self._attr_key) or self._mask_changed(old_attr, new_attr):
+                time_values.append(new_t)
+                bboxes.append(new_bbox)
+
+        self._invalidate_bbox(time_values, bboxes)
+
+    @staticmethod
+    def _mask_changed(old_attr: dict, new_attr: dict) -> bool:
+        """
+        Whether the painted output changed while the bbox stayed in place.
+
+        The rendered region depends on the displayed attribute value and the mask
+        pixels, so a mask swap with an unchanged bbox still requires invalidation.
+        """
+        old_mask = old_attr.get(DEFAULT_ATTR_KEYS.MASK)
+        new_mask = new_attr.get(DEFAULT_ATTR_KEYS.MASK)
+        if old_mask is None and new_mask is None:
+            return False
+        elif old_mask is None or new_mask is None:
+            return True
+        return old_mask != new_mask
