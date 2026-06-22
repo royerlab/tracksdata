@@ -64,3 +64,29 @@ def test_unpickle_columns_all_null_column() -> None:
 
     assert result.schema["mask"] == pl.Null
     assert result["mask"].to_list() == [None, None, None]
+
+
+def test_unpickle_columns_leaves_raw_binary_untouched() -> None:
+    """Only columns named in *columns* are unpickled; raw-binary columns are left as-is.
+
+    Both a genuinely-pickled column and a raw-binary column (e.g. the blosc2-compressed
+    Mask ``data`` leaf) come back as ``pl.Binary``, so the function must rely on the
+    explicit *columns* set rather than the dtype to decide what to unpickle.
+    """
+    pickled = [cloudpickle.dumps(np.array([1, 2, 3])), cloudpickle.dumps(np.array([4, 5]))]
+    raw = [b"\x00raw-bytes-not-pickled\x01", b"\x02another-raw-blob\x03"]
+    df = pl.DataFrame(
+        {
+            "pickled": pl.Series(pickled, dtype=pl.Binary),
+            "raw": pl.Series(raw, dtype=pl.Binary),
+        }
+    )
+
+    # "raw" is a binary column but is NOT listed as pickled, so it must be skipped.
+    result = unpickle_columns(df, ["pickled"])
+
+    for actual, expected in zip(result["pickled"].to_list(), [np.array([1, 2, 3]), np.array([4, 5])], strict=True):
+        np.testing.assert_array_equal(actual, expected)
+
+    assert result.schema["raw"] == pl.Binary
+    assert result["raw"].to_list() == raw
