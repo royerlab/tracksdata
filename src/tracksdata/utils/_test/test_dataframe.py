@@ -45,7 +45,7 @@ def test_unpickle_bytes_columns_variable_size_arrays() -> None:
     arrays = [np.ones((41, 41), dtype=bool), np.ones((4, 4), dtype=bool)]
     df = pl.DataFrame({"mask": pl.Series([cloudpickle.dumps(a) for a in arrays], dtype=pl.Binary)})
 
-    result = unpickle_bytes_columns(df)  # must not raise SchemaError
+    result = unpickle_bytes_columns(df, ["mask"])  # must not raise SchemaError
 
     for actual, expected in zip(result["mask"].to_list(), arrays, strict=False):
         np.testing.assert_array_equal(actual, expected)

@@ -16,7 +16,8 @@ from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph import BaseGraph, IndexedRXGraph, RustWorkXGraph, SQLGraph
 from tracksdata.io._numpy_array import from_array
 from tracksdata.nodes import RegionPropsNodes
-from tracksdata.nodes._mask import Mask
+from tracksdata.nodes._mask import Mask, as_mask
+from tracksdata.utils._dtypes import STRUCT_FIELD_SEP
 
 
 def test_already_existing_keys(graph_backend: BaseGraph) -> None:
@@ -1653,10 +1654,8 @@ def test_form_other_regionprops_nodes(
         assert target_row["y"] == pytest.approx(source_row["y"])
         assert target_row["x"] == pytest.approx(source_row["x"])
 
-        source_mask = source_row[DEFAULT_ATTR_KEYS.MASK]
-        target_mask = target_row[DEFAULT_ATTR_KEYS.MASK]
-        assert isinstance(source_mask, Mask)
-        assert isinstance(target_mask, Mask)
+        source_mask = as_mask(source_row[DEFAULT_ATTR_KEYS.MASK])
+        target_mask = as_mask(target_row[DEFAULT_ATTR_KEYS.MASK])
         np.testing.assert_array_equal(source_mask.mask, target_mask.mask)
         np.testing.assert_array_equal(source_mask.bbox, target_mask.bbox)
 
@@ -1761,6 +1760,42 @@ def test_sql_graph_mask_update_survives_reload(tmp_path: Path) -> None:
 
     assert isinstance(stored_mask, Mask)
     np.testing.assert_array_equal(stored_mask.mask, mask_data)
+
+
+def test_sql_graph_mask_struct_stored_raw_not_pickled(tmp_path: Path) -> None:
+    """Mask struct's binary `data` leaf is stored as raw BLOB, not double-pickled.
+
+    Regression for storing the (already blosc2-compressed) mask bytes through a
+    SQLAlchemy ``PickleType`` column, which wrapped them in a second pickle layer.
+    """
+    db_path = tmp_path / "mask_struct.db"
+    graph = SQLGraph("sqlite", str(db_path))
+    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, Mask.struct_dtype(2))
+
+    mask_data = np.array([[True, False], [False, True]], dtype=bool)
+    mask = Mask(mask_data, bbox=np.array([0, 0, 2, 2]))
+    node_id = graph.add_node({"t": 0, DEFAULT_ATTR_KEYS.MASK: mask.to_struct()})
+
+    data_col = f"{DEFAULT_ATTR_KEYS.MASK}{STRUCT_FIELD_SEP}{Mask.MASK_DATA_FIELD}"
+    # The binary leaf must be a raw LargeBinary column, never a PickleType.
+    assert isinstance(graph.Node.__table__.columns[data_col].type, sa.LargeBinary)
+    assert not isinstance(graph.Node.__table__.columns[data_col].type, sa.PickleType)
+
+    graph._engine.dispose()
+
+    reloaded = SQLGraph("sqlite", str(db_path))
+    # Still raw binary after reflection — not restored to PickleType.
+    assert isinstance(reloaded.Node.__table__.columns[data_col].type, sa.LargeBinary)
+    assert not isinstance(reloaded.Node.__table__.columns[data_col].type, sa.PickleType)
+
+    df = reloaded.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.MASK])
+    assert df.schema[DEFAULT_ATTR_KEYS.MASK] == Mask.struct_dtype(2)
+    restored = as_mask(df[DEFAULT_ATTR_KEYS.MASK].to_list()[0])
+    np.testing.assert_array_equal(restored.mask, mask_data)
+    np.testing.assert_array_equal(restored.bbox, mask.bbox)
+
+    # Struct-field filtering still works against the flat physical bbox columns.
+    assert reloaded.filter(NodeAttr(DEFAULT_ATTR_KEYS.MASK).struct.field("min_y") == 0).node_ids() == [node_id]
 
 
 def test_sql_graph_struct_dtype_survives_reload(tmp_path: Path) -> None:

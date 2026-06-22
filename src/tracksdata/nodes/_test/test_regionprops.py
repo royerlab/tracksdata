@@ -4,7 +4,7 @@ from skimage.measure._regionprops import RegionProperties
 
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph import RustWorkXGraph
-from tracksdata.nodes import Mask, RegionPropsNodes
+from tracksdata.nodes import Mask, RegionPropsNodes, as_mask
 from tracksdata.options import get_options, options_context
 
 
@@ -278,12 +278,14 @@ def test_regionprops_mask_creation() -> None:
     assert "shape" in graph.metadata
     assert graph.metadata["shape"] == labels.shape
 
-    # Check that masks were created
+    # Check that masks were created as struct attributes
     nodes_df = graph.node_attrs()
     masks = nodes_df[DEFAULT_ATTR_KEYS.MASK]
+    assert masks.dtype == Mask.struct_dtype(labels.ndim - 1)
 
-    # All masks should be Mask objects
+    # All masks should convert back to Mask objects
     for mask in masks:
+        mask = as_mask(mask)
         assert isinstance(mask, Mask)
         assert mask._mask is not None
         assert mask._bbox is not None

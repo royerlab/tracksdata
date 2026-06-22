@@ -166,8 +166,8 @@ def _matching_data(
     ]:
         attr_keys = [DEFAULT_ATTR_KEYS.T, tracklet_id_key, *required_attrs]
         nodes_df = graph.node_attrs(attr_keys=attr_keys)
-        if use_mask_serialization:
-            # required by multiprocessing
+        if use_mask_serialization and nodes_df[DEFAULT_ATTR_KEYS.MASK].dtype == pl.Object:
+            # required by multiprocessing; struct mask columns are Arrow-native and need no pickling
             nodes_df = column_to_bytes(nodes_df, DEFAULT_ATTR_KEYS.MASK)
         labels = {}
 
