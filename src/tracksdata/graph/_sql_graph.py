@@ -23,7 +23,7 @@ from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.graph.filters._base_filter import BaseFilter
 from tracksdata.utils._cache import cache_method
-from tracksdata.utils._dataframe import unpack_array_attrs, unpickle_bytes_columns
+from tracksdata.utils._dataframe import unpack_array_attrs, unpickle_columns
 from tracksdata.utils._dtypes import (
     STRUCT_FIELD_SEP,
     AttrSchema,
@@ -422,7 +422,7 @@ class SQLFilter(BaseFilter):
                 schema_overrides=self._graph._polars_schema_override(table),
             )
 
-        df = unpickle_bytes_columns(df, self._graph._pickled_physical_columns(table))
+        df = unpickle_columns(df, self._graph._pickled_physical_columns(table))
         return self._graph._cast_columns(table, df)
 
     def _query_from_attr_keys(
@@ -1404,7 +1404,7 @@ class SQLGraph(BaseGraph):
                     filter_node_ids,
                     self.Node,
                 )
-            node_df = unpickle_bytes_columns(node_df, self._pickled_physical_columns(self.Node))
+            node_df = unpickle_columns(node_df, self._pickled_physical_columns(self.Node))
             node_df = self._cast_columns(self.Node, node_df)
 
         if single_node:
@@ -1597,7 +1597,7 @@ class SQLGraph(BaseGraph):
                 connection=session.connection(),
                 schema_overrides=self._polars_schema_override(self.Node),
             )
-            nodes_df = unpickle_bytes_columns(nodes_df, self._pickled_physical_columns(self.Node))
+            nodes_df = unpickle_columns(nodes_df, self._pickled_physical_columns(self.Node))
             nodes_df = self._cast_columns(self.Node, nodes_df)
 
         # Select using logical keys (struct columns are now reconstructed).
@@ -1643,7 +1643,7 @@ class SQLGraph(BaseGraph):
                 connection=session.connection(),
                 schema_overrides=self._polars_schema_override(self.Edge),
             )
-            edges_df = unpickle_bytes_columns(edges_df, self._pickled_physical_columns(self.Edge))
+            edges_df = unpickle_columns(edges_df, self._pickled_physical_columns(self.Edge))
             edges_df = self._cast_columns(self.Edge, edges_df)
 
         if unpack:

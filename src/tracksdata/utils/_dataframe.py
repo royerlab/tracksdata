@@ -31,7 +31,7 @@ def unpack_array_attrs(df: pl.DataFrame) -> pl.DataFrame:
     return unpack_array_attrs(df)
 
 
-def unpickle_bytes_columns(df: pl.DataFrame, columns: Collection[str]) -> pl.DataFrame:
+def unpickle_columns(df: pl.DataFrame, columns: Collection[str]) -> pl.DataFrame:
     """
     Unpickle pickled bytes columns read from the database.
 
@@ -53,6 +53,12 @@ def unpickle_bytes_columns(df: pl.DataFrame, columns: Collection[str]) -> pl.Dat
     pl.DataFrame
         The DataFrame with the pickled columns unpickled.
     """
+    # `columns` lists columns that are *defined* as pickled (SQL ``PickleType``),
+    # but the runtime dtype is inferred per query result since pickle columns are
+    # excluded from the polars schema override. A genuinely-pickled column can
+    # therefore come back as something other than ``pl.Binary`` (e.g. an all-NULL
+    # result is inferred as ``pl.Null``). Restrict to actual binary columns so
+    # ``cloudpickle.loads`` is only ever applied to real bytes.
     targets = [col for col in columns if col in df.columns and df.schema[col] == pl.Binary]
     if not targets:
         return df

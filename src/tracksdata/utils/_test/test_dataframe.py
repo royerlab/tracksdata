@@ -2,7 +2,7 @@ import cloudpickle
 import numpy as np
 import polars as pl
 
-from tracksdata.utils._dataframe import unpack_array_attrs, unpickle_bytes_columns
+from tracksdata.utils._dataframe import unpack_array_attrs, unpickle_columns
 
 
 def test_unpack_array_attrs() -> None:
@@ -34,7 +34,7 @@ def test_unpack_array_attrs() -> None:
     )
 
 
-def test_unpickle_bytes_columns_variable_size_arrays() -> None:
+def test_unpickle_columns_variable_size_arrays() -> None:
     """Regression: unpickling a binary column with variable-size numpy arrays must not crash.
 
     This reproduces the production bug triggered by GEFF import: masks are stored as raw
@@ -45,7 +45,22 @@ def test_unpickle_bytes_columns_variable_size_arrays() -> None:
     arrays = [np.ones((41, 41), dtype=bool), np.ones((4, 4), dtype=bool)]
     df = pl.DataFrame({"mask": pl.Series([cloudpickle.dumps(a) for a in arrays], dtype=pl.Binary)})
 
-    result = unpickle_bytes_columns(df, ["mask"])  # must not raise SchemaError
+    result = unpickle_columns(df, ["mask"])  # must not raise SchemaError
 
     for actual, expected in zip(result["mask"].to_list(), arrays, strict=False):
         np.testing.assert_array_equal(actual, expected)
+
+
+def test_unpickle_columns_all_null_column() -> None:
+    """A pickle column that comes back entirely NULL is inferred as pl.Null, not pl.Binary.
+
+    Such columns must be skipped so ``cloudpickle.loads`` is never applied to non-bytes
+    values, and the column is returned untouched.
+    """
+    df = pl.DataFrame({"mask": [None, None, None]})
+    assert df.schema["mask"] == pl.Null
+
+    result = unpickle_columns(df, ["mask"])  # must not raise
+
+    assert result.schema["mask"] == pl.Null
+    assert result["mask"].to_list() == [None, None, None]
