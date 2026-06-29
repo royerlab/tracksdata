@@ -411,12 +411,20 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         with self._root.node_added.blocked():
             parent_node_ids = self._root.bulk_add_nodes(nodes, indices=indices)
 
-        # Defensive: drop NODE_ID from emitted/local-stored attrs in case the root
-        # backend (e.g. older SQL paths) injected it.
-        emitted_nodes = [
-            {key: value for key, value in node_attrs.items() if key != DEFAULT_ATTR_KEYS.NODE_ID}
-            for node_attrs in nodes
-        ]
+        if self._is_root_rx_graph:
+            # The rx root stored these exact dict objects by reference (and does not
+            # inject NODE_ID), so reuse them in the local view. Root and view then share
+            # attribute storage, staying in sync without per-write copies — the invariant
+            # the read-skip in update_node_attrs/update_edge_attrs relies on. (subgraph()
+            # already shares this way for pre-existing nodes; this keeps add-through-view
+            # consistent with it.)
+            emitted_nodes = nodes
+        else:
+            # Defensive: non-rx roots (e.g. SQL) may inject NODE_ID; store filtered copies.
+            emitted_nodes = [
+                {key: value for key, value in node_attrs.items() if key != DEFAULT_ATTR_KEYS.NODE_ID}
+                for node_attrs in nodes
+            ]
         if self.sync:
             node_ids = self._bulk_add_nodes_local(emitted_nodes)
             self._add_id_mappings(list(zip(node_ids, parent_node_ids, strict=True)))
@@ -547,7 +555,7 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         self._remove_node_local(node_id)
 
         if view_signal_on:
-            self.node_removed.emit(node_id, old_attrs)
+            self.node_removed.emit([node_id], [old_attrs])
 
     def _add_node_local(self, node_id: int) -> None:
         """
@@ -611,7 +619,7 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         self._add_node_local(node_id)
 
         if is_signal_on(self.node_added):
-            self.node_added.emit(node_id, self.nodes[node_id].to_dict())
+            self.node_added.emit([node_id], [self.nodes[node_id].to_dict()])
 
     def add_edge(
         self,

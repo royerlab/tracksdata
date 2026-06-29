@@ -1334,10 +1334,18 @@ def test_remove_node_from_view_signals(graph_backend: BaseGraph) -> None:
 
     view = graph_backend.filter().subgraph()
 
+    # `node_removed` is a Signal(list, list); slots iterate the batch exactly like
+    # the real consumers (SpatialFilter._remove_node, GraphArrayView._on_node_removed).
+    # A non-iterating slot would silently accept a buggy scalar emit — these don't.
     view_calls: list[tuple[int, dict]] = []
     root_calls: list[tuple[int, dict]] = []
-    view.node_removed.connect(lambda nid, attrs: view_calls.append((nid, attrs)))
-    graph_backend.node_removed.connect(lambda nid, attrs: root_calls.append((nid, attrs)))
+
+    def _record(sink: list, node_ids: list[int], old_attrs: list[dict]) -> None:
+        for nid, attrs in zip(node_ids, old_attrs, strict=True):
+            sink.append((nid, attrs))
+
+    view.node_removed.connect(lambda node_ids, old_attrs: _record(view_calls, node_ids, old_attrs))
+    graph_backend.node_removed.connect(lambda node_ids, old_attrs: _record(root_calls, node_ids, old_attrs))
 
     view.remove_node_from_view(n1)
 
@@ -1508,10 +1516,18 @@ def test_add_node_to_view_signals(graph_backend: BaseGraph) -> None:
     view = graph_backend.filter().subgraph()
     view.remove_node_from_view(n1)
 
+    # `node_added` is a Signal(list, list); slots iterate the batch exactly like
+    # the real consumers (GraphArrayView._on_node_added). A non-iterating slot would
+    # silently accept a buggy scalar emit — these don't.
     view_calls: list[tuple[int, dict]] = []
     root_calls: list[tuple[int, dict]] = []
-    view.node_added.connect(lambda nid, attrs: view_calls.append((nid, attrs)))
-    graph_backend.node_added.connect(lambda nid, attrs: root_calls.append((nid, attrs)))
+
+    def _record(sink: list, node_ids: list[int], new_attrs: list[dict]) -> None:
+        for nid, attrs in zip(node_ids, new_attrs, strict=True):
+            sink.append((nid, attrs))
+
+    view.node_added.connect(lambda node_ids, new_attrs: _record(view_calls, node_ids, new_attrs))
+    graph_backend.node_added.connect(lambda node_ids, new_attrs: _record(root_calls, node_ids, new_attrs))
 
     view.add_node_to_view(n1)
 
@@ -1541,6 +1557,74 @@ def test_add_node_to_view_validation(graph_backend: BaseGraph) -> None:
     view.sync = False
     with pytest.raises(RuntimeError, match=r"add_node_to_view requires sync=True"):
         view.add_node_to_view(n0)
+
+
+def test_view_only_helpers_emit_batched_signal(graph_backend: BaseGraph) -> None:
+    """Regression: view-only remove/add must emit the batched ``Signal(list, list)``.
+
+    ``remove_node_from_view``/``add_node_to_view`` previously emitted scalars
+    (``node_id``, ``attrs``) instead of single-element lists. Real consumers
+    (SpatialFilter, GraphArrayView) iterate the payload with ``zip(node_ids, attrs)``,
+    so a scalar emit raised ``EmitLoopError`` (``zip(int, dict)`` -> not iterable).
+    This slot reproduces that consumer pattern.
+    """
+    graph_backend.add_node_attr_key("x", pl.Float64)
+    n0 = graph_backend.add_node({"t": 0, "x": 0.0})
+    n1 = graph_backend.add_node({"t": 1, "x": 1.0})
+
+    view = graph_backend.filter().subgraph()
+
+    removed: list[tuple[int, dict]] = []
+    added: list[tuple[int, dict]] = []
+
+    def on_removed(node_ids: list[int], old_attrs: list[dict]) -> None:
+        for nid, attrs in zip(node_ids, old_attrs, strict=True):
+            removed.append((nid, attrs))
+
+    def on_added(node_ids: list[int], new_attrs: list[dict]) -> None:
+        for nid, attrs in zip(node_ids, new_attrs, strict=True):
+            added.append((nid, attrs))
+
+    view.node_removed.connect(on_removed)
+    view.node_added.connect(on_added)
+
+    # Must not raise EmitLoopError from a consumer iterating the batch.
+    view.remove_node_from_view(n1)
+    view.add_node_to_view(n1)
+
+    assert removed == [(n1, removed[0][1])]
+    assert removed[0][1]["x"] == 1.0
+    assert added == [(n1, added[0][1])]
+    assert added[0][1]["x"] == 1.0
+    _ = n0
+
+
+def test_add_nodes_via_view_shares_storage_with_root(graph_backend: BaseGraph) -> None:
+    """Regression: nodes added *through a view* must stay in sync with the root.
+
+    ``update_node_attrs``/``update_edge_attrs`` skip syncing the view's local store
+    for rx roots, on the assumption that root and view share attribute-dict storage.
+    The view add-path previously stored *copies*, so a root write was never reflected
+    in the view for nodes added through the view. This builds the funtracks pattern
+    (empty graph -> subgraph -> add via view) and asserts a root write is visible.
+    """
+    graph_backend.add_node_attr_key("area", default_value=0.0, dtype=pl.Float64)
+
+    view = graph_backend.filter().subgraph()
+    if not view._is_root_rx_graph:
+        # Only rx roots share attribute storage root<->view; for copy-on-subgraph
+        # backends (e.g. SQL) a direct-on-root write is intentionally not propagated.
+        pytest.skip("shared-storage invariant only applies to rustworkx-family roots")
+
+    (node_id,) = view.bulk_add_nodes(nodes=[{"t": 0, "area": 10.0}])
+
+    # Write on the root; the view (and its readers) must observe it.
+    graph_backend.update_node_attrs(attrs={"area": 99.0}, node_ids=[node_id])
+
+    assert view.nodes[node_id]["area"] == 99.0
+    # Reading via the dataframe API must agree with the per-node accessor.
+    view_area = view.node_attrs().filter(pl.col(DEFAULT_ATTR_KEYS.NODE_ID) == node_id)["area"].item()
+    assert view_area == 99.0
 
 
 def test_add_edge_to_view_basic(graph_backend: BaseGraph) -> None:
