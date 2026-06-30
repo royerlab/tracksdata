@@ -747,8 +747,7 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
             for i, node_id in enumerate(node_ids):
                 new_attrs = dict(old_attrs_by_id[node_id])
                 for k, v in attrs.items():
-                    if k in new_attrs:
-                        new_attrs[k] = v if np.isscalar(v) else v[i]
+                    new_attrs[k] = v if np.isscalar(v) else v[i]
                 new_attrs_by_id[node_id] = new_attrs
             if root_signal_on:
                 for node_id in node_ids:
