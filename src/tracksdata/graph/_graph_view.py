@@ -6,14 +6,19 @@ import numpy as np
 import polars as pl
 import rustworkx as rx
 
-from tracksdata.attrs import AttrComparison
+from tracksdata.attrs import Filter
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.graph._mapped_graph_mixin import MappedGraphMixin
 from tracksdata.graph._rustworkx_graph import IndexedRXGraph, RustWorkXGraph, RXFilter
 from tracksdata.graph.filters._indexed_filter import IndexRXFilter
 from tracksdata.utils._dtypes import AttrSchema
-from tracksdata.utils._signal import is_signal_on
+from tracksdata.utils._signal import (
+    emit_node_added_events,
+    emit_node_removed_events,
+    emit_node_updated_events,
+    is_signal_on,
+)
 
 
 class GraphView(MappedGraphMixin, RustWorkXGraph):
@@ -238,7 +243,7 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
 
     def filter(
         self,
-        *attr_filters: AttrComparison,
+        *attr_filters: Filter,
         node_ids: Sequence[int] | None = None,
         include_targets: bool = False,
         include_sources: bool = False,
@@ -391,20 +396,14 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
             )
 
         if self.sync:
-            with self.node_added.blocked():
-                node_id = RustWorkXGraph.add_node(
-                    self,
-                    attrs=attrs,
-                    validate_keys=validate_keys,
-                )
+            # Local primitive: pure rx_graph + _time_to_nodes, no validation, no signal.
+            node_id = self._bulk_add_nodes_local([attrs])[0]
             self._add_id_mapping(node_id, parent_node_id)
         else:
             self._out_of_sync = True
 
-        if is_signal_on(self._root.node_added):
-            self._root.node_added.emit(parent_node_id, attrs)
-        if is_signal_on(self.node_added):
-            self.node_added.emit(parent_node_id, attrs)
+        emit_node_added_events(self._root.node_added, [(parent_node_id, attrs)])
+        emit_node_added_events(self.node_added, [(parent_node_id, attrs)])
 
         return parent_node_id
 
@@ -412,81 +411,207 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         with self._root.node_added.blocked():
             parent_node_ids = self._root.bulk_add_nodes(nodes, indices=indices)
 
+        # Defensive: drop NODE_ID from emitted/local-stored attrs in case the root
+        # backend (e.g. older SQL paths) injected it.
+        emitted_nodes = [
+            {key: value for key, value in node_attrs.items() if key != DEFAULT_ATTR_KEYS.NODE_ID}
+            for node_attrs in nodes
+        ]
         if self.sync:
-            with self.node_added.blocked():
-                node_ids = RustWorkXGraph.bulk_add_nodes(self, nodes)
+            node_ids = self._bulk_add_nodes_local(emitted_nodes)
             self._add_id_mappings(list(zip(node_ids, parent_node_ids, strict=True)))
         else:
             self._out_of_sync = True
 
-        if is_signal_on(self._root.node_added):
-            for node_id, node_attrs in zip(parent_node_ids, nodes, strict=True):
-                self._root.node_added.emit(node_id, node_attrs)
-
-        if is_signal_on(self.node_added):
-            for node_id, node_attrs in zip(parent_node_ids, nodes, strict=True):
-                self.node_added.emit(node_id, node_attrs)
+        emit_node_added_events(self._root.node_added, zip(parent_node_ids, emitted_nodes, strict=True))
+        emit_node_added_events(self.node_added, zip(parent_node_ids, emitted_nodes, strict=True))
 
         return parent_node_ids
 
-    def remove_node(self, node_id: int) -> None:
+    def _remove_node_local(self, node_id: int) -> None:
         """
-        Remove a node from the graph.
+        Remove a node from this view's local rx_graph and ID mappings only.
 
-        This method removes the node from both the view and the root graph,
-        along with all connected edges. Also updates the node mappings.
+        No validation, no signals, no root call. Caller is responsible for those.
+        """
+        local_node_id = self._external_to_local[node_id]
+
+        # Capture incident edges BEFORE removal. rustworkx drops them along with
+        # the node; afterwards we'd have no way to identify which entries to
+        # clean from `_edge_map_to_root` without scanning the whole bookkeeping.
+        # `all_edges=True` is required — the default returns only out-edges,
+        # which would leave in-edge bookkeeping stale.
+        incident_local_edge_ids = list(self.rx_graph.incident_edges(local_node_id, all_edges=True))
+
+        # `_bulk_remove_nodes_local` drops the node from rx_graph (refreshing
+        # _time_to_nodes / _overlaps) without touching the root or emitting signals.
+        self._bulk_remove_nodes_local([local_node_id])
+
+        self._remove_id_mapping(external_id=node_id)
+
+        for edge_id in incident_local_edge_ids:
+            self._edge_map_to_root.pop(edge_id, None)
+
+    def bulk_remove_nodes(self, node_ids: Sequence[int]) -> None:
+        """
+        Remove multiple nodes from both the view and the root graph.
 
         Parameters
         ----------
-        node_id : int
-            The ID of the node to remove.
+        node_ids : Sequence[int]
+            External IDs of the nodes to remove.
 
         Raises
         ------
         ValueError
-            If the node_id does not exist in the graph.
+            If any node_id does not exist in the graph.
         """
-        if node_id not in self._external_to_local:
-            raise ValueError(f"Node {node_id} does not exist in the graph.")
+        if hasattr(node_ids, "tolist"):
+            node_ids = node_ids.tolist()
+        else:
+            node_ids = list(node_ids)
+        if len(node_ids) == 0:
+            return
 
-        # Capture signal state once so a slot connecting mid-call cannot reference
-        # an unbound `old_attrs`.
+        missing = [nid for nid in node_ids if nid not in self._external_to_local]
+        if missing:
+            raise ValueError(f"Node {missing[0]} does not exist in the graph.")
+
         view_signal_on = is_signal_on(self.node_removed)
         root_signal_on = is_signal_on(self._root.node_removed)
+        old_attrs_per_node: dict[int, dict[str, Any]] = {}
         if view_signal_on or root_signal_on:
-            old_attrs = self.nodes[node_id].to_dict()
+            # Single batched query instead of one filter+materialize per node.
+            # include_key defaults to False, so NODE_ID is excluded from each attrs
+            # dict, matching the previous per-node NodeInterface.to_dict() behaviour.
+            old_attrs_per_node = (
+                self.filter(node_ids=node_ids)
+                .node_attrs()
+                .rows_by_key(key=DEFAULT_ATTR_KEYS.NODE_ID, named=True, unique=True)
+            )
 
-        # Remove from root graph first, because removing bounding box requires node attrs.
-        # Block root's signal so it doesn't fire while the view is still in old state;
-        # re-emit at the end after both root and view are consistent.
         with self._root.node_removed.blocked():
-            self._root.remove_node(node_id)
+            self._root.bulk_remove_nodes(node_ids)
 
         if self.sync:
-            # Get the local node ID and remove from local graph
-            local_node_id = self._external_to_local[node_id]
+            local_ids = [self._external_to_local[nid] for nid in node_ids]
+            self._bulk_remove_nodes_local(local_ids)
+            for nid in node_ids:
+                self._remove_id_mapping(external_id=nid)
 
-            # Capture incident edges BEFORE removal. rustworkx drops them along with
-            # the node; afterwards we'd have no way to identify which entries to
-            # clean from `_edge_map_to_root` without scanning the whole bookkeeping.
-            incident_local_edge_ids = list(self.rx_graph.incident_edges(local_node_id))
-
-            with self.node_removed.blocked():
-                super().remove_node(local_node_id)
-
-            # Remove the node mapping
-            self._remove_id_mapping(external_id=node_id)
-
-            # Drop just the affected edges from the bookkeeping
-            for edge_id in incident_local_edge_ids:
-                self._edge_map_to_root.pop(edge_id, None)
+            edge_indices = set(self.rx_graph.edge_indices())
+            for local_edge_id in list(self._edge_map_to_root.keys()):
+                if local_edge_id not in edge_indices:
+                    del self._edge_map_to_root[local_edge_id]
         else:
             self._out_of_sync = True
 
         if root_signal_on:
-            self._root.node_removed.emit(node_id, old_attrs)
+            emit_node_removed_events(self._root.node_removed, ((nid, old_attrs_per_node[nid]) for nid in node_ids))
+        if view_signal_on:
+            emit_node_removed_events(self.node_removed, ((nid, old_attrs_per_node[nid]) for nid in node_ids))
+
+    def remove_node_from_view(self, node_id: int) -> None:
+        """
+        Remove a node from this view only, leaving the root graph untouched.
+
+        The view's local rx_graph and ID mappings are updated; the root is not
+        modified. After this call the view no longer represents a strict filter
+        of the root, but its internal state is consistent and traversals
+        (successors/predecessors) continue to work.
+
+        Only the view's `node_removed` signal fires — the root signal does not,
+        because the root did not change.
+
+        Parameters
+        ----------
+        node_id : int
+            The ID of the node to remove from the view.
+
+        Raises
+        ------
+        ValueError
+            If the node_id does not exist in the view.
+        RuntimeError
+            If `sync=False` — view-only removal requires a maintained local view.
+        """
+        if node_id not in self._external_to_local:
+            raise ValueError(f"Node {node_id} does not exist in the graph.")
+        if not self.sync:
+            raise RuntimeError("remove_node_from_view requires sync=True; the local view is not maintained otherwise.")
+
+        view_signal_on = is_signal_on(self.node_removed)
+        if view_signal_on:
+            old_attrs = self.nodes[node_id].to_dict()
+
+        self._remove_node_local(node_id)
+
         if view_signal_on:
             self.node_removed.emit(node_id, old_attrs)
+
+    def _add_node_local(self, node_id: int) -> None:
+        """
+        Re-insert a node that already exists in the root into this view's local
+        rx_graph and ID mappings only. No root call, no signals.
+
+        Caller guarantees `node_id` exists in the root and is not already in the view.
+
+        The attributes are obtained the same way ``subgraph()`` does for the backend:
+        for an in-memory (rustworkx-family) root the root's attribute dict is reused by
+        reference (so root↔view writes propagate without an explicit sync); for any other
+        backend (e.g. ``SQLGraph``) a fresh attribute dict is fetched via the public API,
+        matching that backend's copy-on-subgraph semantics. Inverse of
+        ``_remove_node_local``.
+        """
+        root = self._root
+        if hasattr(root, "rx_graph"):
+            root_local_id = root._map_to_local(node_id) if hasattr(root, "_map_to_local") else node_id
+            attrs = root.rx_graph[root_local_id]
+        else:
+            attrs = root.filter(node_ids=[node_id]).node_attrs().drop(DEFAULT_ATTR_KEYS.NODE_ID).rows(named=True)[0]
+
+        # `_bulk_add_nodes_local` appends to rx_graph (and updates _time_to_nodes)
+        # without emitting signals or touching the root — the view-only counterpart
+        # to the public `add_node`, which would also write to the root.
+        local_node_id = self._bulk_add_nodes_local([attrs])[0]
+
+        self._add_id_mapping(local_node_id, node_id)
+
+    def add_node_to_view(self, node_id: int) -> None:
+        """
+        Re-surface a node that exists in the root into this view only, leaving the
+        root graph untouched. Inverse of ``remove_node_from_view``.
+
+        The node must exist in the root and must not already be in the view. Its
+        attributes follow the same sharing semantics as ``subgraph()`` for the backend
+        (shared by reference for rustworkx-family roots, copied for others). Incident
+        edges are NOT re-added — use ``add_edge_to_view`` for those.
+
+        Only the view's ``node_added`` signal fires — the root did not change.
+
+        Parameters
+        ----------
+        node_id : int
+            The (root) ID of the node to re-surface in the view.
+
+        Raises
+        ------
+        ValueError
+            If the node is already in the view, or does not exist in the root.
+        RuntimeError
+            If ``sync=False`` — view-only mutation requires a maintained local view.
+        """
+        if not self.sync:
+            raise RuntimeError("add_node_to_view requires sync=True; the local view is not maintained otherwise.")
+        if node_id in self._external_to_local:
+            raise ValueError(f"Node {node_id} is already in the view.")
+        if not self._root.has_node(node_id):
+            raise ValueError(f"Node {node_id} does not exist in the root graph.")
+
+        self._add_node_local(node_id)
+
+        if is_signal_on(self.node_added):
+            self.node_added.emit(node_id, self.nodes[node_id].to_dict())
 
     def add_edge(
         self,
@@ -542,7 +667,53 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         if return_ids:
             return parent_edge_ids
 
-    def remove_edge(
+    def _remove_edge_local(self, edge_id: int) -> None:
+        """
+        Remove an edge from this view's local rx_graph and edge mapping only.
+
+        No validation, no root call. Caller guarantees `edge_id` (root id) is
+        present in `self._edge_map_from_root`.
+        """
+        local_edge_id = self._edge_map_from_root[edge_id]
+        src, tgt, _ = self.rx_graph.edge_index_map()[local_edge_id]
+        self.rx_graph.remove_edge(src, tgt)
+        del self._edge_map_to_root[local_edge_id]
+
+    def bulk_remove_edges(self, edge_ids: Sequence[int]) -> None:
+        """
+        Remove multiple edges from both the root and (if present) the view.
+
+        Parameters
+        ----------
+        edge_ids : Sequence[int]
+            Root edge IDs to remove.
+
+        Raises
+        ------
+        ValueError
+            If any edge_id does not exist in the root graph.
+        """
+        if hasattr(edge_ids, "tolist"):
+            edge_ids = edge_ids.tolist()
+        else:
+            edge_ids = list(edge_ids)
+        if len(edge_ids) == 0:
+            return
+
+        self._root.bulk_remove_edges(edge_ids)
+
+        if self.sync:
+            edge_map = self.rx_graph.edge_index_map()
+            for root_eid in edge_ids:
+                if root_eid in self._edge_map_from_root:
+                    local_edge_id = self._edge_map_from_root[root_eid]
+                    src, tgt, _ = edge_map[local_edge_id]
+                    self.rx_graph.remove_edge(src, tgt)
+                    del self._edge_map_to_root[local_edge_id]
+        else:
+            self._out_of_sync = True
+
+    def remove_edge_from_view(
         self,
         source_id: int | None = None,
         target_id: int | None = None,
@@ -550,29 +721,125 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         edge_id: int | None = None,
     ) -> None:
         """
-        Remove an edge by ID or by endpoints in both the root and (if present) the view.
+        Remove an edge from this view only, leaving the root graph untouched.
+
+        Resolves the edge by `edge_id` or by `(source_id, target_id)`. The root
+        graph is not modified, so the view will diverge from a strict filter of
+        the root.
+
+        Parameters
+        ----------
+        source_id : int, optional
+            Source node id of the edge. Required if `edge_id` is not given.
+        target_id : int, optional
+            Target node id of the edge. Required if `edge_id` is not given.
+        edge_id : int, optional
+            Root edge id. If given, `source_id` and `target_id` are ignored.
+
+        Raises
+        ------
+        ValueError
+            If neither `edge_id` nor both endpoints are given, or the edge is
+            not in the view.
+        RuntimeError
+            If `sync=False` — view-only removal requires a maintained local view.
         """
-        # Remove from root first
+        if not self.sync:
+            raise RuntimeError("remove_edge_from_view requires sync=True; the local view is not maintained otherwise.")
+
         if edge_id is None:
             if source_id is None or target_id is None:
                 raise ValueError("Provide either edge_id or both source_id and target_id.")
             try:
                 edge_id = self._root.edge_id(source_id, target_id)
-            # Ensure the same error raised by the SQLGraph
             except rx.NoEdgeBetweenNodes as e:
                 raise ValueError(f"Edge {source_id}->{target_id} does not exist in the graph.") from e
-        self._root.remove_edge(edge_id=edge_id)  # Error raised from root if edge_id not found
 
-        # Remove from the local graph if synced
-        if self.sync:
-            if edge_id in self._edge_map_from_root:
-                local_edge_id = self._edge_map_from_root[edge_id]
-                edge_map = self.rx_graph.edge_index_map()
-                src, tgt, _ = edge_map[local_edge_id]
-                self.rx_graph.remove_edge(src, tgt)
-                del self._edge_map_to_root[local_edge_id]
+        if edge_id not in self._edge_map_from_root:
+            raise ValueError(f"Edge {edge_id} does not exist in the view.")
+
+        self._remove_edge_local(edge_id)
+
+    def _add_edge_local(self, source_id: int, target_id: int) -> int:
+        """
+        Re-insert an edge that already exists in the root into this view's local
+        rx_graph and edge mapping only. No root call. Returns the root edge id.
+
+        Caller guarantees the root edge ``source_id -> target_id`` exists and both
+        endpoints are already in the view. Attributes are obtained the same way
+        ``subgraph()`` does for the backend: reused by reference for an in-memory
+        (rustworkx-family) root, or fetched as a fresh dict via the public API for any
+        other backend (e.g. ``SQLGraph``). Inverse of ``_remove_edge_local``.
+        """
+        parent_edge_id = self._root.edge_id(source_id, target_id)
+
+        root = self._root
+        if hasattr(root, "rx_graph"):
+            root_local_src = root._map_to_local(source_id) if hasattr(root, "_map_to_local") else source_id
+            root_local_tgt = root._map_to_local(target_id) if hasattr(root, "_map_to_local") else target_id
+            attrs = root.rx_graph.get_edge_data(root_local_src, root_local_tgt)
         else:
-            self._out_of_sync = True
+            df = root.edge_attrs()
+            drop_cols = [
+                c
+                for c in (
+                    DEFAULT_ATTR_KEYS.EDGE_ID,
+                    DEFAULT_ATTR_KEYS.EDGE_SOURCE,
+                    DEFAULT_ATTR_KEYS.EDGE_TARGET,
+                )
+                if c in df.columns
+            ]
+            attrs = df.filter(pl.col(DEFAULT_ATTR_KEYS.EDGE_ID) == parent_edge_id).drop(drop_cols).rows(named=True)[0]
+
+        local_edge_id = self.rx_graph.add_edge(
+            self._map_to_local(source_id),
+            self._map_to_local(target_id),
+            attrs,
+        )
+        self._edge_map_to_root.put(local_edge_id, parent_edge_id)
+        return parent_edge_id
+
+    def add_edge_to_view(
+        self,
+        source_id: int,
+        target_id: int,
+    ) -> None:
+        """
+        Re-surface an edge that exists in the root into this view only, leaving the
+        root graph untouched. Inverse of ``remove_edge_from_view``.
+
+        Both endpoints must already be in the view, the root edge must exist, and the
+        edge must not already be in the view. The edge's attributes follow the same
+        sharing semantics as ``subgraph()`` for the backend (shared by reference for
+        rustworkx-family roots, copied for others). No ``edge_added`` signal exists, so
+        (as with the edge-remove helper) edges have no signal analog.
+
+        Parameters
+        ----------
+        source_id, target_id : int
+            Endpoints of the (root) edge to re-surface in the view.
+
+        Raises
+        ------
+        ValueError
+            If an endpoint is missing from the view, the root edge does not exist, or
+            the edge is already in the view.
+        RuntimeError
+            If ``sync=False`` — view-only mutation requires a maintained local view.
+        """
+        if not self.sync:
+            raise RuntimeError("add_edge_to_view requires sync=True; the local view is not maintained otherwise.")
+        for endpoint in (source_id, target_id):
+            if endpoint not in self._external_to_local:
+                raise ValueError(f"Endpoint {endpoint} is not in the view.")
+        try:
+            parent_edge_id = self._root.edge_id(source_id, target_id)
+        except rx.NoEdgeBetweenNodes as e:
+            raise ValueError(f"Edge {source_id}->{target_id} does not exist in the root graph.") from e
+        if parent_edge_id in self._edge_map_from_root:
+            raise ValueError(f"Edge {source_id}->{target_id} is already in the view.")
+
+        self._add_edge_local(source_id, target_id)
 
     def _get_neighbors(
         self,
@@ -747,22 +1014,19 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
             for i, node_id in enumerate(node_ids):
                 new_attrs = dict(old_attrs_by_id[node_id])
                 for k, v in attrs.items():
-                    new_attrs[k] = v if np.isscalar(v) else v[i]
+                    if k in new_attrs:
+                        new_attrs[k] = v if np.isscalar(v) else v[i]
                 new_attrs_by_id[node_id] = new_attrs
             if root_signal_on:
-                for node_id in node_ids:
-                    self._root.node_updated.emit(
-                        node_id,
-                        old_attrs_by_id[node_id],
-                        new_attrs_by_id[node_id],
-                    )
+                emit_node_updated_events(
+                    self._root.node_updated,
+                    ((node_id, old_attrs_by_id[node_id], new_attrs_by_id[node_id]) for node_id in node_ids),
+                )
             if view_signal_on:
-                for node_id in node_ids:
-                    self.node_updated.emit(
-                        node_id,
-                        old_attrs_by_id[node_id],
-                        new_attrs_by_id[node_id],
-                    )
+                emit_node_updated_events(
+                    self.node_updated,
+                    ((node_id, old_attrs_by_id[node_id], new_attrs_by_id[node_id]) for node_id in node_ids),
+                )
 
     def update_edge_attrs(
         self,

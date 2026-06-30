@@ -12,6 +12,14 @@ They can be used to filter elements in the graph as:
 graph.filter(NodeAttr("t") == 1).subgraph()
 ```
 
+Boolean combinations of comparisons can be expressed with `|` (or), `^` (xor),
+`&` (and) and `~` (not). Comparisons passed as multiple positional arguments to
+`filter()` are still implicitly AND-ed together.
+```python
+graph.filter((NodeAttr("t") == 1) | (NodeAttr("t") == 2)).subgraph()
+graph.filter(~(NodeAttr("t") == 0)).subgraph()
+```
+
 Or to create complex expression when solving the tracking problem:
 ```python
 NearestNeighborsSolver(-Attr("iou") * (-Attr("distance") / 30.0).exp())
@@ -21,6 +29,7 @@ NearestNeighborsSolver(-Attr("iou") * (-Attr("distance") / 30.0).exp())
 import functools
 import math
 import operator
+from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from typing import Any, TypeGuard, Union, overload
 
@@ -30,12 +39,17 @@ from polars import DataFrame, Expr, Series
 
 Scalar = int | float | str | bool | complex | np.number
 ExprInput = Union[str, Scalar, "Attr", Expr, "AttrComparison"]
-MembershipExprInput = Sequence[Scalar]
+MembershipExprInput = Sequence[Scalar] | np.ndarray
+
+# Logical operators supported by AttrFilter compounds (op name → bitwise symbol).
+_FILTER_OP_SYMBOLS = {"and": "&", "or": "|", "xor": "^", "not": "~"}
 
 
 __all__ = [
     "AttrComparison",
+    "AttrFilter",
     "EdgeAttr",
+    "Filter",
     "NodeAttr",
     "attr_comps_to_strs",
     "polars_reduce_attr_comps",
@@ -85,7 +99,65 @@ def _is_membership_expr_input(x: Any) -> TypeGuard[MembershipExprInput]:
     return isinstance(x, Sequence)
 
 
-class AttrComparison:
+class Filter(ABC):
+    """
+    Common interface for anything usable as a filter argument to `graph.filter()`.
+
+    Implemented by [AttrComparison][tracksdata.attrs.AttrComparison] (leaf
+    comparisons like `NodeAttr("t") == 1`) and
+    [AttrFilter][tracksdata.attrs.AttrFilter] (compound boolean trees built
+    with `& | ^ ~`). Helpers in this module accept any `Filter` and treat
+    them interchangeably via `to_attr()` and `columns`.
+
+    Backend code that needs to walk a compound tree (e.g. SQL pushdown in
+    `_to_sql_clause`, Python evaluation in `_eval_filter`) still uses
+    `isinstance(_, AttrComparison)` to distinguish leaves from compounds —
+    that structural dispatch is intentional and not part of this interface.
+    """
+
+    @abstractmethod
+    def to_attr(self) -> "Attr":
+        """Materialize this filter as an `Attr` holding a polars boolean expression."""
+
+    @property
+    @abstractmethod
+    def columns(self) -> list[str]:
+        """Column names referenced by this filter, in order, deduplicated."""
+
+    def _combine(self, op: str, other: Any, reverse: bool = False) -> "AttrFilter":
+        if not isinstance(other, Filter):
+            symbol = _FILTER_OP_SYMBOLS[op]
+            raise TypeError(
+                f"Cannot apply '{symbol}' between {type(self).__name__} and {type(other).__name__}. "
+                "Boolean operators on filters combine them into a compound filter; both operands "
+                "must be a Filter (AttrComparison or AttrFilter)."
+            )
+        operands = [other, self] if reverse else [self, other]
+        return AttrFilter(op, operands)
+
+    def __and__(self, other: "Filter") -> "AttrFilter":
+        return self._combine("and", other)
+
+    def __rand__(self, other: "Filter") -> "AttrFilter":
+        return self._combine("and", other, reverse=True)
+
+    def __or__(self, other: "Filter") -> "AttrFilter":
+        return self._combine("or", other)
+
+    def __ror__(self, other: "Filter") -> "AttrFilter":
+        return self._combine("or", other, reverse=True)
+
+    def __xor__(self, other: "Filter") -> "AttrFilter":
+        return self._combine("xor", other)
+
+    def __rxor__(self, other: "Filter") -> "AttrFilter":
+        return self._combine("xor", other, reverse=True)
+
+    def __invert__(self) -> "AttrFilter":
+        return AttrFilter("not", [self])
+
+
+class AttrComparison(Filter):
     """
     Class to store a comparison between an [Attr][tracksdata.attrs.Attr] and a value
     (a sequence of values for `is_in`).
@@ -129,7 +201,10 @@ class AttrComparison:
             raise ValueError(f"Comparison operators are not supported for multiple columns. Found {columns}.")
 
         self.attr = attr
-        self.column = columns[0]
+        # Prefer the explicitly tracked root_column so struct-field comparisons
+        # (e.g. `NodeAttr("m").struct.field("x") == 1`) record the parent storage
+        # column ("m"), letting backends remap to their physical layout via field_path.
+        self.column = attr.root_column if attr.root_column is not None else columns[0]
         self.op = op
 
         # casting numpy scalars to python scalars
@@ -144,14 +219,22 @@ class AttrComparison:
         self.other = other
 
     def __repr__(self) -> str:
-        return f"{type(self.attr).__name__}({self.column}) {_OPS_MATH_SYMBOLS[self.op]} {self.other}"
+        if self.attr.field_path:
+            column = ".".join([str(self.column), *self.attr.field_path])
+        else:
+            column = str(self.column)
+        return f"{type(self.attr).__name__}({column}) {_OPS_MATH_SYMBOLS[self.op]} {self.other}"
 
     def to_attr(self) -> "Attr":
         """
         Transform the comparison back to an [Attr][tracksdata.attrs.Attr] object.
         This is useful for evaluating the expression on a DataFrame.
         """
-        return Attr(self.op(pl.col(self.column), self.other))
+        return Attr(self.op(self.attr.expr, self.other))
+
+    @property
+    def columns(self) -> list[str]:
+        return [self.column]
 
     def __getattr__(self, attr: str) -> Any:
         return getattr(self.to_attr(), attr)
@@ -159,7 +242,7 @@ class AttrComparison:
     def _delegate_operator(self, other: ExprInput, op: Callable[[Expr, Expr], Expr], reverse: bool = False) -> "Attr":
         return self.to_attr()._delegate_operator(other, op, reverse)
 
-    # Binary operators
+    # Arithmetic operators (auto-generated by `_setup_ops`, return Attr)
     def __add__(self, other: ExprInput) -> "Attr": ...
     def __sub__(self, other: ExprInput) -> "Attr": ...
     def __mul__(self, other: ExprInput) -> "Attr": ...
@@ -167,11 +250,8 @@ class AttrComparison:
     def __floordiv__(self, other: ExprInput) -> "Attr": ...
     def __mod__(self, other: ExprInput) -> "Attr": ...
     def __pow__(self, other: ExprInput) -> "Attr": ...
-    def __and__(self, other: ExprInput) -> "Attr": ...
-    def __or__(self, other: ExprInput) -> "Attr": ...
-    def __xor__(self, other: ExprInput) -> "Attr": ...
 
-    # Reverse operators
+    # Reverse arithmetic operators
     def __radd__(self, other: Scalar) -> "Attr": ...
     def __rsub__(self, other: Scalar) -> "Attr": ...
     def __rmul__(self, other: Scalar) -> "Attr": ...
@@ -179,23 +259,53 @@ class AttrComparison:
     def __rfloordiv__(self, other: Scalar) -> "Attr": ...
     def __rmod__(self, other: Scalar) -> "Attr": ...
     def __rpow__(self, other: Scalar) -> "Attr": ...
-    def __rand__(self, other: Scalar) -> "Attr": ...
-    def __ror__(self, other: Scalar) -> "Attr": ...
-    def __rxor__(self, other: Scalar) -> "Attr": ...
 
-    # Comparison operators (always return Attr)
+    # Boolean operators (`& | ^ ~`) are inherited from `Filter` and combine
+    # comparisons into an `AttrFilter` compound.
+
+    # Comparison operators (always return Attr).
+    # No `__r{op}__` stubs: Python's data model uses `__eq__`/`__ne__` for
+    # reflected `==`/`!=` and the OPPOSITE op for reflected `<>≤≥`
+    # (e.g. `1 < attr` → `attr.__gt__(1)`), so `__rlt__` etc. are never called.
     def __eq__(self, other: ExprInput) -> "Attr": ...
-    def __req__(self, other: ExprInput) -> "Attr": ...
     def __ne__(self, other: ExprInput) -> "Attr": ...
-    def __rne__(self, other: ExprInput) -> "Attr": ...
     def __lt__(self, other: ExprInput) -> "Attr": ...
-    def __rlt__(self, other: ExprInput) -> "Attr": ...
     def __le__(self, other: ExprInput) -> "Attr": ...
-    def __rle__(self, other: ExprInput) -> "Attr": ...
     def __gt__(self, other: ExprInput) -> "Attr": ...
-    def __rgt__(self, other: ExprInput) -> "Attr": ...
     def __ge__(self, other: ExprInput) -> "Attr": ...
-    def __rge__(self, other: ExprInput) -> "Attr": ...
+
+
+class _StructNamespace:
+    """Wrapper around polars struct namespace that preserves Attr semantics.
+
+    Polars' own ``Expr.struct.field(name)`` only updates the underlying expression;
+    it loses the parent column identity, which backends need to map a filter back
+    to its physical storage (e.g. SQL flat columns, dict lookups in rustworkx).
+    This wrapper proxies the namespace while threading ``root_column`` and
+    ``field_path`` through ``.field(...)`` calls.
+    """
+
+    def __init__(self, attr: "Attr") -> None:
+        self._attr = attr
+        self._namespace = attr.expr.struct
+
+    def field(self, name: str) -> "Attr":
+        # preserve_field_path keeps the existing root/path before appending the new field.
+        out = self._attr._wrap(self._namespace.field(name), preserve_field_path=True)
+        # _namespace.field() always returns a polars Expr, so _wrap always yields an Attr here.
+        out._append_field_path(name)
+        return out
+
+    def __getattr__(self, name: str) -> Any:
+        namespace_attr = getattr(self._namespace, name)
+        if callable(namespace_attr):
+
+            @functools.wraps(namespace_attr)
+            def _wrapped(*args, **kwargs):
+                return self._attr._wrap(namespace_attr(*args, **kwargs))
+
+            return _wrapped
+        return namespace_attr
 
 
 class Attr:
@@ -222,30 +332,43 @@ class Attr:
     def __init__(self, value: ExprInput) -> None:
         self._inf_exprs = []  # expressions multiplied by +inf
         self._neg_inf_exprs = []  # expressions multiplied by -inf
+        # Path-tracking for backend filters:
+        # - root_column: top-level column used to store the value.
+        # - field_path: nested struct path from that root column.
+        self._root_column: str | None = None
+        self._field_path: tuple[str, ...] = ()
 
         if isinstance(value, str):
             self.expr = pl.col(value)
+            self._root_column = value
         elif isinstance(value, Attr):
             self.expr = value.expr
             # Copy infinity tracking from the other AttrExpr
             self._inf_exprs = value.inf_exprs
             self._neg_inf_exprs = value.neg_inf_exprs
+            self._root_column = value.root_column
+            self._field_path = value.field_path
         elif isinstance(value, AttrComparison):
             attr = value.to_attr()
             self.expr = attr.expr
             self._inf_exprs = attr.inf_exprs
             self._neg_inf_exprs = attr.neg_inf_exprs
+            self._root_column = attr.root_column
+            self._field_path = attr.field_path
         elif isinstance(value, Expr):
             self.expr = value
         else:
             self.expr = pl.lit(value)
 
-    def _wrap(self, expr: ExprInput) -> Union["Attr", Any]:
+    def _wrap(self, expr: ExprInput, *, preserve_field_path: bool = False) -> Union["Attr", Any]:
         if isinstance(expr, Expr):
-            result = Attr(expr)
+            result = type(self)(expr)
             # Propagate infinity tracking
             result._inf_exprs = self._inf_exprs.copy()
             result._neg_inf_exprs = self._neg_inf_exprs.copy()
+            if preserve_field_path:
+                result._root_column = self._root_column
+                result._field_path = self._field_path
             return result
         return expr
 
@@ -316,7 +439,6 @@ class Attr:
         self,
         other: ExprInput,
         op: Callable,
-        reverse: bool = False,
     ) -> "AttrComparison | Attr":
         """
         Simplified version of `_delegate_operator` for comparison operators.
@@ -331,25 +453,16 @@ class Attr:
             The other expression to delegate the operator to.
         op : Callable
             The operator to delegate.
-        reverse : bool, optional
-            Whether the operator is reversed.
 
         Returns
         -------
         AttrComparison | Attr
             The result of the operator.
         """
-        if reverse:
-            lhs = Attr(other)
-            rhs = self
-        else:
-            lhs = self
-            rhs = other
-
         if isinstance(other, Attr):
             return self._delegate_operator(other, op, reverse=False)
 
-        return AttrComparison(lhs, op, rhs)
+        return AttrComparison(self, op, other)
 
     def alias(self, name: str) -> "Attr":
         result = Attr(self.expr.alias(name))
@@ -376,6 +489,33 @@ class Attr:
     @property
     def columns(self) -> list[str]:
         return list(dict.fromkeys(self.expr_columns + self.inf_columns + self.neg_inf_columns))
+
+    @property
+    def root_column(self) -> str | None:
+        """
+        Top-level column name from which this expression originates.
+
+        Examples
+        --------
+        `Attr("t").root_column == "t"`
+        `NodeAttr("measurements").struct.field("score").root_column == "measurements"`
+        """
+        return self._root_column
+
+    @property
+    def field_path(self) -> tuple[str, ...]:
+        """
+        Nested struct-field path relative to [root_column][tracksdata.attrs.Attr.root_column].
+
+        Empty tuple means no nested access.
+
+        Examples
+        --------
+        `Attr("t").field_path == ()`
+        `NodeAttr("measurements").struct.field("score").field_path == ("score",)`
+        `NodeAttr("meta").struct.field("det").struct.field("conf").field_path == ("det", "conf")`
+        """
+        return self._field_path
 
     @property
     def inf_exprs(self) -> list["Attr"]:
@@ -464,6 +604,9 @@ class Attr:
         if attr.startswith("_"):
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{attr}'")
 
+        if attr == "struct":
+            return _StructNamespace(self)
+
         # To auto generate operator methods such as `.log()``
         expr_attr = getattr(self.expr, attr)
         if callable(expr_attr):
@@ -474,6 +617,12 @@ class Attr:
 
             return _wrapped
         return expr_attr
+
+    def _append_field_path(self, field_name: str) -> None:
+        if self._root_column is None:
+            self._field_path = ()
+        else:
+            self._field_path = (*self._field_path, field_name)
 
     def __repr__(self) -> str:
         return f"Attr({self.expr})"
@@ -510,22 +659,10 @@ class Attr:
     def __eq__(self, other: ExprInput) -> "Attr | AttrComparison": ...
 
     @overload
-    def __req__(self, other: "Attr") -> "Attr": ...
-    @overload
-    def __req__(self, other: Scalar) -> "AttrComparison": ...
-    def __req__(self, other: ExprInput) -> "Attr | AttrComparison": ...
-
-    @overload
     def __ne__(self, other: "Attr") -> "Attr": ...
     @overload
     def __ne__(self, other: Scalar) -> "AttrComparison": ...
     def __ne__(self, other: ExprInput) -> "Attr | AttrComparison": ...
-
-    @overload
-    def __rne__(self, other: "Attr") -> "Attr": ...
-    @overload
-    def __rne__(self, other: Scalar) -> "AttrComparison": ...
-    def __rne__(self, other: ExprInput) -> "Attr | AttrComparison": ...
 
     @overload
     def __lt__(self, other: "Attr") -> "Attr": ...
@@ -534,22 +671,10 @@ class Attr:
     def __lt__(self, other: ExprInput) -> "Attr | AttrComparison": ...
 
     @overload
-    def __rlt__(self, other: "Attr") -> "Attr": ...
-    @overload
-    def __rlt__(self, other: Scalar) -> "AttrComparison": ...
-    def __rlt__(self, other: ExprInput) -> "Attr | AttrComparison": ...
-
-    @overload
     def __le__(self, other: "Attr") -> "Attr": ...
     @overload
     def __le__(self, other: Scalar) -> "AttrComparison": ...
     def __le__(self, other: ExprInput) -> "Attr | AttrComparison": ...
-
-    @overload
-    def __rle__(self, other: "Attr") -> "Attr": ...
-    @overload
-    def __rle__(self, other: Scalar) -> "AttrComparison": ...
-    def __rle__(self, other: ExprInput) -> "Attr | AttrComparison": ...
 
     @overload
     def __gt__(self, other: "Attr") -> "Attr": ...
@@ -558,22 +683,10 @@ class Attr:
     def __gt__(self, other: ExprInput) -> "Attr | AttrComparison": ...
 
     @overload
-    def __rgt__(self, other: "Attr") -> "Attr": ...
-    @overload
-    def __rgt__(self, other: Scalar) -> "AttrComparison": ...
-    def __rgt__(self, other: ExprInput) -> "Attr | AttrComparison": ...
-
-    @overload
     def __ge__(self, other: "Attr") -> "Attr": ...
     @overload
     def __ge__(self, other: Scalar) -> "AttrComparison": ...
     def __ge__(self, other: ExprInput) -> "Attr | AttrComparison": ...
-
-    @overload
-    def __rge__(self, other: "Attr") -> "Attr": ...
-    @overload
-    def __rge__(self, other: Scalar) -> "AttrComparison": ...
-    def __rge__(self, other: ExprInput) -> "Attr | AttrComparison": ...
 
 
 # Auto-generate operator methods using functools.partialmethod
@@ -590,9 +703,8 @@ def _add_operator(
 def _add_comparison_operator(
     name: str,
     op: Callable,
-    reverse: bool = False,
 ) -> None:
-    method = functools.partialmethod(Attr._delegate_comparison_operator, op=op, reverse=reverse)
+    method = functools.partialmethod(Attr._delegate_comparison_operator, op=op)
     setattr(Attr, name, method)
 
 
@@ -600,6 +712,7 @@ def _setup_ops() -> None:
     """
     Setup the operator methods for the AttrExpr class.
     """
+    # Arithmetic operators: generated for both Attr and AttrComparison.
     bin_ops = {
         "add": operator.add,
         "sub": operator.sub,
@@ -608,6 +721,12 @@ def _setup_ops() -> None:
         "floordiv": operator.floordiv,
         "mod": operator.mod,
         "pow": operator.pow,
+    }
+
+    # Logical operators: generated only for Attr (bitwise on the polars expr).
+    # AttrComparison inherits `& | ^ ~` from `Filter` (they build AttrFilter
+    # compounds), so they are intentionally excluded here.
+    logical_ops = {
         "and": operator.and_,
         "or": operator.or_,
         "xor": operator.xor,
@@ -622,19 +741,20 @@ def _setup_ops() -> None:
         "ge": operator.ge,
     }
 
-    for op_name, op_func in bin_ops.items():
+    for op_name, op_func in (bin_ops | logical_ops).items():
         _add_operator(Attr, f"__{op_name}__", op_func, reverse=False)
         _add_operator(Attr, f"__r{op_name}__", op_func, reverse=True)
+
+    for op_name, op_func in bin_ops.items():
         _add_operator(AttrComparison, f"__{op_name}__", op_func, reverse=False)
         _add_operator(AttrComparison, f"__r{op_name}__", op_func, reverse=True)
 
+    # No reverse comparison operators (`__rlt__` etc.) — Python uses the
+    # opposite op for reflected `<>≤≥` and `__eq__`/`__ne__` symmetrically.
     for op_name, op_func in comp_ops.items():
-        _add_comparison_operator(f"__{op_name}__", op_func, reverse=False)
-        _add_comparison_operator(f"__r{op_name}__", op_func, reverse=True)
-
-        # attrr_comparision uses normal delegate_operator
+        _add_comparison_operator(f"__{op_name}__", op_func)
+        # AttrComparison uses normal delegate_operator
         _add_operator(AttrComparison, f"__{op_name}__", op_func, reverse=False)
-        _add_operator(AttrComparison, f"__r{op_name}__", op_func, reverse=True)
 
 
 _setup_ops()
@@ -662,67 +782,185 @@ class EdgeAttr(Attr):
     """
 
 
-def split_attr_comps(attr_comps: Sequence[AttrComparison]) -> tuple[list[AttrComparison], list[AttrComparison]]:
+class AttrFilter(Filter):
     """
-    Split a list of attribute comparisons into node and edge attribute comparisons.
+    A compound boolean combination of [AttrComparison][tracksdata.attrs.AttrComparison]
+    (or nested `AttrFilter`) operands, used to express OR / XOR / AND / NOT
+    relationships when filtering nodes or edges in a graph.
+
+    Use Python's bitwise operators on `AttrComparison` (or `AttrFilter`)
+    instances to build compounds:
+
+    ```python
+    graph.filter((NodeAttr("t") == 1) | (NodeAttr("t") == 2))
+    graph.filter(~(NodeAttr("t") == 0))
+    graph.filter((EdgeAttr("w") > 0.5) ^ (EdgeAttr("w") < -0.5))
+    ```
+
+    All leaves of a single `AttrFilter` must reference attributes of the same
+    kind (either all [NodeAttr][tracksdata.attrs.NodeAttr] or all
+    [EdgeAttr][tracksdata.attrs.EdgeAttr]). Mixing node and edge attributes
+    inside one compound is not supported because it would require joining the
+    node and edge tables in a way that conflicts with the existing AND-based
+    filter semantics. Top-level node/edge filters can still be combined via
+    positional arguments to `graph.filter()` (implicit AND).
 
     Parameters
     ----------
-    attr_comps : Sequence[AttrComparison]
-        The attribute comparisons to split.
+    op : str
+        Logical operator, one of `"and"`, `"or"`, `"xor"`, `"not"`.
+    operands : Sequence[Filter]
+        Operands. `"not"` requires exactly one operand; the others require at
+        least two.
+    """
+
+    def __init__(self, op: str, operands: Sequence[Filter]) -> None:
+        if op not in _FILTER_OP_SYMBOLS:
+            raise ValueError(f"Unknown logical operator '{op}'. Expected one of {tuple(_FILTER_OP_SYMBOLS)}.")
+        operands = list(operands)
+        for o in operands:
+            if not isinstance(o, Filter):
+                raise TypeError(
+                    f"AttrFilter operands must be Filter (AttrComparison or AttrFilter), got {type(o).__name__}."
+                )
+        if op == "not":
+            if len(operands) != 1:
+                raise ValueError("'not' filter requires exactly one operand.")
+        else:
+            if len(operands) < 2:
+                raise ValueError(f"'{op}' filter requires at least two operands.")
+        self.op = op
+        self.operands = operands
+
+    # Boolean operators (`& | ^ ~`) are inherited from `Filter`.
+
+    def to_attr(self) -> "Attr":
+        """Translate the compound filter to an `Attr` holding the polars boolean expression.
+
+        Mirrors [AttrComparison.to_attr][tracksdata.attrs.AttrComparison.to_attr]
+        and folds children polymorphically — both operand types expose `to_attr`,
+        so no parallel `(Filter)` walker is needed for
+        evaluation or column extraction.
+        """
+        if self.op == "not":
+            return Attr(~self.operands[0].to_attr().expr)
+        child_exprs = [o.to_attr().expr for o in self.operands]
+        if self.op == "and":
+            return Attr(functools.reduce(operator.and_, child_exprs))
+        if self.op == "or":
+            return Attr(functools.reduce(operator.or_, child_exprs))
+        # xor
+        return Attr(functools.reduce(operator.xor, child_exprs))
+
+    def leaves(self) -> list["AttrComparison"]:
+        """Flatten the filter tree to its leaf comparisons."""
+        out: list[AttrComparison] = []
+        for o in self.operands:
+            if isinstance(o, AttrFilter):
+                out.extend(o.leaves())
+            else:
+                assert isinstance(o, AttrComparison)
+                out.append(o)
+        return out
+
+    @property
+    def columns(self) -> list[str]:
+        return self.to_attr().expr_columns
+
+    def __repr__(self) -> str:
+        if self.op == "not":
+            return f"~{self.operands[0]!r}"
+        sep = f" {_FILTER_OP_SYMBOLS[self.op]} "
+        return "(" + sep.join(repr(o) for o in self.operands) + ")"
+
+
+def _filter_attr_kind(f: Filter) -> type[Attr]:
+    """Return the leaf-attribute kind (NodeAttr / EdgeAttr) of a filter.
+
+    Raises ValueError if the filter mixes node and edge attributes.
+    """
+    if isinstance(f, AttrComparison):
+        if isinstance(f.attr, NodeAttr):
+            return NodeAttr
+        if isinstance(f.attr, EdgeAttr):
+            return EdgeAttr
+        raise ValueError(f"Expected comparisons of 'NodeAttr' or 'EdgeAttr' objects, got {type(f.attr)}")
+
+    assert isinstance(f, AttrFilter)
+    kinds = {_filter_attr_kind(o) for o in f.operands}
+    if len(kinds) > 1:
+        raise ValueError(
+            "A single AttrFilter compound cannot mix NodeAttr and EdgeAttr comparisons. "
+            "Combine node and edge filters via separate positional arguments to graph.filter()."
+        )
+    return kinds.pop()
+
+
+def split_attr_comps(
+    attr_comps: Sequence[Filter],
+) -> tuple[list[Filter], list[Filter]]:
+    """
+    Split a list of attribute comparisons (or compound filters) into node and
+    edge groups based on the kind of their leaf comparisons.
+
+    Parameters
+    ----------
+    attr_comps : Sequence[Filter]
+        The attribute comparisons or compound filters to split.
 
     Returns
     -------
-    tuple[list[AttrComparison], list[AttrComparison]]
-        A tuple of lists of node and edge attribute comparisons.
+    tuple[list[Filter], list[Filter]]
+        A tuple of lists of node and edge filters.
     """
-    node_attr_comps = []
-    edge_attr_comps = []
+    node_attr_comps: list[Filter] = []
+    edge_attr_comps: list[Filter] = []
 
     for attr_comp in attr_comps:
-        if isinstance(attr_comp.attr, NodeAttr):
+        kind = _filter_attr_kind(attr_comp)
+        if kind is NodeAttr:
             node_attr_comps.append(attr_comp)
-        elif isinstance(attr_comp.attr, EdgeAttr):
-            edge_attr_comps.append(attr_comp)
         else:
-            raise ValueError(f"Expected comparisons of 'NodeAttr' or 'EdgeAttr' objects, got {type(attr_comp.attr)}")
+            edge_attr_comps.append(attr_comp)
 
     return node_attr_comps, edge_attr_comps
 
 
-def attr_comps_to_strs(attr_comps: Sequence[AttrComparison]) -> list[str]:
+def attr_comps_to_strs(attr_comps: Sequence[Filter]) -> list[str]:
     """
-    Convert a list of attribute comparisons to a list of strings.
+    Convert a list of attribute comparisons (or compound filters) to a list of
+    column names involved in them.
 
     Parameters
     ----------
-    attr_comps : Sequence[AttrComparison]
-        The attribute comparisons to convert to strings.
+    attr_comps : Sequence[Filter]
+        The filters to extract column names from.
 
     Returns
     -------
     list[str]
-        The attribute comparisons as strings.
+        The column names referenced by the filters, deduplicated while
+        preserving order.
     """
-    return [str(attr_comp.column) for attr_comp in attr_comps]
+    # Both subclasses of `Filter` expose `.columns`.
+    return list(dict.fromkeys(c for ac in attr_comps for c in ac.columns))
 
 
 def polars_reduce_attr_comps(
-    df: pl.DataFrame,
-    attr_comps: Sequence[AttrComparison],
+    attr_comps: Sequence[Filter],
     reduce_op: Callable[[Expr, Expr], Expr],
 ) -> pl.Expr:
     """
-    Reduce a list of attribute comparisons into a single polars expression.
+    Reduce a list of attribute comparisons (or compound filters) into a single
+    polars expression, combined with `reduce_op` at the top level (AND-ed by
+    default in callers).
 
     Parameters
     ----------
-    df : pl.DataFrame
-        The dataframe to reduce the attribute comparisons on.
-    attr_comps : Sequence[AttrComparison]
-        The attribute comparisons to reduce.
+    attr_comps : Sequence[Filter]
+        The filters to reduce.
     reduce_op : Callable[[Expr, Expr], Expr]
-        The operation to reduce the attribute comparisons with.
+        The operation to reduce the top-level filters with.
 
     Returns
     -------
@@ -730,7 +968,10 @@ def polars_reduce_attr_comps(
         The reduced polars expression.
     """
     if not attr_comps:
-        # Return True for all rows by using the first column as a reference
         raise ValueError("No attribute comparisons provided.")
-
-    return pl.reduce(reduce_op, [attr_comp.op(df[str(attr_comp.column)], attr_comp.other) for attr_comp in attr_comps])
+    # `f.to_attr().expr` lets each filter render its own expression. For
+    # `AttrComparison` over a struct field, that expression already drills into
+    # the struct (e.g. `pl.col("m").struct.field("x")`) rather than reading the
+    # bare column. For compound `AttrFilter`s, it returns the combined boolean
+    # expression.
+    return pl.reduce(reduce_op, [f.to_attr().expr for f in attr_comps])
