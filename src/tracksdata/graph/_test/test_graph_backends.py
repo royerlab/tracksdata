@@ -575,6 +575,22 @@ def test_update_node_attrs_emits_batched_node_updated_callback(graph_backend: Ba
     assert [attrs["x"] for attrs in calls[0][2]] == [10.0, 20.0, 30.0]
 
 
+def test_update_node_attrs_node_updated_carries_changed_keys(graph_backend: BaseGraph) -> None:
+    """node_updated delivers the set of written keys as a 4th arg, so connectors
+    can skip work when none of the keys they track changed."""
+    graph_backend.add_node_attr_key("x", pl.Float64)
+    graph_backend.add_node_attr_key("score", pl.Float64)
+
+    node_ids = graph_backend.bulk_add_nodes([{"t": 0, "x": 1.0, "score": 0.0}])
+
+    calls: list[set] = []
+    graph_backend.node_updated.connect(lambda node_ids, old_attrs, new_attrs, changed_keys: calls.append(changed_keys))
+
+    graph_backend.update_node_attrs(node_ids=node_ids, attrs={"score": 5.0})
+
+    assert calls == [{"score"}]
+
+
 def test_update_edge_attrs(graph_backend: BaseGraph) -> None:
     """Test updating edge attributes."""
     node1 = graph_backend.add_node({"t": 0})

@@ -1017,15 +1017,18 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
                     if k in new_attrs:
                         new_attrs[k] = v if np.isscalar(v) else v[i]
                 new_attrs_by_id[node_id] = new_attrs
+            changed_keys = set(attrs.keys())
             if root_signal_on:
                 emit_node_updated_events(
                     self._root.node_updated,
                     ((node_id, old_attrs_by_id[node_id], new_attrs_by_id[node_id]) for node_id in node_ids),
+                    changed_keys,
                 )
             if view_signal_on:
                 emit_node_updated_events(
                     self.node_updated,
                     ((node_id, old_attrs_by_id[node_id], new_attrs_by_id[node_id]) for node_id in node_ids),
+                    changed_keys,
                 )
 
     def update_edge_attrs(

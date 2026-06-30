@@ -446,8 +446,15 @@ class GraphArrayView(BaseReadOnlyArray):
         node_ids: list[int],
         old_attrs: list[dict],
         new_attrs: list[dict],
+        changed_keys: set[str] | None = None,
     ) -> None:
         del node_ids
+        # The rendered output depends only on position (t/bbox), the mask, and the
+        # displayed attribute. If none changed, there is nothing to invalidate.
+        if changed_keys is not None and changed_keys.isdisjoint(
+            {DEFAULT_ATTR_KEYS.T, DEFAULT_ATTR_KEYS.BBOX, DEFAULT_ATTR_KEYS.MASK, self._attr_key}
+        ):
+            return
         time_values: list[Any] = []
         bboxes: list[Any] = []
         for old_attr, new_attr in zip(old_attrs, new_attrs, strict=True):
