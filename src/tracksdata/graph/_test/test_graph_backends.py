@@ -726,6 +726,39 @@ def test_edge_attrs_include_targets(graph_backend: BaseGraph) -> None:
     assert single_exclusive_edge_ids == expected_single_exclusive, msg
 
 
+def test_edge_attrs_include_sources(graph_backend: BaseGraph) -> None:
+    """Edges must be unique and respect endpoint membership with include_sources."""
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
+
+    # node0 -> node1 -> node2
+    node0 = graph_backend.add_node({"t": 0})
+    node1 = graph_backend.add_node({"t": 1})
+    node2 = graph_backend.add_node({"t": 2})
+
+    edge0 = graph_backend.add_edge(node0, node1, attrs={"weight": 0.1})
+    edge1 = graph_backend.add_edge(node1, node2, attrs={"weight": 0.2})
+
+    # include_sources=True with both endpoints of edge0 selected:
+    # - edge0: node0 -> node1 ✓ (must appear exactly once)
+    # - edge1: node1 -> node2 ✗ (node2 not selected and include_targets=False)
+    edge_ids = graph_backend.filter(node_ids=[node0, node1], include_sources=True).edge_ids()
+    assert list(edge_ids) == [edge0]
+
+    # include_sources=True selecting only the target of edge0:
+    # - edge0: node0 -> node1 ✓ (in-edge with source outside the selection)
+    edge_ids = graph_backend.filter(node_ids=[node1], include_sources=True).edge_ids()
+    assert list(edge_ids) == [edge0]
+
+    # node attribute filters must constrain edge endpoints the same way
+    assert graph_backend.filter(NodeAttr("t") == 1).edge_ids() == []
+
+    edge_ids = graph_backend.filter(NodeAttr("t") == 1, include_targets=True).edge_ids()
+    assert list(edge_ids) == [edge1]
+
+    edge_ids = graph_backend.filter(NodeAttr("t") == 1, include_sources=True).edge_ids()
+    assert list(edge_ids) == [edge0]
+
+
 def test_from_ctc(
     ctc_data_dir: Path,
     graph_backend: BaseGraph,
