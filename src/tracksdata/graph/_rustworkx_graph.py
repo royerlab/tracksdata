@@ -1294,6 +1294,7 @@ class RustWorkXGraph(BaseGraph):
             emit_node_updated_events(
                 self.node_updated,
                 ((node_id, old_attrs_by_id[node_id], dict(self._graph[node_id])) for node_id in node_ids),
+                set(attrs.keys()),
             )
 
     def update_edge_attrs(
@@ -1969,6 +1970,7 @@ class IndexedRXGraph(MappedGraphMixin, RustWorkXGraph):
                     (external_node_id, old_attrs_by_id[external_node_id], dict(self._graph[local_node_id]))
                     for external_node_id, local_node_id in zip(external_node_ids, local_node_ids, strict=True)
                 ),
+                set(attrs.keys()),
             )
 
     def bulk_remove_nodes(self, node_ids: Sequence[int]) -> None:

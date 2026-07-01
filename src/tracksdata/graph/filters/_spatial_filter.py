@@ -246,7 +246,11 @@ class SpatialFilter:
         node_ids: list[int],
         old_attrs: list[dict[str, Any]],
         new_attrs: list[dict[str, Any]],
+        changed_keys: set[str] | None = None,
     ) -> None:
+        # Skip rtree churn when the update touches no spatial coordinate.
+        if changed_keys is not None and changed_keys.isdisjoint(self._attr_keys):
+            return
         self._remove_node(node_ids, old_attrs)
         self._add_node(node_ids, new_attrs)
 
@@ -488,7 +492,15 @@ class BBoxSpatialFilter:
         node_ids: list[int],
         old_attrs: list[dict[str, Any]],
         new_attrs: list[dict[str, Any]],
+        changed_keys: set[str] | None = None,
     ) -> None:
+        # Skip rtree churn when the update touches neither the bbox nor the frame.
+        if changed_keys is not None:
+            spatial_keys = {self._bbox_attr_key}
+            if self._frame_attr_key is not None:
+                spatial_keys.add(self._frame_attr_key)
+            if changed_keys.isdisjoint(spatial_keys):
+                return
         self._remove_node(node_ids, old_attrs)
         self._add_node(node_ids, new_attrs)
 
