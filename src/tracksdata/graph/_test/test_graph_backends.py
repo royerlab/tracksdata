@@ -607,6 +607,11 @@ def test_update_edge_attrs(graph_backend: BaseGraph) -> None:
     with pytest.raises(ValueError):
         graph_backend.update_edge_attrs(edge_ids=[edge_id], attrs={"weight": [1.0, 2.0]})
 
+    # the caller's attrs dict must not be mutated (e.g. scalar broadcast to a list)
+    user_attrs = {"weight": 2.0}
+    graph_backend.update_edge_attrs(edge_ids=[edge_id], attrs=user_attrs)
+    assert user_attrs == {"weight": 2.0}
+
 
 def test_num_edges(graph_backend: BaseGraph) -> None:
     """Test counting edges."""

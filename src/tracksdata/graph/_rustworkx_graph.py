@@ -1323,21 +1323,26 @@ class RustWorkXGraph(BaseGraph):
             edge_ids = self.edge_ids()
 
         size = len(edge_ids)
+        # broadcast scalars into a local copy so the caller's dict is not mutated
+        broadcast_attrs: dict[str, Any] = {}
         for key, value in attrs.items():
             if key not in self.edge_attr_keys():
                 raise ValueError(f"Edge attribute key '{key}' not found in graph. Expected '{self.edge_attr_keys()}'")
 
             if np.isscalar(value):
-                attrs[key] = [value] * size
+                broadcast_attrs[key] = [value] * size
 
-            elif len(attrs[key]) != size:
-                raise ValueError(f"Attribute '{key}' has wrong size. Expected {size}, got {len(attrs[key])}")
+            elif len(value) != size:
+                raise ValueError(f"Attribute '{key}' has wrong size. Expected {size}, got {len(value)}")
+
+            else:
+                broadcast_attrs[key] = value
 
         edge_map = self._graph.edge_index_map()
 
         for i, edge_id in enumerate(edge_ids):
             edge_attr = edge_map[edge_id][2]  # 0=source, 1=target, 2=attributes
-            for key, value in attrs.items():
+            for key, value in broadcast_attrs.items():
                 edge_attr[key] = value[i]
 
     def assign_tracklet_ids(
