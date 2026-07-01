@@ -285,6 +285,40 @@ def test_graph_array_view_equal(multi_node_graph_from_image) -> None:
     # assert np.array_equal(array_view[0], label[0])
 
 
+def test_graph_array_view_numpy_operators(multi_node_graph_from_image) -> None:
+    """Operators between GraphArrayView and numpy arrays/scalars must cast to the array content."""
+    array_view, label = multi_node_graph_from_image
+    t = 1
+    frame_shape = label.shape[1:]
+
+    # comparison with a numpy array, in both operand orders
+    np.testing.assert_array_equal(array_view[t] == np.zeros(frame_shape), label[t] == 0)
+    np.testing.assert_array_equal(np.zeros(frame_shape) == array_view[t], label[t] == 0)
+
+    # comparison with a scalar must be elementwise, not object identity
+    result = array_view[t] == t + 1
+    assert isinstance(result, np.ndarray)
+    np.testing.assert_array_equal(result, label[t] == t + 1)
+    np.testing.assert_array_equal(array_view[t] != 0, label[t] != 0)
+    np.testing.assert_array_equal(array_view[t] > 0, label[t] > 0)
+
+    # arithmetic with arrays and scalars
+    np.testing.assert_array_equal(array_view[t] + np.ones(frame_shape), label[t] + 1.0)
+    np.testing.assert_array_equal(array_view[t] + 1, label[t] + 1)
+    np.testing.assert_array_equal(array_view[t] * 2, label[t] * 2)
+    np.testing.assert_array_equal(-array_view[t], -label[t].astype(np.int64))
+
+    # between two views
+    np.testing.assert_array_equal(array_view[t] == array_view[t], np.ones(frame_shape, dtype=bool))
+
+    # `out=` is not supported for read-only arrays
+    with pytest.raises(TypeError, match="out"):
+        np.add(array_view[t], 1, out=np.zeros(frame_shape))
+
+    # operator support must not break hashability (e.g. signal connections)
+    assert isinstance(hash(array_view), int)
+
+
 def test_graph_array_view_getitem_multi_slices(multi_node_graph_from_image) -> None:
     """Test __getitem__ with slices."""
     array_view, label = multi_node_graph_from_image
