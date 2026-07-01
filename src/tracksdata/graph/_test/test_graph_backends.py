@@ -726,6 +726,29 @@ def test_edge_attrs_include_targets(graph_backend: BaseGraph) -> None:
     assert single_exclusive_edge_ids == expected_single_exclusive, msg
 
 
+def test_filter_node_ids_with_include_flags(graph_backend: BaseGraph) -> None:
+    """Selected nodes must be kept when include flags extend the selection."""
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
+
+    node0 = graph_backend.add_node({"t": 0})
+    node1 = graph_backend.add_node({"t": 1})
+    isolated = graph_backend.add_node({"t": 0})
+
+    graph_backend.add_edge(node0, node1, attrs={"weight": 0.5})
+
+    # explicitly selected nodes without edges must not be dropped
+    node_ids = graph_backend.filter(node_ids=[node0, isolated], include_targets=True).node_ids()
+    assert sorted(node_ids) == sorted([node0, node1, isolated])
+
+    # node attribute filters behave the same way
+    node_ids = graph_backend.filter(NodeAttr("t") == 0, include_targets=True).node_ids()
+    assert sorted(node_ids) == sorted([node0, node1, isolated])
+
+    # include_sources only extends with edge sources, not targets
+    node_ids = graph_backend.filter(node_ids=[node0, isolated], include_sources=True).node_ids()
+    assert sorted(node_ids) == sorted([node0, isolated])
+
+
 def test_from_ctc(
     ctc_data_dir: Path,
     graph_backend: BaseGraph,

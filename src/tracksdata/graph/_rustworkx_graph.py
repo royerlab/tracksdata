@@ -199,26 +199,34 @@ class RXFilter(BaseFilter):
 
     @cache_method
     def node_ids(self) -> list[int]:
-        # if there are no edge filters, we can return the current node ids
+        # if there are no edge filters nor include flags, we can return the current node ids
         if not self._edge_attr_comps and (not self._include_targets and not self._include_sources):
             return self._current_node_ids()
 
-        # find nodes that are connected to edges that pass the edge filters
-        node_ids = []
-        edge_node_ids = (
-            self._edge_attrs()
-            .select(
-                DEFAULT_ATTR_KEYS.EDGE_SOURCE,
-                DEFAULT_ATTR_KEYS.EDGE_TARGET,
-            )
-            .to_numpy()
-            .ravel()
-        )
-        node_ids.append(edge_node_ids)
+        edges_df = self._edge_attrs()
+        node_filtered = self._node_ids is not None or bool(self._node_attr_comps)
 
-        if self._node_attr_comps:
-            # if there are node filters, we need to add the nodes that pass the node filters
-            node_ids.append(self._current_node_ids())
+        node_ids = []
+        if node_filtered or not self._edge_attr_comps:
+            # nodes selected by `node_ids`/node filters (or all nodes when
+            # unfiltered) are always kept; the include flags only extend the
+            # selection with the respective edge endpoints, matching SQLFilter.
+            node_ids.append(np.asarray(self._current_node_ids(), dtype=int))
+        else:
+            # only edge filters: nodes are the endpoints of the matching edges
+            node_ids.append(
+                edges_df.select(
+                    DEFAULT_ATTR_KEYS.EDGE_SOURCE,
+                    DEFAULT_ATTR_KEYS.EDGE_TARGET,
+                )
+                .to_numpy()
+                .ravel()
+            )
+
+        if self._include_sources:
+            node_ids.append(edges_df[DEFAULT_ATTR_KEYS.EDGE_SOURCE].to_numpy())
+        if self._include_targets:
+            node_ids.append(edges_df[DEFAULT_ATTR_KEYS.EDGE_TARGET].to_numpy())
 
         node_ids = [v for v in node_ids if len(v) > 0]
 
