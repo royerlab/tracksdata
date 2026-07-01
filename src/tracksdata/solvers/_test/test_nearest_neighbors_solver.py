@@ -383,3 +383,26 @@ def test_nearest_neighbors_solver_solve_large_graph() -> None:
     for target_idx in [2, 3, 4, 5, 6]:
         target_edges = selected_edges.filter(selected_edges[DEFAULT_ATTR_KEYS.EDGE_TARGET] == nodes[target_idx])
         assert len(target_edges) <= 1  # one parent constraint
+
+
+def test_nearest_neighbors_solver_reset_node_solution() -> None:
+    """Re-solving with `reset=True` must clear stale node solution values."""
+    graph = RustWorkXGraph()
+
+    node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0})
+    node1 = graph.add_node({DEFAULT_ATTR_KEYS.T: 1})
+    node2 = graph.add_node({DEFAULT_ATTR_KEYS.T: 1})
+
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, pl.Float64)
+    graph.add_edge(node0, node1, {DEFAULT_ATTR_KEYS.EDGE_DIST: 1.0})
+    graph.add_edge(node0, node2, {DEFAULT_ATTR_KEYS.EDGE_DIST: 2.0})
+
+    # First solve selects both edges (and all three nodes)
+    NearestNeighborsSolver(max_children=2).solve(graph)
+    assert graph.nodes[node2][DEFAULT_ATTR_KEYS.SOLUTION]
+
+    # Second solve only keeps the best edge; node2 must be reset to False
+    NearestNeighborsSolver(max_children=1).solve(graph)
+    assert graph.nodes[node0][DEFAULT_ATTR_KEYS.SOLUTION]
+    assert graph.nodes[node1][DEFAULT_ATTR_KEYS.SOLUTION]
+    assert not graph.nodes[node2][DEFAULT_ATTR_KEYS.SOLUTION]
