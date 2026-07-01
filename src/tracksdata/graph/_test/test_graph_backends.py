@@ -607,6 +607,11 @@ def test_update_edge_attrs(graph_backend: BaseGraph) -> None:
     with pytest.raises(ValueError):
         graph_backend.update_edge_attrs(edge_ids=[edge_id], attrs={"weight": [1.0, 2.0]})
 
+    # the caller's attrs dict must not be mutated (e.g. scalar broadcast to a list)
+    user_attrs = {"weight": 2.0}
+    graph_backend.update_edge_attrs(edge_ids=[edge_id], attrs=user_attrs)
+    assert user_attrs == {"weight": 2.0}
+
 
 def test_num_edges(graph_backend: BaseGraph) -> None:
     """Test counting edges."""
@@ -757,6 +762,29 @@ def test_edge_attrs_include_sources(graph_backend: BaseGraph) -> None:
 
     edge_ids = graph_backend.filter(NodeAttr("t") == 1, include_sources=True).edge_ids()
     assert list(edge_ids) == [edge0]
+
+
+def test_filter_node_ids_with_include_flags(graph_backend: BaseGraph) -> None:
+    """Selected nodes must be kept when include flags extend the selection."""
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
+
+    node0 = graph_backend.add_node({"t": 0})
+    node1 = graph_backend.add_node({"t": 1})
+    isolated = graph_backend.add_node({"t": 0})
+
+    graph_backend.add_edge(node0, node1, attrs={"weight": 0.5})
+
+    # explicitly selected nodes without edges must not be dropped
+    node_ids = graph_backend.filter(node_ids=[node0, isolated], include_targets=True).node_ids()
+    assert sorted(node_ids) == sorted([node0, node1, isolated])
+
+    # node attribute filters behave the same way
+    node_ids = graph_backend.filter(NodeAttr("t") == 0, include_targets=True).node_ids()
+    assert sorted(node_ids) == sorted([node0, node1, isolated])
+
+    # include_sources only extends with edge sources, not targets
+    node_ids = graph_backend.filter(node_ids=[node0, isolated], include_sources=True).node_ids()
+    assert sorted(node_ids) == sorted([node0, isolated])
 
 
 def test_from_ctc(

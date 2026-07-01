@@ -199,26 +199,34 @@ class RXFilter(BaseFilter):
 
     @cache_method
     def node_ids(self) -> list[int]:
-        # if there are no edge filters, we can return the current node ids
+        # if there are no edge filters nor include flags, we can return the current node ids
         if not self._edge_attr_comps and (not self._include_targets and not self._include_sources):
             return self._current_node_ids()
 
-        # find nodes that are connected to edges that pass the edge filters
-        node_ids = []
-        edge_node_ids = (
-            self._edge_attrs()
-            .select(
-                DEFAULT_ATTR_KEYS.EDGE_SOURCE,
-                DEFAULT_ATTR_KEYS.EDGE_TARGET,
-            )
-            .to_numpy()
-            .ravel()
-        )
-        node_ids.append(edge_node_ids)
+        edges_df = self._edge_attrs()
+        node_filtered = self._node_ids is not None or bool(self._node_attr_comps)
 
-        if self._node_attr_comps:
-            # if there are node filters, we need to add the nodes that pass the node filters
-            node_ids.append(self._current_node_ids())
+        node_ids = []
+        if node_filtered or not self._edge_attr_comps:
+            # nodes selected by `node_ids`/node filters (or all nodes when
+            # unfiltered) are always kept; the include flags only extend the
+            # selection with the respective edge endpoints, matching SQLFilter.
+            node_ids.append(np.asarray(self._current_node_ids(), dtype=int))
+        else:
+            # only edge filters: nodes are the endpoints of the matching edges
+            node_ids.append(
+                edges_df.select(
+                    DEFAULT_ATTR_KEYS.EDGE_SOURCE,
+                    DEFAULT_ATTR_KEYS.EDGE_TARGET,
+                )
+                .to_numpy()
+                .ravel()
+            )
+
+        if self._include_sources:
+            node_ids.append(edges_df[DEFAULT_ATTR_KEYS.EDGE_SOURCE].to_numpy())
+        if self._include_targets:
+            node_ids.append(edges_df[DEFAULT_ATTR_KEYS.EDGE_TARGET].to_numpy())
 
         node_ids = [v for v in node_ids if len(v) > 0]
 
@@ -966,7 +974,6 @@ class RustWorkXGraph(BaseGraph):
             The IDs of the filtered nodes.
         """
         rx_graph = self.rx_graph
-        node_map = None
         # entire graph
         attrs, time = _pop_time_eq(attrs)
         selected_nodes = None
@@ -983,16 +990,15 @@ class RustWorkXGraph(BaseGraph):
         elif node_ids is not None:
             selected_nodes = node_ids
 
-        if selected_nodes is not None:
-            # subgraph of selected nodes
-            rx_graph, node_map = rx_graph.subgraph_with_nodemap(selected_nodes)
-
         _filter_func = _create_filter_func(attrs, self._node_attr_schemas())
 
-        if node_map is None:
+        if selected_nodes is None:
             return list(rx_graph.filter_nodes(_filter_func))
-        else:
-            return [node_map[n] for n in rx_graph.filter_nodes(_filter_func)]
+
+        # evaluate the filter directly on the selected nodes' payloads;
+        # building an rx subgraph here would also copy every edge between
+        # the selected nodes just to discard them afterwards.
+        return [node_id for node_id in selected_nodes if _filter_func(rx_graph[node_id])]
 
     def node_ids(self) -> list[int]:
         """
@@ -1333,21 +1339,26 @@ class RustWorkXGraph(BaseGraph):
             edge_ids = self.edge_ids()
 
         size = len(edge_ids)
+        # broadcast scalars into a local copy so the caller's dict is not mutated
+        broadcast_attrs: dict[str, Any] = {}
         for key, value in attrs.items():
             if key not in self.edge_attr_keys():
                 raise ValueError(f"Edge attribute key '{key}' not found in graph. Expected '{self.edge_attr_keys()}'")
 
             if np.isscalar(value):
-                attrs[key] = [value] * size
+                broadcast_attrs[key] = [value] * size
 
-            elif len(attrs[key]) != size:
-                raise ValueError(f"Attribute '{key}' has wrong size. Expected {size}, got {len(attrs[key])}")
+            elif len(value) != size:
+                raise ValueError(f"Attribute '{key}' has wrong size. Expected {size}, got {len(value)}")
+
+            else:
+                broadcast_attrs[key] = value
 
         edge_map = self._graph.edge_index_map()
 
         for i, edge_id in enumerate(edge_ids):
             edge_attr = edge_map[edge_id][2]  # 0=source, 1=target, 2=attributes
-            for key, value in attrs.items():
+            for key, value in broadcast_attrs.items():
                 edge_attr[key] = value[i]
 
     def assign_tracklet_ids(
