@@ -252,20 +252,36 @@ class RXFilter(BaseFilter):
         data = {k: [] for k in self._graph.edge_attr_keys()}
         data[DEFAULT_ATTR_KEYS.EDGE_ID] = []
 
+        # Endpoint membership constraints, matching SQLFilter semantics:
+        # when nodes are selected (explicit `node_ids` or node attribute filters),
+        # an edge's source must be in the selected set unless `include_sources`,
+        # and its target must be in the selected set unless `include_targets`.
         check_node_ids = None
-        if self._node_ids is not None and not (self._include_targets or self._include_sources):
+        if self._node_ids is not None or self._node_attr_comps:
             check_node_ids = set(node_ids)
+
+        # An edge can be visited twice (out_edges of its source and in_edges of
+        # its target) when `include_sources` is set; deduplicate by the identity
+        # of the payload dict, which is unique per edge (unlike EDGE_ID, it is
+        # always present, e.g. view-local edges of a SQL-rooted GraphView).
+        seen_edges = set()
 
         # TODO: at this point I think we are better creating a rx subgraph
         # and using the filter method
         for node_id in node_ids:
             for nf in neigh_funcs:
                 for src, tgt, attr in nf(node_id):
-                    if _filter_func(attr):
-                        if check_node_ids is not None:
-                            if src not in check_node_ids or tgt not in check_node_ids:
-                                continue
+                    if id(attr) in seen_edges:
+                        continue
+                    seen_edges.add(id(attr))
 
+                    if check_node_ids is not None:
+                        if not self._include_sources and src not in check_node_ids:
+                            continue
+                        if not self._include_targets and tgt not in check_node_ids:
+                            continue
+
+                    if _filter_func(attr):
                         sources.append(src)
                         targets.append(tgt)
                         for k in data.keys():
