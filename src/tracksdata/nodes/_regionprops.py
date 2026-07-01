@@ -139,6 +139,9 @@ class RegionPropsNodes(BaseNodesOperator):
                 elif np.isscalar(value):
                     dtype = numpy_char_code_to_dtype(value.dtype) if hasattr(value, "dtype") else type(value)
                     graph.add_node_attr_key(key, dtype)
+                elif isinstance(value, dict):
+                    # struct-valued attributes, e.g. masks stored as `Mask.to_struct()`
+                    graph.add_node_attr_key(key, pl.Series([value]).dtype)
                 elif type(value).__module__ != "builtins":
                     graph.add_node_attr_key(key, pl.Object)
                 else:
@@ -306,7 +309,7 @@ class RegionPropsNodes(BaseNodesOperator):
                 else:
                     attrs[prop] = getattr(obj, prop)
 
-            attrs[DEFAULT_ATTR_KEYS.MASK] = Mask(obj.image, obj.bbox)
+            attrs[DEFAULT_ATTR_KEYS.MASK] = Mask(obj.image, obj.bbox).to_struct()
             attrs[DEFAULT_ATTR_KEYS.BBOX] = np.asarray(obj.bbox, dtype=int)
             attrs[DEFAULT_ATTR_KEYS.T] = t
 

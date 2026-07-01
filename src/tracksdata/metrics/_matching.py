@@ -144,6 +144,8 @@ class MaskMatching(Matching):
         tuple[list[int], list[int], list[int], list[int], list[float]]
             Matching data: mapped_ref, mapped_comp, rows, cols, weights (IoU values).
         """
+        # Local import: avoids the graph <-> nodes package import cycle.
+        from tracksdata.nodes._mask import as_mask
         from tracksdata.utils._dtypes import column_from_bytes
 
         # Handle serialized masks if needed
@@ -151,18 +153,18 @@ class MaskMatching(Matching):
             ref_group = column_from_bytes(ref_group, DEFAULT_ATTR_KEYS.MASK)
             comp_group = column_from_bytes(comp_group, DEFAULT_ATTR_KEYS.MASK)
 
+        # Materialize masks once, struct values decompress on conversion
+        ref_masks = [as_mask(m) for m in ref_group[DEFAULT_ATTR_KEYS.MASK]]
+        comp_masks = [as_mask(m) for m in comp_group[DEFAULT_ATTR_KEYS.MASK]]
+
         mapped_ref = []
         mapped_comp = []
         rows = []
         cols = []
         weights = []
 
-        for i, (ref_id, ref_mask) in enumerate(
-            zip(ref_group[reference_graph_key], ref_group[DEFAULT_ATTR_KEYS.MASK], strict=True)
-        ):
-            for j, (comp_id, comp_mask) in enumerate(
-                zip(comp_group[input_graph_key], comp_group[DEFAULT_ATTR_KEYS.MASK], strict=True)
-            ):
+        for i, (ref_id, ref_mask) in enumerate(zip(ref_group[reference_graph_key], ref_masks, strict=True)):
+            for j, (comp_id, comp_mask) in enumerate(zip(comp_group[input_graph_key], comp_masks, strict=True)):
                 # Intersection over reference is used to select the matches
                 inter = ref_mask.intersection(comp_mask)
                 ctc_score = inter / ref_mask.size

@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from copy import copy
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
 
@@ -10,9 +10,6 @@ from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.options import get_options
 from tracksdata.utils._dtypes import polars_dtype_to_numpy_dtype
-
-if TYPE_CHECKING:
-    from tracksdata.nodes._mask import Mask
 
 
 def _validate_shape(
@@ -346,14 +343,17 @@ class GraphArrayView(BaseReadOnlyArray):
         np.ndarray
             The filled buffer.
         """
+        # Local import: avoids the graph <-> nodes package import cycle (importing
+        # tracksdata.nodes re-enters the partially-initialized graph package).
+        from tracksdata.nodes._mask import as_mask
+
         subgraph = self._spatial_filter[(slice(time, time), *volume_slicing)]
         df = subgraph.node_attrs(
             attr_keys=[self._attr_key, DEFAULT_ATTR_KEYS.MASK],
         )
 
         for mask, value in zip(df[DEFAULT_ATTR_KEYS.MASK], df[self._attr_key], strict=True):
-            mask: Mask
-            mask.paint_buffer(buffer, value, offset=self._offset)
+            as_mask(mask).paint_buffer(buffer, value, offset=self._offset)
 
     def _offset_as_array(self, ndim: int) -> np.ndarray:
         """Normalize `offset` to a vector for each spatial axis."""
