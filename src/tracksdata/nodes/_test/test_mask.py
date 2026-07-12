@@ -1,7 +1,16 @@
 import numpy as np
 import pytest
 
-from tracksdata.nodes._mask import Mask, _nd_sphere
+from tracksdata.nodes._mask import (
+    Mask,
+    MaskCodec,
+    _nd_sphere,
+    _pack_mask_array,
+    _unpack_mask_array,
+    as_mask,
+    get_default_mask_codec,
+    set_default_mask_codec,
+)
 
 
 def test_mask_init() -> None:
@@ -601,3 +610,145 @@ def test_mask_move() -> None:
     mask.move(offset=np.asarray([-3, 2]), image_shape=(7, 7))
     np.testing.assert_array_equal(mask.bbox, [2, 4, 3, 5])
     np.testing.assert_array_equal(mask.mask, point)
+
+
+def test_mask_struct_dtype() -> None:
+    import polars as pl
+
+    dtype_2d = Mask.struct_dtype(2)
+    assert dtype_2d == pl.Struct(
+        {
+            "min_y": pl.Int64,
+            "min_x": pl.Int64,
+            "max_y": pl.Int64,
+            "max_x": pl.Int64,
+            "data": pl.Binary,
+        }
+    )
+
+    dtype_3d = Mask.struct_dtype(3)
+    assert [f.name for f in dtype_3d.fields] == [
+        "min_z",
+        "min_y",
+        "min_x",
+        "max_z",
+        "max_y",
+        "max_x",
+        "data",
+    ]
+
+    with pytest.raises(ValueError):
+        Mask.struct_dtype(4)
+
+
+@pytest.mark.parametrize("ndim", [2, 3])
+def test_mask_struct_roundtrip(ndim: int) -> None:
+    rng = np.random.default_rng(0)
+    shape = (3, 4, 5)[:ndim]
+    mask_data = rng.uniform(size=shape) > 0.5
+    bbox = np.concatenate([np.arange(1, ndim + 1), np.arange(1, ndim + 1) + shape])
+
+    mask = Mask(mask_data, bbox=bbox)
+    value = mask.to_struct()
+
+    assert isinstance(value, dict)
+    assert isinstance(value["data"], bytes)
+    assert value["min_y" if ndim == 2 else "min_z"] == 1
+
+    restored = Mask.from_struct(value)
+    assert restored == mask
+
+
+def test_as_mask() -> None:
+    mask = Mask(np.ones((2, 2), dtype=bool), bbox=np.array([0, 0, 2, 2]))
+
+    assert as_mask(mask) is mask
+    assert as_mask(mask.to_struct()) == mask
+
+    with pytest.raises(TypeError):
+        as_mask("not a mask")
+
+
+def test_mask_struct_attr_in_graph(graph_backend) -> None:
+    """Masks stored as struct attributes round-trip and are filterable by bbox fields."""
+
+    from tracksdata.attrs import NodeAttr
+    from tracksdata.constants import DEFAULT_ATTR_KEYS
+
+    graph = graph_backend
+    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, Mask.struct_dtype(2))
+
+    mask_a = Mask(np.ones((2, 2), dtype=bool), bbox=np.array([0, 0, 2, 2]))
+    mask_b = Mask(np.ones((2, 3), dtype=bool), bbox=np.array([5, 6, 7, 9]))
+
+    node_a = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, DEFAULT_ATTR_KEYS.MASK: mask_a.to_struct()})
+    node_b = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, DEFAULT_ATTR_KEYS.MASK: mask_b.to_struct()})
+
+    df = graph.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.MASK])
+    assert df[DEFAULT_ATTR_KEYS.MASK].dtype == Mask.struct_dtype(2)
+
+    restored = {n: as_mask(v) for n, v in zip(df[DEFAULT_ATTR_KEYS.NODE_ID], df[DEFAULT_ATTR_KEYS.MASK], strict=True)}
+    assert restored[node_a] == mask_a
+    assert restored[node_b] == mask_b
+
+    # filtering on a bbox field of the mask struct
+    filtered = graph.filter(NodeAttr(DEFAULT_ATTR_KEYS.MASK).struct.field("min_y") > 2).node_ids()
+    assert filtered == [node_b]
+
+
+@pytest.mark.parametrize("codec", list(MaskCodec))
+@pytest.mark.parametrize("ndim", [1, 2, 3])
+def test_pack_unpack_codec_roundtrip(codec: MaskCodec, ndim: int) -> None:
+    rng = np.random.default_rng(0)
+    shape = (7, 5, 4)[:ndim]
+    mask = rng.uniform(size=shape) > 0.5
+
+    packed = _pack_mask_array(mask, codec)
+    assert packed[0] == codec  # codec is tagged in the first byte
+    restored = _unpack_mask_array(packed)
+
+    assert restored.shape == mask.shape
+    np.testing.assert_array_equal(restored, mask)
+
+
+def test_codec_resolution_by_name_and_int() -> None:
+    mask = np.ones((3, 3), dtype=bool)
+    assert _unpack_mask_array(_pack_mask_array(mask, "packbits"))[0, 0]
+    assert _pack_mask_array(mask, "raw")[0] == MaskCodec.RAW
+    assert _pack_mask_array(mask, int(MaskCodec.BLOSC2))[0] == MaskCodec.BLOSC2
+
+    with pytest.raises(ValueError):
+        _pack_mask_array(mask, "nope")
+
+
+def test_default_mask_codec_switch() -> None:
+    original = get_default_mask_codec()
+    try:
+        set_default_mask_codec("packbits")
+        assert get_default_mask_codec() == MaskCodec.PACKBITS
+        # to_struct() with no explicit codec uses the default
+        mask = Mask(np.ones((4, 4), dtype=bool), bbox=np.array([0, 0, 4, 4]))
+        assert mask.to_struct()["data"][0] == MaskCodec.PACKBITS
+        # explicit codec overrides the default
+        assert mask.to_struct(codec="raw")["data"][0] == MaskCodec.RAW
+    finally:
+        set_default_mask_codec(original)
+
+
+def test_mixed_codecs_in_one_column_are_readable() -> None:
+    """A column may hold masks packed with different codecs; each stays readable."""
+    mask = np.array([[True, False], [True, True]], dtype=bool)
+    bbox = np.array([0, 0, 2, 2])
+    for codec in MaskCodec:
+        value = Mask(mask, bbox=bbox).to_struct(codec=codec)
+        assert as_mask(value) == Mask(mask, bbox=bbox)
+
+
+def test_raw_codec_mask_is_mutable_after_difference() -> None:
+    """RAW decodes to a read-only view; in-place difference must still work."""
+    a = Mask(np.ones((4, 4), dtype=bool), bbox=np.array([0, 0, 4, 4]))
+    decoded = as_mask(a.to_struct(codec="raw"))
+    other = Mask(np.ones((2, 2), dtype=bool), bbox=np.array([0, 0, 2, 2]))
+    decoded -= other  # would raise on a read-only array without the copy-on-write guard
+    assert not decoded.mask[0, 0]
+    assert decoded.mask[3, 3]

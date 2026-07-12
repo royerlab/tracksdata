@@ -12,7 +12,7 @@ from tracksdata.options import get_options
 from tracksdata.utils._dtypes import polars_dtype_to_numpy_dtype
 
 if TYPE_CHECKING:
-    from tracksdata.nodes._mask import Mask
+    pass
 
 
 def _validate_shape(
@@ -346,14 +346,15 @@ class GraphArrayView(BaseReadOnlyArray):
         np.ndarray
             The filled buffer.
         """
+        from tracksdata.nodes._mask import as_mask
+
         subgraph = self._spatial_filter[(slice(time, time), *volume_slicing)]
         df = subgraph.node_attrs(
             attr_keys=[self._attr_key, DEFAULT_ATTR_KEYS.MASK],
         )
 
         for mask, value in zip(df[DEFAULT_ATTR_KEYS.MASK], df[self._attr_key], strict=True):
-            mask: Mask
-            mask.paint_buffer(buffer, value, offset=self._offset)
+            as_mask(mask).paint_buffer(buffer, value, offset=self._offset)
 
     def _offset_as_array(self, ndim: int) -> np.ndarray:
         """Normalize `offset` to a vector for each spatial axis."""

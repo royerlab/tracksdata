@@ -1,6 +1,11 @@
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.edges._generic_edges import GenericFuncEdgeAttrs
-from tracksdata.nodes._mask import Mask
+from tracksdata.nodes._mask import Mask, as_mask
+
+
+def _mask_iou(source_mask: "Mask | dict", target_mask: "Mask | dict") -> float:
+    """IoU between two mask attribute values (struct dicts or `Mask` instances)."""
+    return as_mask(source_mask).iou(as_mask(target_mask))
 
 
 class IoUEdgeAttr(GenericFuncEdgeAttrs):
@@ -22,7 +27,7 @@ class IoUEdgeAttr(GenericFuncEdgeAttrs):
         mask_key: str = DEFAULT_ATTR_KEYS.MASK,
     ):
         super().__init__(
-            func=Mask.iou,
+            func=_mask_iou,
             attr_keys=mask_key,
             output_key=output_key,
         )

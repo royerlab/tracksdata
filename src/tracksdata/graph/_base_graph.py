@@ -1378,11 +1378,13 @@ class BaseGraph(abc.ABC):
             raise ValueError("iou_threshold must be between 0.0 and 1.0")
 
         def _estimate_overlaps(t: int) -> list[list[int, 2]]:
+            from tracksdata.nodes._mask import as_mask
+
             node_attrs = self.filter(NodeAttr(DEFAULT_ATTR_KEYS.T) == t).node_attrs(
                 attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.MASK],
             )
             node_ids = node_attrs[DEFAULT_ATTR_KEYS.NODE_ID].to_list()
-            masks = node_attrs[DEFAULT_ATTR_KEYS.MASK].to_list()
+            masks = [as_mask(m) for m in node_attrs[DEFAULT_ATTR_KEYS.MASK].to_list()]
             overlaps = []
             for i in range(len(masks)):
                 mask_i = masks[i]
@@ -1939,8 +1941,10 @@ class BaseGraph(abc.ABC):
         }
 
         if DEFAULT_ATTR_KEYS.MASK in node_attrs.columns:
+            from tracksdata.nodes._mask import as_mask
+
             node_dict[DEFAULT_ATTR_KEYS.MASK] = construct_var_len_props(
-                [mask.mask.astype(np.uint64) for mask in node_attrs[DEFAULT_ATTR_KEYS.MASK]]
+                [as_mask(mask).mask.astype(np.uint64) for mask in node_attrs[DEFAULT_ATTR_KEYS.MASK]]
             )
 
         edge_dict = {k: {"values": column_to_numpy(v), "missing": None} for k, v in edge_attrs.to_dict().items()}

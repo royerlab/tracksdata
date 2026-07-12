@@ -422,7 +422,7 @@ class SQLFilter(BaseFilter):
                 schema_overrides=self._graph._polars_schema_override(table),
             )
 
-        df = unpickle_bytes_columns(df)
+        df = unpickle_bytes_columns(df, self._graph._pickled_physical_columns(table))
         return self._graph._cast_columns(table, df)
 
     def _query_from_attr_keys(
@@ -656,6 +656,11 @@ class SQLGraph(BaseGraph):
         self._engine_kwargs = engine_kwargs if engine_kwargs is not None else {}
         self._engine = sa.create_engine(self._url, **self._engine_kwargs)
 
+        # Initialized before `_define_schema`, which (when reloading an existing
+        # database) reads the attribute schemas to restore pickle column types.
+        self._node_attr_schemas_cache: dict | None = None
+        self._edge_attr_schemas_cache: dict | None = None
+
         # Create unique classes for this instance
         self._define_schema(overwrite=overwrite)
 
@@ -666,8 +671,6 @@ class SQLGraph(BaseGraph):
 
         self._max_id_per_time = {}
         self._update_max_id_per_time()
-        self._node_attr_schemas_cache: dict | None = None
-        self._edge_attr_schemas_cache: dict | None = None
 
     def supports_custom_indices(self) -> bool:
         return True
@@ -686,8 +689,6 @@ class SQLGraph(BaseGraph):
             pass
 
         if len(metadata.tables) > 0 and not overwrite:
-            for table in metadata.tables.values():
-                self._restore_pickled_column_types(table)
             for table_name, table in metadata.tables.items():
                 cls = type(
                     table_name,
@@ -699,6 +700,10 @@ class SQLGraph(BaseGraph):
                 )
                 setattr(self, table_name, cls)
             self.Base = Base
+            # Restore pickle column types only after the ORM classes exist, so
+            # `_pickled_physical_columns` can read the stored attribute schemas.
+            for table_name in metadata.tables:
+                self._restore_pickled_column_types(getattr(self, table_name))
             return
 
         class Node(Base):
@@ -794,7 +799,37 @@ class SQLGraph(BaseGraph):
 
     @staticmethod
     def _is_pickled_sql_type(column_type: TypeEngine) -> bool:
-        return isinstance(column_type, sa.PickleType | sa.LargeBinary)
+        """Whether a SQL column stores pickled Python objects.
+
+        Only ``PickleType`` columns are pickled. Plain ``LargeBinary`` columns
+        hold raw bytes (e.g. the blosc2-compressed Mask ``data`` leaf) and must
+        not be unpickled. After reflection both report as ``LargeBinary``, so
+        :meth:`_restore_pickled_column_types` re-tags the genuinely-pickled ones
+        as ``PickleType`` before this check is used.
+        """
+        return isinstance(column_type, sa.PickleType)
+
+    def _pickled_physical_columns(self, table_class: type[DeclarativeBase]) -> list[str]:
+        """Physical column names whose values are pickled (vs stored natively)."""
+        return [col.name for col in table_class.__table__.columns if self._is_pickled_sql_type(col.type)]
+
+    def _raw_binary_physical_columns(self, table_class: type[DeclarativeBase]) -> set[str]:
+        """Physical column names that hold raw ``pl.Binary`` bytes (never pickled).
+
+        These are the only blob columns left as ``LargeBinary`` after reflection;
+        every other blob column is re-tagged as ``PickleType``.
+        """
+        raw: set[str] = set()
+        for key, schema in self._attr_schemas_for_table(table_class).items():
+            if isinstance(schema.dtype, pl.Struct):
+                raw.update(
+                    flat_col
+                    for flat_col, leaf_dtype in flatten_struct_dtype(key, schema.dtype)
+                    if leaf_dtype == pl.Binary
+                )
+            elif schema.dtype == pl.Binary:
+                raw.add(key)
+        return raw
 
     @property
     def __node_attr_schemas(self) -> dict[str, AttrSchema]:
@@ -840,9 +875,20 @@ class SQLGraph(BaseGraph):
         self._private_metadata[self._PRIVATE_SQL_EDGE_SCHEMA_STORE_KEY] = encoded_schemas
         self._edge_attr_schemas_cache = None
 
-    def _restore_pickled_column_types(self, table: sa.Table) -> None:
-        for column in table.columns:
-            if isinstance(column.type, sa.LargeBinary):
+    def _restore_pickled_column_types(self, table_class: type[DeclarativeBase]) -> None:
+        """Restore ``PickleType`` on reflected pickle columns.
+
+        Reflection reports every blob column as ``LargeBinary``, losing the
+        distinction between genuinely-pickled columns and raw-binary ones. We
+        consult the stored schema (via :meth:`_pickled_physical_columns`) and
+        only re-tag the pickled ones, leaving raw-binary columns (e.g. the Mask
+        ``data`` leaf) as ``LargeBinary`` so writes store their bytes directly.
+        """
+        if table_class.__tablename__ not in (self.Node.__tablename__, self.Edge.__tablename__):
+            return
+        raw_binary = self._raw_binary_physical_columns(table_class)
+        for column in table_class.__table__.columns:
+            if isinstance(column.type, sa.LargeBinary) and column.name not in raw_binary:
                 column.type = sa.PickleType()
 
     def _polars_schema_override(self, table_class: type[DeclarativeBase]) -> SchemaDict:
@@ -1357,7 +1403,7 @@ class SQLGraph(BaseGraph):
                     filter_node_ids,
                     self.Node,
                 )
-            node_df = unpickle_bytes_columns(node_df)
+            node_df = unpickle_bytes_columns(node_df, self._pickled_physical_columns(self.Node))
             node_df = self._cast_columns(self.Node, node_df)
 
         if single_node:
@@ -1550,7 +1596,7 @@ class SQLGraph(BaseGraph):
                 connection=session.connection(),
                 schema_overrides=self._polars_schema_override(self.Node),
             )
-            nodes_df = unpickle_bytes_columns(nodes_df)
+            nodes_df = unpickle_bytes_columns(nodes_df, self._pickled_physical_columns(self.Node))
             nodes_df = self._cast_columns(self.Node, nodes_df)
 
         # Select using logical keys (struct columns are now reconstructed).
@@ -1596,7 +1642,7 @@ class SQLGraph(BaseGraph):
                 connection=session.connection(),
                 schema_overrides=self._polars_schema_override(self.Edge),
             )
-            edges_df = unpickle_bytes_columns(edges_df)
+            edges_df = unpickle_bytes_columns(edges_df, self._pickled_physical_columns(self.Edge))
             edges_df = self._cast_columns(self.Edge, edges_df)
 
         if unpack:
