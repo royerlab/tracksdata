@@ -1,6 +1,7 @@
 """Matplotlib-based plotting utilities for lineage trees."""
 
-from collections.abc import Mapping, Sequence
+import warnings
+from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
@@ -15,6 +16,34 @@ if TYPE_CHECKING:
     from matplotlib.colors import Colormap, Normalize
 
 __all__ = ["plot_lineage_tree"]
+
+
+def _resolve_color_values(raw: list) -> tuple[Any, bool]:
+    """
+    Interpret per-node color-callable outputs as either scalars or literal colors.
+
+    Parameters
+    ----------
+    raw : list
+        One value per node, as returned by a `color` callable.
+
+    Returns
+    -------
+    tuple[Any, bool]
+        `(values, is_scalar)`. If the outputs form a 1-D numeric array,
+        `values` is that array and `is_scalar` is True, so they are mapped
+        through a colormap (and support a colorbar). Otherwise `values` is
+        the original list of literal colors (names, hex, or RGB(A) tuples)
+        and `is_scalar` is False.
+    """
+    try:
+        arr = np.asarray(raw, dtype=float)
+    except (ValueError, TypeError):
+        return list(raw), False
+    if arr.ndim == 1:
+        return arr, True
+    # (N, 3) or (N, 4): literal RGB(A) colors, not colormap-able scalars
+    return list(raw), False
 
 
 def _tracklet_tree_layout(tracklet_graph: rx.PyDiGraph) -> dict[int, float]:
@@ -202,13 +231,17 @@ def plot_lineage_tree(
     *,
     ax: "Axes | None" = None,
     tracklet_id_key: str = DEFAULT_ATTR_KEYS.TRACKLET_ID,
-    color_attr: str | None = None,
+    color: "str | Callable[[Mapping[str, Any]], Any] | None" = None,
     cmap: "str | Colormap" = "viridis",
     color_norm: "Normalize | tuple[float, float] | None" = None,
-    size_attr: str | None = None,
+    size: "str | Callable[[Mapping[str, Any]], float] | float | None" = None,
     size_norm: tuple[float, float] | None = None,
     size_range: tuple[float, float] = (10.0, 100.0),
     node_size: float = 30.0,
+    marker: "str | Callable[[Mapping[str, Any]], str] | None" = None,
+    text: "str | Callable[[Mapping[str, Any]], Any] | None" = None,
+    text_kwargs: dict[str, Any] | None = None,
+    attrs: Sequence[str] | None = None,
     time_range: tuple[int, int] | None = None,
     time_points: Sequence[int] | None = None,
     time_positions: "Mapping[int, float] | ArrayLike | None" = None,
@@ -225,6 +258,21 @@ def plot_lineage_tree(
     subset of time points is shown, each node is connected to its nearest
     displayed descendants, bridging over the hidden time points so the lineage
     stays connected.
+
+    The `color`, `size`, `marker`, and `text` aesthetics each accept either a
+    fixed value or a callable, which is the main way to customize the markers:
+
+    - As a string, `color`/`size`/`text` name a numeric node attribute, and
+      `marker` is a single matplotlib marker glyph applied to every node.
+    - As a callable, they receive each node's attribute row (a mapping of
+      attribute key to value) and return that node's color, size, marker glyph,
+      or text label. This allows categorical colors, per-node marker shapes,
+      and colors derived from a computed quantity (e.g. `np.log1p(row["area"])`).
+
+    A colorbar-compatible mapping is available whenever `color` produces numeric
+    values (a numeric attribute name, or a callable returning numbers) together
+    with `cmap`. If a callable returns literal colors (names, hex, or RGB(A)),
+    those colors are used verbatim and no colorbar mapping exists.
 
     Requires `matplotlib`, which is an optional dependency
     (`pip install "tracksdata[plot]"`).
@@ -245,23 +293,51 @@ def plot_lineage_tree(
         The key of the tracklet id node attribute. If the key does not exist,
         [BaseGraph.assign_tracklet_ids][tracksdata.graph.BaseGraph.assign_tracklet_ids]
         is called first.
-    color_attr : str | None, optional
-        Node attribute key bound to the marker colors. Must be numeric.
+    color : str | Callable | None, optional
+        Marker color. A string names a numeric node attribute mapped through
+        `cmap`/`color_norm` (a colorbar mapping is available). A callable
+        receives each node's attribute row and returns either a number (mapped
+        through `cmap`, colorbar available) or a literal color (used as-is, no
+        colorbar). If None, matplotlib's default color is used.
     cmap : str | Colormap, optional
-        Colormap used with `color_attr`.
+        Colormap used when `color` yields numeric values.
     color_norm : Normalize | tuple[float, float] | None, optional
-        Normalization for the colors, either a matplotlib `Normalize`
+        Normalization for numeric colors, either a matplotlib `Normalize`
         instance or a `(vmin, vmax)` tuple. If None, the data range is used.
-    size_attr : str | None, optional
-        Node attribute key bound to the marker sizes. Must be numeric.
+        A single shared normalization is applied across all marker groups.
+    size : str | Callable | float | None, optional
+        Marker size. A string names a numeric node attribute mapped into
+        `size_range`. A callable receives each node's attribute row and returns
+        the marker size in points**2 directly. A number sets a constant size.
+        If None, `node_size` is used.
     size_norm : tuple[float, float] | None, optional
         The `(vmin, vmax)` attribute values mapped to the limits of
-        `size_range`. If None, the data range is used.
+        `size_range`, used when `size` is an attribute name. If None, the data
+        range is used.
     size_range : tuple[float, float], optional
         The marker sizes in points**2 assigned to the smallest and largest
-        values of `size_attr`.
+        values when `size` is an attribute name.
     node_size : float, optional
-        Marker size in points**2 used when `size_attr` is None.
+        Marker size in points**2 used when `size` is None.
+    marker : str | Callable | None, optional
+        Marker shape. A string is a single matplotlib marker glyph (e.g. "s")
+        applied to every node. A callable receives each node's attribute row
+        and returns the marker glyph for that node; nodes are grouped by glyph
+        and drawn with one `Axes.scatter` call per group. If None, "o" is used.
+    text : str | Callable | None, optional
+        Per-node text label. A string names a node attribute whose value is
+        annotated at each node. A callable receives each node's attribute row
+        and returns the label. If None, no labels are drawn. Labels are drawn
+        per node and can clutter large trees.
+    text_kwargs : dict[str, Any] | None, optional
+        Additional keyword arguments forwarded to `Axes.annotate` for the text
+        labels (e.g. `fontsize`, `color`, `xytext`).
+    attrs : Sequence[str] | None, optional
+        Extra node attribute keys to load so the `color`/`size`/`marker`/`text`
+        callables can read them. If a callable is passed but `attrs` is None, a
+        warning is emitted and all node attributes are loaded, which may be slow
+        or memory-heavy (e.g. mask attributes). Ignored keys already loaded for
+        other reasons are harmless.
     time_range : tuple[int, int] | None, optional
         Inclusive `(start, end)` range of time points to display.
         If None, all time points are displayed. Mutually exclusive with
@@ -289,17 +365,46 @@ def plot_lineage_tree(
     Returns
     -------
     Axes
-        The matplotlib axes containing the lineage tree. The node
-        `PathCollection` is the last entry of `Axes.collections`, which
-        can be used to add a colorbar.
+        The matplotlib axes containing the lineage tree. When `color` yields
+        numeric values, the last node `PathCollection` in `Axes.collections`
+        is a colorbar-compatible mapping (all marker groups share the same
+        normalization and colormap).
 
     Examples
     --------
+    Continuous color and size from an attribute, with a colorbar:
+
     ```python
     from tracksdata.functional import plot_lineage_tree
 
-    ax = plot_lineage_tree(graph, color_attr="area", cmap="magma", size_attr="area")
+    ax = plot_lineage_tree(graph, color="area", cmap="magma", size="area")
     ax.figure.colorbar(ax.collections[-1], ax=ax, label="area")
+    ```
+
+    Color by a computed quantity (still colorbar-compatible) and shape markers
+    by a categorical attribute:
+
+    ```python
+    import numpy as np
+
+    ax = plot_lineage_tree(
+        graph,
+        color=lambda row: np.log1p(row["area"]),
+        marker=lambda row: "s" if row["is_dividing"] else "o",
+        attrs=["area", "is_dividing"],
+    )
+    ```
+
+    Categorical colors and per-node text labels:
+
+    ```python
+    palette = {"A": "tab:red", "B": "tab:blue"}
+    ax = plot_lineage_tree(
+        graph,
+        color=lambda row: palette[row["class"]],
+        text=lambda row: row["class"],
+        attrs=["class"],
+    )
     ```
 
     Display only a time window with timestamps in seconds:
@@ -309,16 +414,6 @@ def plot_lineage_tree(
         graph,
         time_range=(10, 20),
         time_positions={t: t * 30.0 for t in range(50)},
-    )
-    ```
-
-    Display an arbitrary subset of time points with styled marker borders:
-
-    ```python
-    ax = plot_lineage_tree(
-        graph,
-        time_points=[0, 5, 10, 15],
-        scatter_kwargs={"edgecolors": "black", "linewidths": 0.5},
     )
     ```
     """
@@ -338,13 +433,32 @@ def plot_lineage_tree(
     if tracklet_id_key not in graph.node_attr_keys():
         graph.assign_tracklet_ids(tracklet_id_key)
 
+    has_callable = any(callable(spec) for spec in (color, size, marker, text))
+
     attr_keys = [DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.T, tracklet_id_key]
-    for key in (color_attr, size_attr):
-        if key is None or key in attr_keys:
-            continue
-        if key not in graph.node_attr_keys():
-            raise ValueError(f"Attribute '{key}' not found in graph. Expected one of {graph.node_attr_keys()}")
-        attr_keys.append(key)
+    if has_callable and attrs is None:
+        warnings.warn(
+            "A `color`/`size`/`marker`/`text` callable was given without `attrs`; "
+            "loading all node attributes, which may be slow or memory-heavy "
+            "(e.g. mask attributes). Pass `attrs=[...]` to load only the keys the callables need.",
+            stacklevel=2,
+        )
+        for key in graph.node_attr_keys():
+            if key not in attr_keys:
+                attr_keys.append(key)
+    else:
+        # attribute names referenced directly (string aesthetics) plus any
+        # extra keys the callables need. `marker` as a string is a matplotlib
+        # glyph, not an attribute name, so it is not loaded.
+        requested = [spec for spec in (color, size, text) if isinstance(spec, str)]
+        if attrs is not None:
+            requested.extend(attrs)
+        for key in requested:
+            if key in attr_keys:
+                continue
+            if key not in graph.node_attr_keys():
+                raise ValueError(f"Attribute '{key}' not found in graph. Expected one of {graph.node_attr_keys()}")
+            attr_keys.append(key)
 
     if time_range is not None and time_points is not None:
         raise ValueError("`time_range` and `time_points` are mutually exclusive, provide at most one.")
@@ -396,19 +510,88 @@ def plot_lineage_tree(
     line_kwargs = {"color": "0.6", "linewidth": 1.0, "zorder": 1, **(line_kwargs or {})}
     ax.add_collection(LineCollection(segments, **line_kwargs))
 
-    scatter_kwargs = {"zorder": 2, **(scatter_kwargs or {})}
-    if color_attr is not None:
-        if isinstance(color_norm, tuple):
-            color_norm = Normalize(*color_norm)
-        scatter_kwargs["c"] = nodes_df[color_attr].to_numpy()
-        scatter_kwargs["cmap"] = cmap
-        scatter_kwargs["norm"] = color_norm
-    if size_attr is not None:
-        scatter_kwargs["s"] = _map_to_size_range(nodes_df[size_attr].to_numpy(), size_norm, size_range)
-    else:
-        scatter_kwargs.setdefault("s", node_size)
+    # per-node attribute rows, only materialized when a callable needs them
+    rows = list(nodes_df.iter_rows(named=True)) if has_callable else []
 
-    ax.scatter(x_coords, y_coords, **scatter_kwargs)
+    # resolve the color channel to values passed to scatter's `c`
+    color_values: Any = None
+    color_is_scalar = False
+    if color is not None:
+        if callable(color):
+            color_values, color_is_scalar = _resolve_color_values([color(row) for row in rows])
+        else:
+            color_values = nodes_df[color].to_numpy()
+            color_is_scalar = True
+
+    # a single shared normalization so colors are consistent across marker groups
+    norm: Normalize | None = None
+    if color_is_scalar:
+        if color_norm is None:
+            norm = Normalize(vmin=float(np.nanmin(color_values)), vmax=float(np.nanmax(color_values)))
+        elif isinstance(color_norm, tuple):
+            norm = Normalize(*color_norm)
+        else:
+            norm = color_norm
+
+    # resolve the size channel: attribute name -> mapped range, callable -> raw
+    # sizes, number -> constant, None -> node_size default
+    if size is None:
+        size_values: Any = None
+    elif callable(size):
+        size_values = np.asarray([size(row) for row in rows], dtype=float)
+    elif isinstance(size, str):
+        size_values = _map_to_size_range(nodes_df[size].to_numpy(), size_norm, size_range)
+    else:
+        size_values = float(size)
+
+    # resolve the marker channel: callable -> per-node glyphs (grouped), string
+    # -> single glyph, None -> "o"
+    if callable(marker):
+        marker_values = [marker(row) for row in rows]
+    else:
+        marker_values = None
+        single_marker = marker if isinstance(marker, str) else "o"
+
+    scatter_kwargs = {"zorder": 2, **(scatter_kwargs or {})}
+
+    def _scatter_group(idx: np.ndarray, marker_glyph: str) -> Any:
+        kwargs = dict(scatter_kwargs)
+        if color_is_scalar:
+            kwargs["c"] = color_values[idx]
+            kwargs["cmap"] = cmap
+            kwargs["norm"] = norm
+        elif color_values is not None:
+            kwargs["c"] = [color_values[i] for i in idx]
+        if size_values is None:
+            kwargs.setdefault("s", node_size)
+        elif np.isscalar(size_values):
+            kwargs.setdefault("s", size_values)
+        else:
+            kwargs["s"] = size_values[idx]
+        return ax.scatter(x_coords[idx], y_coords[idx], marker=marker_glyph, **kwargs)
+
+    if marker_values is None:
+        _scatter_group(np.arange(len(nodes_df)), single_marker)
+    else:
+        marker_arr = np.asarray(marker_values, dtype=object)
+        # one scatter call per distinct glyph (scatter accepts a single marker)
+        for glyph in dict.fromkeys(marker_values):
+            idx = np.nonzero(marker_arr == glyph)[0]
+            _scatter_group(idx, glyph)
+
+    if text is not None:
+        if callable(text):
+            labels = [text(row) for row in rows]
+        else:
+            labels = nodes_df[text].to_list()
+        annotate_kwargs = {
+            "fontsize": 8,
+            "xytext": (3.0, 0.0),
+            "textcoords": "offset points",
+            **(text_kwargs or {}),
+        }
+        for x, y, label in zip(x_coords, y_coords, labels, strict=True):
+            ax.annotate(str(label), (x, y), **annotate_kwargs)
 
     if orientation == "vertical":
         time_axis, tree_axis = ax.yaxis, ax.xaxis

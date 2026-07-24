@@ -82,10 +82,10 @@ def test_plot_lineage_tree_color_and_size() -> None:
 
     ax = plot_lineage_tree(
         graph,
-        color_attr="feature",
+        color="feature",
         cmap="magma",
         color_norm=(0.0, 10.0),
-        size_attr="feature",
+        size="feature",
         size_range=(10.0, 50.0),
     )
 
@@ -106,7 +106,7 @@ def test_plot_lineage_tree_size_norm() -> None:
     """Test explicit size normalization limits with clipping."""
     graph = _dividing_graph()
 
-    ax = plot_lineage_tree(graph, size_attr="feature", size_norm=(0.0, 2.0), size_range=(10.0, 50.0))
+    ax = plot_lineage_tree(graph, size="feature", size_norm=(0.0, 2.0), size_range=(10.0, 50.0))
 
     sizes = np.asarray(ax.collections[-1].get_sizes())
     feature = graph.node_attrs(attr_keys=["feature"])["feature"].to_numpy()
@@ -176,7 +176,7 @@ def test_plot_lineage_tree_edge_colors() -> None:
 
     ax = plot_lineage_tree(
         graph,
-        color_attr="feature",
+        color="feature",
         scatter_kwargs={"edgecolors": "red", "linewidths": 1.5},
     )
 
@@ -262,4 +262,137 @@ def test_plot_lineage_tree_errors() -> None:
         plot_lineage_tree(graph, time_range=(10, 20))
 
     with pytest.raises(ValueError, match="not found in graph"):
-        plot_lineage_tree(graph, color_attr="does_not_exist")
+        plot_lineage_tree(graph, color="does_not_exist")
+
+
+def test_plot_lineage_tree_color_callable_scalar() -> None:
+    """A color callable returning numbers is colormap-mapped and colorbar-compatible."""
+    graph = _dividing_graph()
+
+    ax = plot_lineage_tree(
+        graph,
+        color=lambda row: 2.0 * row["feature"],
+        cmap="magma",
+        attrs=["feature"],
+    )
+
+    scatter = ax.collections[-1]
+    feature = graph.node_attrs(attr_keys=["feature"])["feature"].to_numpy()
+    # numeric callable output feeds scatter's color array -> colorbar mapping exists
+    assert scatter.get_array() is not None
+    np.testing.assert_array_equal(np.asarray(scatter.get_array()), 2.0 * feature)
+    assert scatter.get_cmap().name == "magma"
+
+
+def test_plot_lineage_tree_color_callable_categorical() -> None:
+    """A color callable returning literal colors is used verbatim (no colorbar)."""
+    graph = _dividing_graph()
+
+    ax = plot_lineage_tree(
+        graph,
+        color=lambda row: "red" if row["feature"] < 3.0 else "blue",
+        attrs=["feature"],
+    )
+
+    scatter = ax.collections[-1]
+    # literal colors -> no scalar mapping
+    assert scatter.get_array() is None
+    feature = graph.node_attrs(attr_keys=["feature"])["feature"].to_numpy()
+    facecolors = scatter.get_facecolors()
+    red = np.array([1.0, 0.0, 0.0, 1.0])
+    blue = np.array([0.0, 0.0, 1.0, 1.0])
+    expected = np.where((feature < 3.0)[:, None], red, blue)
+    np.testing.assert_allclose(facecolors, expected)
+
+
+def test_plot_lineage_tree_size_callable() -> None:
+    """A size callable returns marker sizes directly."""
+    graph = _dividing_graph()
+
+    ax = plot_lineage_tree(graph, size=lambda row: 5.0 + row["feature"], attrs=["feature"])
+
+    sizes = np.asarray(ax.collections[-1].get_sizes())
+    feature = graph.node_attrs(attr_keys=["feature"])["feature"].to_numpy()
+    np.testing.assert_allclose(sizes, 5.0 + feature)
+
+
+def test_plot_lineage_tree_size_constant() -> None:
+    """A numeric size sets a constant marker size."""
+    graph = _dividing_graph()
+
+    ax = plot_lineage_tree(graph, size=42.0)
+
+    sizes = np.asarray(ax.collections[-1].get_sizes())
+    np.testing.assert_allclose(sizes, [42.0])
+
+
+def test_plot_lineage_tree_marker_callable_groups() -> None:
+    """A marker callable groups nodes by glyph into one scatter call each."""
+    graph = _dividing_graph()
+
+    ax = plot_lineage_tree(
+        graph,
+        marker=lambda row: "s" if row["feature"] < 3.0 else "^",
+        attrs=["feature"],
+    )
+
+    # one LineCollection for edges + one PathCollection per distinct glyph
+    scatters = ax.collections[1:]
+    assert len(scatters) == 2
+    total = sum(len(s.get_offsets()) for s in scatters)
+    assert total == graph.num_nodes()
+
+
+def test_plot_lineage_tree_marker_single_glyph() -> None:
+    """A marker string applies a single glyph to every node in one scatter call."""
+    graph = _dividing_graph()
+
+    ax = plot_lineage_tree(graph, marker="s")
+
+    _lines, scatter = ax.collections
+    assert len(scatter.get_offsets()) == graph.num_nodes()
+
+
+def test_plot_lineage_tree_marker_and_color_share_norm() -> None:
+    """Marker groups share one normalization so colors stay consistent and colorbar-compatible."""
+    graph = _dividing_graph()
+
+    ax = plot_lineage_tree(
+        graph,
+        color="feature",
+        color_norm=(0.0, 10.0),
+        marker=lambda row: "s" if row["feature"] < 3.0 else "^",
+        attrs=["feature"],
+    )
+
+    scatters = ax.collections[1:]
+    assert len(scatters) == 2
+    for scatter in scatters:
+        assert scatter.norm.vmin == 0.0
+        assert scatter.norm.vmax == 10.0
+        assert scatter.get_cmap().name == "viridis"
+
+
+def test_plot_lineage_tree_text() -> None:
+    """Text labels are annotated per node, from an attribute name or a callable."""
+    graph = _dividing_graph()
+
+    ax = plot_lineage_tree(graph, text="feature")
+    texts = {t.get_text() for t in ax.texts}
+    assert len(ax.texts) == graph.num_nodes()
+    assert "0.0" in texts
+
+    _, ax2 = plt.subplots()
+    plot_lineage_tree(graph, ax=ax2, text=lambda row: f"n{row['feature']:.0f}", attrs=["feature"])
+    labels = {t.get_text() for t in ax2.texts}
+    assert "n0" in labels and "n5" in labels
+
+
+def test_plot_lineage_tree_callable_without_attrs_warns() -> None:
+    """A callable without `attrs` warns and still plots by loading all attributes."""
+    graph = _dividing_graph()
+
+    with pytest.warns(UserWarning, match="loading all node attributes"):
+        ax = plot_lineage_tree(graph, color=lambda row: row["feature"])
+
+    assert len(ax.collections[-1].get_offsets()) == graph.num_nodes()
