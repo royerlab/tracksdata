@@ -62,9 +62,11 @@ dependencies = [
 [project.optional-dependencies]
 spatial = ["spatial-graph"]
 motile = ["motile"]
+plot = ["matplotlib"]
 test = [
   "spatial-graph",
   "motile",
+  "matplotlib",
   "pytest>=7.0",
   "pytest-cov",
   "pytest-html",
