@@ -119,7 +119,7 @@ def test_crop_func_attrs_function_with_frames() -> None:
 
     def intensity_sum(frame: NDArray, mask: Mask) -> float:
         cropped = mask_crop(mask, frame)
-        return float(np.sum(cropped[mask["mask"]]))
+        return float(np.sum(cropped[mask.mask]))
 
     # Register output key before using operator
     graph.add_node_attr_key("intensity_sum", dtype=pl.Float64)
@@ -176,7 +176,7 @@ def test_crop_func_attrs_function_with_frames_and_attrs() -> None:
 
     def intensity_sum_times_multiplier(frame: NDArray, mask: Mask, multiplier: float) -> float:
         cropped = mask_crop(mask, frame)
-        return float(np.sum(cropped[mask["mask"]]) * multiplier)
+        return float(np.sum(cropped[mask.mask]) * multiplier)
 
     # Register output key before using operator
     graph.add_node_attr_key("weighted_intensity", dtype=pl.Float64)
@@ -292,7 +292,7 @@ def test_crop_func_attrs_error_handling_missing_attr_key() -> None:
     graph.add_node({DEFAULT_ATTR_KEYS.T: 0, DEFAULT_ATTR_KEYS.MASK: mask})
 
     def double_mask_sum(mask: Mask) -> float:
-        return float(np.sum(mask["mask"])) * 2.0
+        return float(np.sum(mask.mask)) * 2.0
 
     # Create operator with output key that is not registered
     operator = GenericFuncNodeAttrs(
@@ -335,7 +335,7 @@ def test_crop_func_attrs_function_with_frames_multiprocessing(n_workers: int) ->
 
     def intensity_sum(frame: NDArray, mask: Mask) -> float:
         cropped = mask_crop(mask, frame)
-        return float(np.sum(cropped[mask["mask"]]))
+        return float(np.sum(cropped[mask.mask]))
 
     # Register output key before using operator
     graph.add_node_attr_key("intensity_sum", dtype=pl.Float64)
@@ -466,7 +466,7 @@ def test_crop_func_attrs_batch_processing_with_frames() -> None:
         results = []
         for m in mask:
             cropped = mask_crop(m, frame)
-            results.append(float(np.sum(cropped[m["mask"]])))
+            results.append(float(np.sum(cropped[m.mask])))
         return results
 
     # Register output key before using operator

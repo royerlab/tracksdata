@@ -7,7 +7,7 @@ import pytest
 import tracksdata as td
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.functional import shift_division
-from tracksdata.nodes._mask import Mask, mask_equal
+from tracksdata.nodes._mask import Mask
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -704,16 +704,16 @@ def test_shift_division_ahead_mask() -> None:
 
     merged_id = result.successors(ids["d"])[0]
     merged_mask = result.nodes[merged_id][DEFAULT_ATTR_KEYS.MASK]
-    assert isinstance(merged_mask, dict)
+    assert isinstance(merged_mask, Mask)
 
     # Non-numeric fallback → first child's mask
     first_child = g.successors(ids["d"])[0]
     expected_mask = masks["c1"] if first_child == ids["c1"] else masks["c2"]
-    assert mask_equal(merged_mask, expected_mask)
+    assert merged_mask == expected_mask
 
     # p and d are untouched
-    assert mask_equal(result.nodes[ids["p"]][DEFAULT_ATTR_KEYS.MASK], masks["p"])
-    assert mask_equal(result.nodes[ids["d"]][DEFAULT_ATTR_KEYS.MASK], masks["d"])
+    assert result.nodes[ids["p"]][DEFAULT_ATTR_KEYS.MASK] == masks["p"]
+    assert result.nodes[ids["d"]][DEFAULT_ATTR_KEYS.MASK] == masks["d"]
 
 
 def test_shift_division_behind_mask() -> None:
@@ -732,9 +732,9 @@ def test_shift_division_behind_mask() -> None:
     # Each replacement node carries its respective child's mask
     got_masks = [result.nodes[nc][DEFAULT_ATTR_KEYS.MASK] for nc in new_children]
     expected_masks = [masks["c1"], masks["c2"]]
-    assert all(any(mask_equal(g, e) for e in expected_masks) for g in got_masks)
-    assert all(any(mask_equal(e, g) for g in got_masks) for e in expected_masks)
+    assert all(any(g == e for e in expected_masks) for g in got_masks)
+    assert all(any(e == g for g in got_masks) for e in expected_masks)
 
     # c1 and c2 are untouched
-    assert mask_equal(result.nodes[ids["c1"]][DEFAULT_ATTR_KEYS.MASK], masks["c1"])
-    assert mask_equal(result.nodes[ids["c2"]][DEFAULT_ATTR_KEYS.MASK], masks["c2"])
+    assert result.nodes[ids["c1"]][DEFAULT_ATTR_KEYS.MASK] == masks["c1"]
+    assert result.nodes[ids["c2"]][DEFAULT_ATTR_KEYS.MASK] == masks["c2"]

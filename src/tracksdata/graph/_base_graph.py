@@ -1946,7 +1946,7 @@ class BaseGraph(abc.ABC):
             from tracksdata.nodes._mask import masks_from_column
 
             node_dict[DEFAULT_ATTR_KEYS.MASK] = construct_var_len_props(
-                [mask["mask"].astype(bool) for mask in masks_from_column(node_attrs[DEFAULT_ATTR_KEYS.MASK])]
+                [mask.mask.astype(bool) for mask in masks_from_column(node_attrs[DEFAULT_ATTR_KEYS.MASK])]
             )
 
         edge_dict = {k: {"values": column_to_numpy(v), "missing": None} for k, v in edge_attrs.to_dict().items()}

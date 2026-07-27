@@ -1,3 +1,5 @@
+from dataclasses import FrozenInstanceError
+
 import numpy as np
 import polars as pl
 import pytest
@@ -8,7 +10,6 @@ from tracksdata.nodes._mask import (
     mask_bbox_struct_fields,
     mask_crop,
     mask_dilate,
-    mask_equal,
     mask_from_coordinates,
     mask_from_struct,
     mask_indices,
@@ -22,7 +23,6 @@ from tracksdata.nodes._mask import (
     mask_subtract,
     mask_to_struct,
     mask_union,
-    mask_validate,
     masks_from_column,
 )
 
@@ -33,25 +33,34 @@ def test_mask_init() -> None:
     bbox = np.array([0, 0, 2, 2])
 
     mask = Mask(bbox=bbox, mask=mask_array)
-    assert np.array_equal(mask["mask"], mask_array)
-    assert np.array_equal(mask["bbox"], bbox)
+    assert np.array_equal(mask.mask, mask_array)
+    assert np.array_equal(mask.bbox, bbox)
 
 
-def test_mask_validate() -> None:
-    """`mask_validate` should reject bboxes that disagree with the binary array."""
+def test_mask_validates_on_construction() -> None:
+    """`Mask` should reject bboxes that disagree with the binary array."""
     mask_array = np.array([[True, False], [False, True]], dtype=bool)
 
     # bbox with the wrong number of dimensions
     with pytest.raises(ValueError, match="does not match bbox dimension"):
-        mask_validate(Mask(bbox=np.array([0, 0, 0, 2, 2, 2]), mask=mask_array))
+        Mask(bbox=np.array([0, 0, 0, 2, 2, 2]), mask=mask_array)
 
     # bbox of the right dimension but the wrong size
     with pytest.raises(ValueError, match="does not match bbox size"):
-        mask_validate(Mask(bbox=np.array([0, 0, 3, 3]), mask=mask_array))
+        Mask(bbox=np.array([0, 0, 3, 3]), mask=mask_array)
 
-    validated = mask_validate(Mask(bbox=[0, 0, 2, 2], mask=mask_array))
-    assert validated["bbox"].dtype == np.int64
-    np.testing.assert_array_equal(validated["bbox"], [0, 0, 2, 2])
+    # bbox is normalized to an int64 array
+    mask = Mask(bbox=[0, 0, 2, 2], mask=mask_array)
+    assert mask.bbox.dtype == np.int64
+    np.testing.assert_array_equal(mask.bbox, [0, 0, 2, 2])
+
+
+def test_mask_is_frozen() -> None:
+    """Masks are immutable, so the geometry functions cannot alias their input."""
+    mask = Mask(bbox=np.array([0, 0, 2, 2]), mask=np.ones((2, 2), dtype=bool))
+
+    with pytest.raises(FrozenInstanceError):
+        mask.bbox = np.array([1, 1, 3, 3])
 
 
 def test_mask_regionprops_spacing_aware() -> None:
@@ -403,8 +412,8 @@ def test_mask_union_overlapping() -> None:
         dtype=bool,
     )
 
-    assert np.array_equal(union["bbox"], expected_bbox)
-    assert np.array_equal(union["mask"], expected_mask)
+    assert np.array_equal(union.bbox, expected_bbox)
+    assert np.array_equal(union.mask, expected_mask)
 
 
 def test_mask_union_disjoint() -> None:
@@ -423,18 +432,18 @@ def test_mask_union_disjoint() -> None:
     expected_mask[:2, :2] = True
     expected_mask[3, 3] = True
 
-    assert np.array_equal(union["bbox"], expected_bbox)
-    assert np.array_equal(union["mask"], expected_mask)
-    assert mask_equal(union, reverse_union)
+    assert np.array_equal(union.bbox, expected_bbox)
+    assert np.array_equal(union.mask, expected_mask)
+    assert union == reverse_union
 
 
 def test_mask_equal() -> None:
-    """`mask_equal` compares both the bbox and the binary array."""
+    """`==` compares both the bbox and the binary array."""
     mask = Mask(bbox=np.array([0, 0, 2, 2]), mask=np.ones((2, 2), dtype=bool))
 
-    assert mask_equal(mask, Mask(bbox=np.array([0, 0, 2, 2]), mask=np.ones((2, 2), dtype=bool)))
-    assert not mask_equal(mask, Mask(bbox=np.array([1, 1, 3, 3]), mask=np.ones((2, 2), dtype=bool)))
-    assert not mask_equal(mask, Mask(bbox=np.array([0, 0, 2, 2]), mask=np.zeros((2, 2), dtype=bool)))
+    assert mask == (Mask(bbox=np.array([0, 0, 2, 2]), mask=np.ones((2, 2), dtype=bool)))
+    assert mask != (Mask(bbox=np.array([1, 1, 3, 3]), mask=np.ones((2, 2), dtype=bool)))
+    assert mask != (Mask(bbox=np.array([0, 0, 2, 2]), mask=np.zeros((2, 2), dtype=bool)))
 
 
 def test_mask_empty() -> None:
@@ -501,10 +510,10 @@ def test_mask_from_coordinates_2d_basic() -> None:
     radius = 2
     mask = mask_from_coordinates(center, radius)
     # Should be a disk of radius 2, shape (5,5), centered at (5,5)
-    assert mask["mask"].shape == (5, 5)
-    assert mask["mask"][2, 2]  # center pixel is True
-    assert mask["mask"].dtype == bool
-    np.testing.assert_array_equal(mask["bbox"], [3, 3, 8, 8])
+    assert mask.mask.shape == (5, 5)
+    assert mask.mask[2, 2]  # center pixel is True
+    assert mask.mask.dtype == bool
+    np.testing.assert_array_equal(mask.bbox, [3, 3, 8, 8])
 
 
 def test_mask_from_coordinates_3d_basic() -> None:
@@ -513,9 +522,9 @@ def test_mask_from_coordinates_3d_basic() -> None:
     radius = 1
     mask = mask_from_coordinates(center, radius)
     # Should be a ball of radius 1, shape (3,3,3), centered at (4,5,6)
-    assert mask["mask"].shape == (3, 3, 3)
-    assert mask["mask"][1, 1, 1]  # center voxel is True
-    np.testing.assert_array_equal(mask["bbox"], [3, 4, 5, 6, 7, 8])
+    assert mask.mask.shape == (3, 3, 3)
+    assert mask.mask[1, 1, 1]  # center voxel is True
+    np.testing.assert_array_equal(mask.bbox, [3, 4, 5, 6, 7, 8])
 
 
 def test_mask_from_coordinates_cropping() -> None:
@@ -528,10 +537,10 @@ def test_mask_from_coordinates_cropping() -> None:
 
     # Mask shape should match the bbox size
     expected_shape = (4, 3)
-    assert mask["mask"].shape == expected_shape
+    assert mask.mask.shape == expected_shape
 
     # Mask should be cropped to fit within image bounds
-    np.testing.assert_array_equal(mask["bbox"], [0, 0, 4, 3])
+    np.testing.assert_array_equal(mask.bbox, [0, 0, 4, 3])
 
 
 def test_mask_simple_difference() -> None:
@@ -543,11 +552,11 @@ def test_mask_simple_difference() -> None:
     mask2 = Mask(bbox=np.asarray([0, 0, 0, 1, 2, 2]), mask=mask2_array)
 
     diff = mask_subtract(mask1, mask2)
-    np.testing.assert_array_equal(diff["mask"], np.asarray([[[False, True], [False, False]]], dtype=bool))
-    np.testing.assert_array_equal(diff["bbox"], np.asarray([0, 0, 0, 1, 2, 2]))
+    np.testing.assert_array_equal(diff.mask, np.asarray([[[False, True], [False, False]]], dtype=bool))
+    np.testing.assert_array_equal(diff.bbox, np.asarray([0, 0, 0, 1, 2, 2]))
 
     # the input masks are left untouched
-    np.testing.assert_array_equal(mask1["mask"], mask1_array)
+    np.testing.assert_array_equal(mask1.mask, mask1_array)
 
 
 def test_mask_difference_no_overlap() -> None:
@@ -559,8 +568,8 @@ def test_mask_difference_no_overlap() -> None:
     mask2 = Mask(bbox=np.asarray([0, 0, 0, 1, 2, 2]), mask=mask2_array)
 
     diff = mask_subtract(mask1, mask2)
-    np.testing.assert_array_equal(diff["mask"], mask1_array)
-    np.testing.assert_array_equal(diff["bbox"], np.asarray([0, 0, 0, 1, 2, 2]))
+    np.testing.assert_array_equal(diff.mask, mask1_array)
+    np.testing.assert_array_equal(diff.bbox, np.asarray([0, 0, 0, 1, 2, 2]))
 
 
 def test_mask_difference_complex_overlap() -> None:
@@ -571,15 +580,15 @@ def test_mask_difference_complex_overlap() -> None:
     mask2 = Mask(bbox=np.asarray([1, 4, 4, 2, 6, 6]), mask=mask2_array)
 
     diff = mask_subtract(mask1, mask2)
-    np.testing.assert_array_equal(diff["mask"], np.asarray([[[True, True], [True, False]]], dtype=bool))
-    np.testing.assert_array_equal(diff["bbox"], np.asarray([1, 3, 3, 2, 5, 5]))
+    np.testing.assert_array_equal(diff.mask, np.asarray([[[True, True], [True, False]]], dtype=bool))
+    np.testing.assert_array_equal(diff.bbox, np.asarray([1, 3, 3, 2, 5, 5]))
 
     # identical to mask1 checking reverse overlap
     mask3 = Mask(bbox=np.asarray([1, 3, 3, 2, 5, 5]), mask=mask1_array)
     reverse_diff = mask_subtract(mask2, mask3)
 
-    np.testing.assert_array_equal(reverse_diff["mask"], np.asarray([[[False, True], [True, True]]], dtype=bool))
-    np.testing.assert_array_equal(reverse_diff["bbox"], np.asarray([1, 4, 4, 2, 6, 6]))
+    np.testing.assert_array_equal(reverse_diff.mask, np.asarray([[[False, True], [True, True]]], dtype=bool))
+    np.testing.assert_array_equal(reverse_diff.bbox, np.asarray([1, 4, 4, 2, 6, 6]))
 
 
 def test_dilation_simple() -> None:
@@ -589,14 +598,14 @@ def test_dilation_simple() -> None:
 
     dilated = mask_dilate(mask, radius=2)
 
-    np.testing.assert_array_equal(dilated["bbox"], [3, 3, 8, 8])
+    np.testing.assert_array_equal(dilated.bbox, [3, 3, 8, 8])
     np.testing.assert_array_equal(
-        dilated["mask"],
+        dilated.mask,
         _nd_sphere(2, 2),
     )
 
     # the input mask is left untouched
-    np.testing.assert_array_equal(mask["bbox"], [5, 5, 6, 6])
+    np.testing.assert_array_equal(mask.bbox, [5, 5, 6, 6])
 
 
 def test_dilation_on_border() -> None:
@@ -607,9 +616,9 @@ def test_dilation_on_border() -> None:
     mask = Mask(bbox=bbox, mask=point)
     dilated = mask_dilate(mask, radius=2, image_shape=(7, 7))
 
-    np.testing.assert_array_equal(dilated["bbox"], [0, 0, 3, 3])
+    np.testing.assert_array_equal(dilated.bbox, [0, 0, 3, 3])
     np.testing.assert_array_equal(
-        dilated["mask"],
+        dilated.mask,
         _nd_sphere(2, 2)[2:, 2:],
     )
 
@@ -618,9 +627,9 @@ def test_dilation_on_border() -> None:
 
     # right overhang
     dilated = mask_dilate(mask, radius=2, image_shape=(7, 7))
-    np.testing.assert_array_equal(dilated["bbox"], [4, 4, 7, 7])
+    np.testing.assert_array_equal(dilated.bbox, [4, 4, 7, 7])
     np.testing.assert_array_equal(
-        dilated["mask"],
+        dilated.mask,
         _nd_sphere(2, 2)[:-2, :-2],
     )
 
@@ -631,15 +640,15 @@ def test_mask_move() -> None:
     mask = Mask(bbox=bbox, mask=point)
 
     moved = mask_move(mask, offset=np.asarray([5, 2]), image_shape=(7, 7))
-    np.testing.assert_array_equal(moved["bbox"], [5, 2, 6, 3])
-    np.testing.assert_array_equal(moved["mask"], point)
+    np.testing.assert_array_equal(moved.bbox, [5, 2, 6, 3])
+    np.testing.assert_array_equal(moved.mask, point)
 
     # the input mask is left untouched
-    np.testing.assert_array_equal(mask["bbox"], [0, 0, 1, 1])
+    np.testing.assert_array_equal(mask.bbox, [0, 0, 1, 1])
 
     moved = mask_move(moved, offset=np.asarray([-3, 2]), image_shape=(7, 7))
-    np.testing.assert_array_equal(moved["bbox"], [2, 4, 3, 5])
-    np.testing.assert_array_equal(moved["mask"], point)
+    np.testing.assert_array_equal(moved.bbox, [2, 4, 3, 5])
+    np.testing.assert_array_equal(moved.mask, point)
 
 
 def test_mask_struct_dtype() -> None:
@@ -686,7 +695,7 @@ def test_mask_struct_roundtrip(ndim: int) -> None:
     assert value["min_y" if ndim == 2 else "min_z"] == 1
 
     restored = mask_from_struct(value)
-    assert mask_equal(restored, mask)
+    assert restored == mask
 
 
 def test_masks_from_column() -> None:
@@ -695,7 +704,7 @@ def test_masks_from_column() -> None:
 
     struct_column = pl.Series([mask_to_struct(mask)], dtype=mask_struct_dtype(2))
     (from_struct_column,) = masks_from_column(struct_column)
-    assert mask_equal(from_struct_column, mask)
+    assert from_struct_column == mask
 
     object_column = pl.Series([mask], dtype=pl.Object)
     (from_object_column,) = masks_from_column(object_column)
@@ -724,8 +733,8 @@ def test_mask_struct_attr_in_graph(graph_backend) -> None:
     assert df[DEFAULT_ATTR_KEYS.MASK].dtype == mask_struct_dtype(2)
 
     restored = dict(zip(df[DEFAULT_ATTR_KEYS.NODE_ID], masks_from_column(df[DEFAULT_ATTR_KEYS.MASK]), strict=True))
-    assert mask_equal(restored[node_a], mask_a)
-    assert mask_equal(restored[node_b], mask_b)
+    assert restored[node_a] == mask_a
+    assert restored[node_b] == mask_b
 
     # filtering on a bbox field of the mask struct
     filtered = graph.filter(NodeAttr(DEFAULT_ATTR_KEYS.MASK).struct.field("min_y") > 2).node_ids()

@@ -8,7 +8,6 @@ from tracksdata.nodes._mask import (
     mask_bbox_struct_fields,
     mask_crop,
     mask_dilate,
-    mask_equal,
     mask_from_coordinates,
     mask_from_struct,
     mask_indices,
@@ -22,7 +21,6 @@ from tracksdata.nodes._mask import (
     mask_subtract,
     mask_to_struct,
     mask_union,
-    mask_validate,
     masks_from_column,
 )
 from tracksdata.nodes._random import RandomNodes
@@ -38,7 +36,6 @@ __all__ = [
     "mask_bbox_struct_fields",
     "mask_crop",
     "mask_dilate",
-    "mask_equal",
     "mask_from_coordinates",
     "mask_from_struct",
     "mask_indices",
@@ -52,6 +49,5 @@ __all__ = [
     "mask_subtract",
     "mask_to_struct",
     "mask_union",
-    "mask_validate",
     "masks_from_column",
 ]

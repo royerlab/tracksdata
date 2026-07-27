@@ -1,6 +1,7 @@
 from collections.abc import Sequence
+from dataclasses import dataclass
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, Any
 
 import blosc2
 import numpy as np
@@ -23,33 +24,63 @@ MASK_DATA_FIELD = "data"
 """Name of the struct field holding the compressed binary mask."""
 
 
-class Mask(TypedDict):
+@dataclass(frozen=True, slots=True, eq=False, repr=False)
+class Mask:
     """
     An individual segmentation mask of a single instance (object).
 
-    Attributes
+    Masks are immutable: the `mask_*` functions that change the geometry
+    (e.g. [mask_dilate][tracksdata.nodes.mask_dilate]) return a new `Mask`
+    rather than modifying the input.
+
+    Parameters
     ----------
-    bbox : NDArray[np.integer]
+    mask : NDArray[np.bool_]
+        A binary array indicating the pixels that are part of the object (e.g. cell, nucleus, etc.).
+    bbox : ArrayLike
         The bounding box of the region of interest with shape (2 * ndim,).
         The first ndim elements are the start indices and the last ndim elements are the end indices.
         Equivalent to slicing a numpy array with `[start:end]`.
-    mask : NDArray[np.bool_]
-        A binary array indicating the pixels that are part of the object (e.g. cell, nucleus, etc.).
+        Stored as an `np.int64` array.
 
-    Notes
-    -----
-    Always construct with keyword arguments. `Mask` is a `TypedDict`, so a positional
-    argument is interpreted as `dict(...)` of that argument rather than as a field.
+    Raises
+    ------
+    ValueError
+        If the bbox dimension or the bbox size does not match the binary array.
 
     Examples
     --------
     ```python
-    mask = Mask(bbox=np.array([0, 0, 2, 2]), mask=np.array([[True, False], [False, True]]))
+    mask = Mask(mask=np.array([[True, False], [False, True]]), bbox=np.array([0, 0, 2, 2]))
     ```
     """
 
-    bbox: NDArray[np.integer]
     mask: NDArray[np.bool_]
+    bbox: NDArray[np.integer]
+
+    def __post_init__(self) -> None:
+        bbox = np.asarray(self.bbox, dtype=np.int64)
+        ndim = self.mask.ndim
+
+        if ndim != bbox.shape[0] // 2:
+            raise ValueError(f"Mask dimension {ndim} does not match bbox dimension {bbox.shape[0]} // 2")
+
+        bbox_size = bbox[ndim:] - bbox[:ndim]
+
+        if np.any(self.mask.shape != bbox_size):
+            raise ValueError(f"Mask shape {self.mask.shape} does not match bbox size {bbox_size}")
+
+        object.__setattr__(self, "bbox", bbox)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Mask):
+            return NotImplemented
+        return np.array_equal(self.bbox, other.bbox) and np.array_equal(self.mask, other.mask)
+
+    def __repr__(self) -> str:
+        ndim = self.mask.ndim
+        slicing_str = ", ".join(f"{i}:{j}" for i, j in zip(self.bbox[:ndim], self.bbox[ndim:], strict=True))
+        return f"Mask(bbox=[{slicing_str}])"
 
 
 def _pack_mask_array(mask: NDArray) -> bytes:
@@ -98,43 +129,8 @@ def _unpack(mask: Mask) -> tuple[NDArray[np.bool_], NDArray[np.int64], int]:
 
     The bbox is always copied so callers can move/resize it without touching the input mask.
     """
-    array = mask["mask"]
-    return array, np.array(mask["bbox"], dtype=np.int64), array.ndim
-
-
-def mask_validate(mask: Mask) -> Mask:
-    """
-    Check that the bounding box and the binary array of a mask agree.
-
-    `Mask` is a plain `TypedDict`, so it is not validated on construction.
-    Use this when a mask comes from an untrusted source.
-
-    Parameters
-    ----------
-    mask : Mask
-        The mask to validate.
-
-    Returns
-    -------
-    Mask
-        An equivalent mask whose `bbox` is an `np.int64` array.
-
-    Raises
-    ------
-    ValueError
-        If the bbox dimension or the bbox size does not match the binary array.
-    """
-    array, bbox, ndim = _unpack(mask)
-
-    if ndim != bbox.shape[0] // 2:
-        raise ValueError(f"Mask dimension {ndim} does not match bbox dimension {bbox.shape[0]} // 2")
-
-    bbox_size = bbox[ndim:] - bbox[:ndim]
-
-    if np.any(array.shape != bbox_size):
-        raise ValueError(f"Mask shape {array.shape} does not match bbox size {bbox_size}")
-
-    return Mask(bbox=bbox, mask=array)
+    array = mask.mask
+    return array, np.array(mask.bbox, dtype=np.int64), array.ndim
 
 
 def mask_crop(
@@ -272,7 +268,7 @@ def mask_iou(mask: Mask, other: Mask) -> float:
     float
         The IoU between the two masks.
     """
-    return fast_iou_with_bbox(np.asarray(mask["bbox"]), np.asarray(other["bbox"]), mask["mask"], other["mask"])
+    return fast_iou_with_bbox(np.asarray(mask.bbox), np.asarray(other.bbox), mask.mask, other.mask)
 
 
 def mask_intersection(mask: Mask, other: Mask) -> float:
@@ -291,7 +287,7 @@ def mask_intersection(mask: Mask, other: Mask) -> float:
     float
         The intersection between the two masks.
     """
-    return fast_intersection_with_bbox(np.asarray(mask["bbox"]), np.asarray(other["bbox"]), mask["mask"], other["mask"])
+    return fast_intersection_with_bbox(np.asarray(mask.bbox), np.asarray(other.bbox), mask.mask, other.mask)
 
 
 def mask_union(mask: Mask, other: Mask) -> Mask:
@@ -359,10 +355,10 @@ def mask_subtract(mask: Mask, other: Mask) -> Mask:
     array, bbox, ndim = _unpack(mask)
     other_array, other_bbox, _ = _unpack(other)
 
-    result = Mask(bbox=bbox.copy(), mask=array.copy())
+    result_array = array.copy()
 
     if mask_intersection(mask, other) == 0:
-        return result
+        return Mask(mask=result_array, bbox=bbox)
 
     other_slicing = []
     slicing = []
@@ -389,8 +385,8 @@ def mask_subtract(mask: Mask, other: Mask) -> Mask:
         slicing.append(slice(start, end))
         other_slicing.append(slice(other_start, other_end))
 
-    result["mask"][tuple(slicing)] &= ~other_array[tuple(other_slicing)]
-    return result
+    result_array[tuple(slicing)] &= ~other_array[tuple(other_slicing)]
+    return Mask(mask=result_array, bbox=bbox)
 
 
 def _crop_overhang(mask: Mask, image_shape: tuple[int, ...]) -> Mask:
@@ -420,8 +416,8 @@ def _crop_overhang(mask: Mask, image_shape: tuple[int, ...]) -> Mask:
 
     slicing = tuple(slice(s, -e if e > 0 else None) for s, e in zip(left_overhang, right_overhang, strict=True))
 
-    # validating bbox and mask shape agree after cropping
-    return mask_validate(Mask(bbox=bbox, mask=array[slicing]))
+    # `Mask` validates that the cropped bbox and mask shape still agree
+    return Mask(mask=array[slicing], bbox=bbox)
 
 
 def mask_dilate(mask: Mask, radius: int, image_shape: tuple[int, ...] | None = None) -> Mask:
@@ -548,28 +544,7 @@ def mask_size(mask: Mask) -> int:
     int
         The number of pixels that are part of the object.
     """
-    return mask["mask"].sum()
-
-
-def mask_equal(mask: Mask, other: Mask) -> bool:
-    """
-    Check whether two masks have the same bounding box and binary array.
-
-    `Mask` holds numpy arrays, so `==` cannot be used to compare two masks.
-
-    Parameters
-    ----------
-    mask : Mask
-        The first mask.
-    other : Mask
-        The mask to compare with.
-
-    Returns
-    -------
-    bool
-        Whether the two masks are equal.
-    """
-    return np.array_equal(mask["bbox"], other["bbox"]) and np.array_equal(mask["mask"], other["mask"])
+    return mask.mask.sum()
 
 
 def mask_from_coordinates(
@@ -707,18 +682,18 @@ def mask_from_struct(value: dict[str, Any]) -> Mask:
     return Mask(bbox=bbox, mask=array)
 
 
-def _decode_mask(value: Mask | dict[str, Any]) -> Mask:
+def _decode_mask(value: "Mask | dict[str, Any]") -> Mask:
     """
     Decode a single mask attribute value.
 
-    Struct values (as returned by graph backends for struct mask attributes)
-    carry the compressed array under ``MASK_DATA_FIELD``; `Mask` values are
-    returned unchanged. Prefer [masks_from_column][tracksdata.nodes.masks_from_column]
-    when the column dtype is available.
+    Struct values (as returned by graph backends for struct mask attributes) are
+    converted; `Mask` values are returned unchanged. Prefer
+    [masks_from_column][tracksdata.nodes.masks_from_column] when the column dtype
+    is available.
     """
-    if MASK_DATA_FIELD in value:
-        return mask_from_struct(value)
-    return value
+    if isinstance(value, Mask):
+        return value
+    return mask_from_struct(value)
 
 
 def masks_from_column(column: pl.Series) -> list[Mask]:

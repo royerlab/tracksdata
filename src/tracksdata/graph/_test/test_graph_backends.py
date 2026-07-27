@@ -19,7 +19,6 @@ from tracksdata.nodes import RegionPropsNodes
 from tracksdata.nodes._mask import (
     MASK_DATA_FIELD,
     Mask,
-    mask_equal,
     mask_from_struct,
     mask_struct_dtype,
     mask_to_struct,
@@ -473,7 +472,7 @@ def test_add_node_attr_key(graph_backend: BaseGraph, dtype: pl.DataType, value: 
         np.testing.assert_array_equal(new_attr_value, value)
     elif isinstance(value, dict):
         # `Mask` is a TypedDict holding numpy arrays, `==` cannot be used
-        assert mask_equal(new_attr_value, value)
+        assert new_attr_value == value
     else:
         assert new_attr_value == value
 
@@ -1743,8 +1742,8 @@ def test_form_other_regionprops_nodes(
 
         source_mask = mask_from_struct(source_row[DEFAULT_ATTR_KEYS.MASK])
         target_mask = mask_from_struct(target_row[DEFAULT_ATTR_KEYS.MASK])
-        np.testing.assert_array_equal(source_mask["mask"], target_mask["mask"])
-        np.testing.assert_array_equal(source_mask["bbox"], target_mask["bbox"])
+        np.testing.assert_array_equal(source_mask.mask, target_mask.mask)
+        np.testing.assert_array_equal(source_mask.bbox, target_mask.bbox)
 
 
 def test_compute_overlaps_basic(graph_backend: BaseGraph) -> None:
@@ -1845,8 +1844,8 @@ def test_sql_graph_mask_update_survives_reload(tmp_path: Path) -> None:
     reloaded.update_node_attrs(node_ids=[node_id], attrs={DEFAULT_ATTR_KEYS.MASK: [mask]})
     stored_mask = reloaded.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.MASK])[DEFAULT_ATTR_KEYS.MASK].to_list()[0]
 
-    assert isinstance(stored_mask, dict)
-    np.testing.assert_array_equal(stored_mask["mask"], mask_data)
+    assert isinstance(stored_mask, Mask)
+    np.testing.assert_array_equal(stored_mask.mask, mask_data)
 
 
 def test_sql_graph_mask_struct_stored_raw_not_pickled(tmp_path: Path) -> None:
@@ -1878,8 +1877,8 @@ def test_sql_graph_mask_struct_stored_raw_not_pickled(tmp_path: Path) -> None:
     df = reloaded.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.MASK])
     assert df.schema[DEFAULT_ATTR_KEYS.MASK] == mask_struct_dtype(2)
     restored = mask_from_struct(df[DEFAULT_ATTR_KEYS.MASK].to_list()[0])
-    np.testing.assert_array_equal(restored["mask"], mask_data)
-    np.testing.assert_array_equal(restored["bbox"], mask["bbox"])
+    np.testing.assert_array_equal(restored.mask, mask_data)
+    np.testing.assert_array_equal(restored.bbox, mask.bbox)
 
     # Struct-field filtering still works against the flat physical bbox columns.
     assert reloaded.filter(NodeAttr(DEFAULT_ATTR_KEYS.MASK).struct.field("min_y") == 0).node_ids() == [node_id]
@@ -2901,7 +2900,7 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
         geff_attrs = geff_graph.nodes[node_id].to_dict()
         source_attrs = graph_backend.nodes[node_id].to_dict()
         # `Mask` is a TypedDict holding numpy arrays, `==` cannot be used
-        assert mask_equal(geff_attrs.pop(DEFAULT_ATTR_KEYS.MASK), source_attrs.pop(DEFAULT_ATTR_KEYS.MASK))
+        assert geff_attrs.pop(DEFAULT_ATTR_KEYS.MASK) == source_attrs.pop(DEFAULT_ATTR_KEYS.MASK)
         assert geff_attrs == source_attrs
 
     assert rx.is_isomorphic(
@@ -3130,13 +3129,13 @@ def test_to_traccuracy_graph(graph_backend: BaseGraph) -> None:
 
     # Add nodes to first graph
     node1 = graph_backend.add_node(
-        {"t": 0, "x": 1.0, "y": 1.0, DEFAULT_ATTR_KEYS.MASK: mask1, DEFAULT_ATTR_KEYS.BBOX: mask1["bbox"]}
+        {"t": 0, "x": 1.0, "y": 1.0, DEFAULT_ATTR_KEYS.MASK: mask1, DEFAULT_ATTR_KEYS.BBOX: mask1.bbox}
     )
     node2 = graph_backend.add_node(
-        {"t": 1, "x": 2.0, "y": 2.0, DEFAULT_ATTR_KEYS.MASK: mask2, DEFAULT_ATTR_KEYS.BBOX: mask2["bbox"]}
+        {"t": 1, "x": 2.0, "y": 2.0, DEFAULT_ATTR_KEYS.MASK: mask2, DEFAULT_ATTR_KEYS.BBOX: mask2.bbox}
     )
     node3 = graph_backend.add_node(
-        {"t": 2, "x": 3.0, "y": 3.0, DEFAULT_ATTR_KEYS.MASK: mask3, DEFAULT_ATTR_KEYS.BBOX: mask3["bbox"]}
+        {"t": 2, "x": 3.0, "y": 3.0, DEFAULT_ATTR_KEYS.MASK: mask3, DEFAULT_ATTR_KEYS.BBOX: mask3.bbox}
     )
 
     graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)

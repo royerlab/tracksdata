@@ -94,7 +94,7 @@ def test_graph_array_view_getitem_with_nodes(graph_backend: BaseGraph) -> None:
             DEFAULT_ATTR_KEYS.T: 0,
             "label": 5,
             DEFAULT_ATTR_KEYS.MASK: mask,
-            DEFAULT_ATTR_KEYS.BBOX: mask["bbox"],
+            DEFAULT_ATTR_KEYS.BBOX: mask.bbox,
             "y": 11,
             "x": 21,
         }
@@ -147,7 +147,7 @@ def test_graph_array_view_getitem_multiple_nodes(graph_backend: BaseGraph) -> No
             DEFAULT_ATTR_KEYS.T: 0,
             "label": 3,
             DEFAULT_ATTR_KEYS.MASK: mask1,
-            DEFAULT_ATTR_KEYS.BBOX: mask1["bbox"],
+            DEFAULT_ATTR_KEYS.BBOX: mask1.bbox,
             "y": 11,
             "x": 21,
         }
@@ -158,7 +158,7 @@ def test_graph_array_view_getitem_multiple_nodes(graph_backend: BaseGraph) -> No
             DEFAULT_ATTR_KEYS.T: 0,
             "label": 7,
             DEFAULT_ATTR_KEYS.MASK: mask2,
-            DEFAULT_ATTR_KEYS.BBOX: mask2["bbox"],
+            DEFAULT_ATTR_KEYS.BBOX: mask2.bbox,
             "y": 31,
             "x": 41,
         }
@@ -199,7 +199,7 @@ def test_graph_array_view_getitem_boolean_dtype(graph_backend: BaseGraph) -> Non
             DEFAULT_ATTR_KEYS.T: 0,
             "is_active": True,
             DEFAULT_ATTR_KEYS.MASK: mask,
-            DEFAULT_ATTR_KEYS.BBOX: mask["bbox"],
+            DEFAULT_ATTR_KEYS.BBOX: mask.bbox,
             "y": 11,
             "x": 21,
         }
@@ -238,7 +238,7 @@ def test_graph_array_view_dtype_inference(graph_backend: BaseGraph) -> None:
             DEFAULT_ATTR_KEYS.MASK: mask,
             "y": 11,
             "x": 21,
-            DEFAULT_ATTR_KEYS.BBOX: mask["bbox"],
+            DEFAULT_ATTR_KEYS.BBOX: mask.bbox,
         }
     )
 
@@ -434,7 +434,7 @@ def test_graph_array_view_invalidates_only_affected_chunk_on_add(graph_backend: 
             DEFAULT_ATTR_KEYS.T: 0,
             "label": 1,
             DEFAULT_ATTR_KEYS.MASK: first_mask,
-            DEFAULT_ATTR_KEYS.BBOX: first_mask["bbox"],
+            DEFAULT_ATTR_KEYS.BBOX: first_mask.bbox,
         }
     )
 
@@ -449,7 +449,7 @@ def test_graph_array_view_invalidates_only_affected_chunk_on_add(graph_backend: 
             DEFAULT_ATTR_KEYS.T: 0,
             "label": 2,
             DEFAULT_ATTR_KEYS.MASK: second_mask,
-            DEFAULT_ATTR_KEYS.BBOX: second_mask["bbox"],
+            DEFAULT_ATTR_KEYS.BBOX: second_mask.bbox,
         }
     )
 
@@ -471,7 +471,7 @@ def test_graph_array_view_invalidates_old_and_new_chunks_on_update(graph_backend
             DEFAULT_ATTR_KEYS.T: 0,
             "label": 1,
             DEFAULT_ATTR_KEYS.MASK: mask,
-            DEFAULT_ATTR_KEYS.BBOX: mask["bbox"],
+            DEFAULT_ATTR_KEYS.BBOX: mask.bbox,
         }
     )
 
@@ -483,7 +483,7 @@ def test_graph_array_view_invalidates_old_and_new_chunks_on_update(graph_backend
         attrs={
             "label": [7],
             DEFAULT_ATTR_KEYS.MASK: [moved_mask],
-            DEFAULT_ATTR_KEYS.BBOX: [moved_mask["bbox"]],
+            DEFAULT_ATTR_KEYS.BBOX: [moved_mask.bbox],
         },
         node_ids=[node_id],
     )
@@ -510,7 +510,7 @@ def test_graph_array_view_invalidates_once_when_attr_key_changes_but_bbox_unchan
             DEFAULT_ATTR_KEYS.T: 0,
             "label": 1,
             DEFAULT_ATTR_KEYS.MASK: mask,
-            DEFAULT_ATTR_KEYS.BBOX: mask["bbox"],
+            DEFAULT_ATTR_KEYS.BBOX: mask.bbox,
         }
     )
 
@@ -548,7 +548,7 @@ def test_graph_array_view_invalidates_twice_when_attr_key_and_bbox_change(graph_
             DEFAULT_ATTR_KEYS.T: 0,
             "label": 1,
             DEFAULT_ATTR_KEYS.MASK: mask,
-            DEFAULT_ATTR_KEYS.BBOX: mask["bbox"],
+            DEFAULT_ATTR_KEYS.BBOX: mask.bbox,
         }
     )
 
@@ -563,7 +563,7 @@ def test_graph_array_view_invalidates_twice_when_attr_key_and_bbox_change(graph_
             attrs={
                 "label": [7],
                 DEFAULT_ATTR_KEYS.MASK: [moved_mask],
-                DEFAULT_ATTR_KEYS.BBOX: [moved_mask["bbox"]],
+                DEFAULT_ATTR_KEYS.BBOX: [moved_mask.bbox],
             },
             node_ids=[node_id],
         )
@@ -593,7 +593,7 @@ def test_graph_array_view_no_invalidation_when_unrelated_attr_changes(graph_back
             "label": 1,
             "score": 0.5,
             DEFAULT_ATTR_KEYS.MASK: mask,
-            DEFAULT_ATTR_KEYS.BBOX: mask["bbox"],
+            DEFAULT_ATTR_KEYS.BBOX: mask.bbox,
         }
     )
 
@@ -626,7 +626,7 @@ def test_graph_array_view_invalidates_chunk_on_remove(graph_backend: BaseGraph) 
             DEFAULT_ATTR_KEYS.T: 0,
             "label": 1,
             DEFAULT_ATTR_KEYS.MASK: first_mask,
-            DEFAULT_ATTR_KEYS.BBOX: first_mask["bbox"],
+            DEFAULT_ATTR_KEYS.BBOX: first_mask.bbox,
         }
     )
     second_mask = _make_square_mask(5, 5)
@@ -635,7 +635,7 @@ def test_graph_array_view_invalidates_chunk_on_remove(graph_backend: BaseGraph) 
             DEFAULT_ATTR_KEYS.T: 0,
             "label": 2,
             DEFAULT_ATTR_KEYS.MASK: second_mask,
-            DEFAULT_ATTR_KEYS.BBOX: second_mask["bbox"],
+            DEFAULT_ATTR_KEYS.BBOX: second_mask.bbox,
         }
     )
 
@@ -663,7 +663,7 @@ def test_graph_array_view_raises_when_bbox_missing(graph_backend: BaseGraph) -> 
             DEFAULT_ATTR_KEYS.T: 0,
             "label": 1,
             DEFAULT_ATTR_KEYS.MASK: mask,
-            DEFAULT_ATTR_KEYS.BBOX: mask["bbox"],
+            DEFAULT_ATTR_KEYS.BBOX: mask.bbox,
         }
     )
 
@@ -686,7 +686,7 @@ def test_graph_array_view_invalidates_once_when_mask_changes_but_bbox_unchanged(
             DEFAULT_ATTR_KEYS.T: 0,
             "label": 1,
             DEFAULT_ATTR_KEYS.MASK: mask,
-            DEFAULT_ATTR_KEYS.BBOX: mask["bbox"],
+            DEFAULT_ATTR_KEYS.BBOX: mask.bbox,
         }
     )
 
@@ -728,7 +728,7 @@ def test_graph_array_view_no_invalidation_when_mask_unchanged(graph_backend: Bas
             DEFAULT_ATTR_KEYS.T: 0,
             "label": 1,
             DEFAULT_ATTR_KEYS.MASK: mask,
-            DEFAULT_ATTR_KEYS.BBOX: mask["bbox"],
+            DEFAULT_ATTR_KEYS.BBOX: mask.bbox,
         }
     )
 

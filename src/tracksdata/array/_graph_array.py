@@ -485,9 +485,6 @@ class GraphArrayView(BaseReadOnlyArray):
         The rendered region depends on the displayed attribute value and the mask
         pixels, so a mask swap with an unchanged bbox still requires invalidation.
         """
-        # Local import: avoids the graph <-> nodes package import cycle.
-        from tracksdata.nodes._mask import MASK_DATA_FIELD, mask_equal
-
         old_mask = old_attr.get(DEFAULT_ATTR_KEYS.MASK)
         new_mask = new_attr.get(DEFAULT_ATTR_KEYS.MASK)
         if old_mask is None and new_mask is None:
@@ -495,9 +492,6 @@ class GraphArrayView(BaseReadOnlyArray):
         elif old_mask is None or new_mask is None:
             return True
 
-        # Struct values only hold scalars and the compressed blob, so they compare
-        # directly; a `Mask` holds numpy arrays and needs `mask_equal`.
-        if MASK_DATA_FIELD in old_mask and MASK_DATA_FIELD in new_mask:
-            return old_mask != new_mask
-
-        return not mask_equal(old_mask, new_mask)
+        # `Mask` compares by value; struct values are dicts of scalars plus the
+        # compressed blob, which also compare directly.
+        return old_mask != new_mask
