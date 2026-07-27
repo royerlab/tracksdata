@@ -129,6 +129,9 @@ select = [
 
 # https://docs.astral.sh/ruff/formatter/
 [tool.ruff.format]
+# ruff >= 0.16 formats markdown code blocks, which rewrites the mkdocs
+# snippet directives (`--8<-- "..."`) in docs/ into invalid syntax.
+exclude = ["*.md"]
 docstring-code-format = true
 skip-magic-trailing-comma = false # default is false
 

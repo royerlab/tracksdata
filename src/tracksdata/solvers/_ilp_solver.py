@@ -139,7 +139,7 @@ class ILPSolver(BaseSolver):
         appearance_weight: str | ExprInput = 0.0,
         disappearance_weight: str | ExprInput = 0.0,
         division_weight: str | ExprInput = 0.0,
-        merge_weight: None | str | ExprInput = None,
+        merge_weight: str | ExprInput | None = None,
         output_key: str = DEFAULT_ATTR_KEYS.SOLUTION,
         num_threads: int = 1,
         reset: bool = True,
