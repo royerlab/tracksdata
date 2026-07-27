@@ -1,18 +1,16 @@
-"""Utilities for working with segmentation masks stored in geff files.
+"""Utilities for inspecting and converting the dtype of properties in geff files.
 
-Segmentation masks are binary, but geff files written by older versions of
-tracksdata stored the mask ``data`` buffer as ``uint64`` (see
-https://github.com/royerlab/tracksdata/pull/318). That is 8x larger than a
-boolean buffer both on disk and, more importantly, when read into memory,
-which can cause out-of-memory errors when loading large datasets.
+The motivating case is segmentation masks: they are binary, but geff files
+written by older versions of tracksdata stored the mask ``data`` buffer as
+``uint64`` (see https://github.com/royerlab/tracksdata/pull/318). That is 8x
+larger than a boolean buffer both on disk and, more importantly, when read into
+memory, which can cause out-of-memory errors when loading large datasets. New
+files store masks as ``bool`` at write time, so :func:`convert_geff_prop_dtype`
+provides a one-time fix for legacy files.
 
-New files store masks as ``bool`` at write time. This module provides a
-one-time conversion for legacy files so they can be read cheaply.
-
-The caller names the mask attribute to convert (defaulting to the standard
-``DEFAULT_ATTR_KEYS.MASK`` key). Nothing on disk distinguishes a mask from any
-other variable-length attribute, so these functions never guess which
-attributes are masks — call once per mask key.
+The helpers are not mask-specific: they read and rewrite the payload dtype of
+any geff property (node or edge, fixed- or variable-length). The caller names
+the property to act on.
 """
 
 from __future__ import annotations
@@ -25,7 +23,6 @@ import numpy as np
 import zarr
 from zarr.storage import StoreLike
 
-from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.utils._logging import LOG
 
 __all__ = ["convert_geff_prop_dtype", "geff_prop_dtype"]
@@ -33,7 +30,7 @@ __all__ = ["convert_geff_prop_dtype", "geff_prop_dtype"]
 
 def geff_prop_dtype(
     geff_store: StoreLike,
-    key: str = DEFAULT_ATTR_KEYS.MASK,
+    key: str,
     *,
     node_or_edge: str = "nodes",
 ) -> np.dtype | None:
@@ -44,7 +41,7 @@ def geff_prop_dtype(
     geff_store : StoreLike
         The store or path to the geff group.
     key : str
-        Which property to inspect. Defaults to the standard mask key.
+        Which property to inspect.
     node_or_edge : str
         Whether ``key`` is a node (``"nodes"``, default) or edge (``"edges"``)
         property.
@@ -149,8 +146,8 @@ def _copy_geff(geff_store: StoreLike, output_path: StoreLike) -> StoreLike:
     """Copy a geff store to ``output_path`` and return the destination.
 
     Uses a fast filesystem copy when both ends are local paths; otherwise falls
-    back to a store-agnostic key-by-key copy (zarr v3 has no working
-    ``copy_store``), so in-memory and remote stores work too.
+    back to a store-agnostic recursive copy, so in-memory and remote stores work
+    too.
     """
     src = _as_path(geff_store)
     dst = _as_path(output_path)
@@ -174,21 +171,20 @@ def _as_path(store: StoreLike) -> Path | None:
 
 
 def _copy_store_contents(src: StoreLike, dst: StoreLike) -> None:
-    """Copy every key from one geff store to another, key by key."""
-    from zarr.core.buffer import default_buffer_prototype
-    from zarr.core.sync import sync
+    """Recursively copy a geff group from one store to another.
 
-    src_store = zarr.open_group(src, mode="r").store
-    dst_store = zarr.open_group(dst, mode="a").store
-    prototype = default_buffer_prototype()
-
-    async def _run() -> None:
-        async for k in src_store.list():
-            value = await src_store.get(k, prototype=prototype)
-            if value is not None:
-                await dst_store.set(k, value)
-
-    sync(_run())
+    Uses only the public zarr ``Group``/``Array`` API (no store internals), so
+    it works across zarr 2.x and 3.x.
+    """
+    stack = [(zarr.open_group(src, mode="r"), zarr.open_group(dst, mode="a"))]
+    while stack:
+        src_group, dst_group = stack.pop()
+        dst_group.attrs.update(dict(src_group.attrs))
+        for name, arr in src_group.arrays():
+            _overwrite_array(dst_group, name, arr[...], arr.chunks)
+            dst_group[name].attrs.update(dict(arr.attrs))
+        for name, sub in src_group.groups():
+            stack.append((sub, dst_group.require_group(name)))
 
 
 def _overwrite_array(parent: zarr.Group, name: str, data: np.ndarray, chunks) -> None:

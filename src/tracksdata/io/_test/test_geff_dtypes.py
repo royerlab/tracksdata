@@ -8,7 +8,7 @@ import zarr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph import IndexedRXGraph, RustWorkXGraph
 from tracksdata.io import convert_geff_prop_dtype, geff_prop_dtype
-from tracksdata.io._geff_masks import _overwrite_array, _set_prop_metadata_dtype
+from tracksdata.io._geff_dtypes import _overwrite_array, _set_prop_metadata_dtype
 from tracksdata.nodes._mask import Mask
 
 MASK_KEY = DEFAULT_ATTR_KEYS.MASK
@@ -45,10 +45,10 @@ def test_convert_geff_mask_to_bool_roundtrip(tmp_path: Path) -> None:
     geff_path, node_masks = _make_masked_geff(tmp_path)
     convert_geff_prop_dtype(geff_path, MASK_KEY, np.uint64)
 
-    assert geff_prop_dtype(geff_path) == np.uint64
+    assert geff_prop_dtype(geff_path, MASK_KEY) == np.uint64
 
     assert convert_geff_prop_dtype(geff_path, MASK_KEY, np.bool_) is True
-    assert geff_prop_dtype(geff_path) == np.bool_
+    assert geff_prop_dtype(geff_path, MASK_KEY) == np.bool_
     # metadata dtype updated too
     root = zarr.open_group(geff_path, mode="r")
     assert root.attrs["geff"]["node_props_metadata"][MASK_KEY]["dtype"] == "bool"
@@ -64,7 +64,7 @@ def test_convert_geff_mask_to_bool_roundtrip(tmp_path: Path) -> None:
 def test_convert_is_noop_when_already_bool(tmp_path: Path) -> None:
     geff_path, _ = _make_masked_geff(tmp_path)
     # to_geff already writes bool
-    assert geff_prop_dtype(geff_path) == np.bool_
+    assert geff_prop_dtype(geff_path, MASK_KEY) == np.bool_
     assert convert_geff_prop_dtype(geff_path, MASK_KEY, np.bool_) is False
 
 
@@ -91,8 +91,8 @@ def test_output_path_leaves_original_untouched(tmp_path: Path) -> None:
     assert convert_geff_prop_dtype(geff_path, MASK_KEY, np.bool_, output_path=out_path) is True
 
     # original is still uint64, copy is bool
-    assert geff_prop_dtype(geff_path) == np.uint64
-    assert geff_prop_dtype(out_path) == np.bool_
+    assert geff_prop_dtype(geff_path, MASK_KEY) == np.uint64
+    assert geff_prop_dtype(out_path, MASK_KEY) == np.bool_
 
     graph, _ = IndexedRXGraph.from_geff(out_path)
     for node_id in graph.node_ids():
@@ -132,8 +132,8 @@ def test_output_path_to_memory_store(tmp_path: Path) -> None:
     assert convert_geff_prop_dtype(geff_path, MASK_KEY, np.bool_, output_path=out_store) is True
 
     # original on disk is untouched, in-memory copy is bool and still loads
-    assert geff_prop_dtype(geff_path) == np.uint64
-    assert geff_prop_dtype(out_store) == np.bool_
+    assert geff_prop_dtype(geff_path, MASK_KEY) == np.uint64
+    assert geff_prop_dtype(out_store, MASK_KEY) == np.bool_
     graph, _ = IndexedRXGraph.from_geff(out_store)
     for node_id in graph.node_ids():
         np.testing.assert_array_equal(graph.nodes[node_id][MASK_KEY].mask, node_masks[node_id])
