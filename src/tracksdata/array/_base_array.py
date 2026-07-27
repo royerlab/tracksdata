@@ -1,4 +1,5 @@
 import abc
+from typing import Any
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -6,10 +7,24 @@ from numpy.typing import ArrayLike
 ArrayIndex = ArrayLike | int | slice | tuple[ArrayLike | int | slice, ...]
 
 
-class BaseReadOnlyArray(abc.ABC):
+class BaseReadOnlyArray(np.lib.mixins.NDArrayOperatorsMixin, abc.ABC):
     """
     Base class for read-only array-like objects.
+
+    Arithmetic and comparison operators (e.g. `array_view == 0`,
+    `array_view + np.ones(...)`) materialize the array content and
+    delegate to the corresponding numpy ufunc via `__array_ufunc__`.
     """
+
+    # NDArrayOperatorsMixin defines `__eq__`, which would otherwise reset
+    # `__hash__` to None; keep the default identity hash.
+    __hash__ = object.__hash__
+
+    def __array_ufunc__(self, ufunc: np.ufunc, method: str, *inputs: Any, **kwargs: Any) -> Any:
+        if kwargs.get("out") is not None:
+            raise TypeError(f"`out` is not supported for read-only {type(self).__name__}.")
+        inputs = tuple(np.asarray(x) if isinstance(x, BaseReadOnlyArray) else x for x in inputs)
+        return getattr(ufunc, method)(*inputs, **kwargs)
 
     def __len__(self) -> int:
         """Returns the length of the first dimension of the array."""

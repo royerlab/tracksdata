@@ -2208,6 +2208,7 @@ class SQLGraph(BaseGraph):
             emit_node_updated_events(
                 self.node_updated,
                 ((node_id, old_attrs_by_id[node_id], new_attrs_by_id[node_id]) for node_id in updated_node_ids),
+                set(attrs.keys()),
             )
 
     def update_edge_attrs(

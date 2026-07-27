@@ -113,7 +113,7 @@ class BaseGraph(abc.ABC):
     _PRIVATE_METADATA_PREFIX = "__private_"
     node_added = Signal(list, list)
     node_removed = Signal(list, list)
-    node_updated = Signal(list, list, list)
+    node_updated = Signal(list, list, list, set)
 
     def __init__(self) -> None:
         self._cache = {}
@@ -1906,7 +1906,7 @@ class BaseGraph(abc.ABC):
                     dtype=(
                         polars_dtype_to_numpy_dtype(v.dtype, compatibility=True)
                         if k != DEFAULT_ATTR_KEYS.MASK
-                        else np.uint64
+                        else np.bool_
                     ),
                     varlength=k == DEFAULT_ATTR_KEYS.MASK,
                 )
@@ -1940,7 +1940,7 @@ class BaseGraph(abc.ABC):
 
         if DEFAULT_ATTR_KEYS.MASK in node_attrs.columns:
             node_dict[DEFAULT_ATTR_KEYS.MASK] = construct_var_len_props(
-                [mask.mask.astype(np.uint64) for mask in node_attrs[DEFAULT_ATTR_KEYS.MASK]]
+                [mask.mask.astype(bool) for mask in node_attrs[DEFAULT_ATTR_KEYS.MASK]]
             )
 
         edge_dict = {k: {"values": column_to_numpy(v), "missing": None} for k, v in edge_attrs.to_dict().items()}

@@ -52,7 +52,10 @@ def multiprocessing_apply(
     options = get_options()
     disable_tqdm = not options.show_progress
 
-    if length == 1:
+    if length == 0:
+        return
+
+    elif length == 1:
         # skipping iteration overhead
         yield func(sequence[0])
 

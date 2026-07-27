@@ -38,13 +38,14 @@ def emit_node_added_events(
 def emit_node_updated_events(
     sig: Signal | SignalInstance,
     event_args: Iterable[tuple[int, dict[str, Any], dict[str, Any]]],
+    changed_keys: set[str],
 ) -> None:
     """
     Emit a single batched ``node_updated`` event.
 
-    Connected slots always receive one call
-    ``(list_of_ids, list_of_old_attrs, list_of_new_attrs)``. No-op if there are
-    no events or the signal has no active listeners.
+    Connected slots receive one call
+    ``(list_of_ids, list_of_old_attrs, list_of_new_attrs, changed_keys)``. No-op
+    if there are no events or the signal has no active listeners.
 
     Parameters
     ----------
@@ -52,13 +53,16 @@ def emit_node_updated_events(
         The ``node_updated`` signal to emit on.
     event_args : Iterable[tuple[int, dict[str, Any], dict[str, Any]]]
         The ``(node_id, old_attrs, new_attrs)`` triples to emit.
+    changed_keys : set[str]
+        The attribute keys actually written by this update (uniform across the
+        batch). Lets connectors skip work when none of the keys they track changed.
     """
     events = list(event_args)
     if len(events) == 0 or not is_signal_on(sig):
         return
 
     node_ids, old_attrs, new_attrs = zip(*events, strict=True)
-    sig.emit(list(node_ids), list(old_attrs), list(new_attrs))
+    sig.emit(list(node_ids), list(old_attrs), list(new_attrs), set(changed_keys))
 
 
 def emit_node_removed_events(
