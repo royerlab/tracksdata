@@ -40,5 +40,6 @@ You can verify the installation by importing the library:
 
 ```python
 import tracksdata as td
+
 print(td.__version__)
 ```

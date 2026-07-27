@@ -236,7 +236,7 @@ def to_ctc(
     shape: tuple[int, ...] | None = None,
     tracklet_id_key: str = DEFAULT_ATTR_KEYS.TRACKLET_ID,
     overwrite: bool = False,
-    dtype: None | DTypeLike = None,
+    dtype: DTypeLike | None = None,
 ) -> None:
     """
     Save a graph to a CTC data directory.

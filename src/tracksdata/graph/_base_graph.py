@@ -1055,7 +1055,7 @@ class BaseGraph(abc.ABC):
         shape: tuple[int, ...] | None = None,
         tracklet_id_key: str = DEFAULT_ATTR_KEYS.TRACKLET_ID,
         overwrite: bool = False,
-        dtype: None | DTypeLike = None,
+        dtype: DTypeLike | None = None,
     ) -> None:
         """
         Save the graph to a CTC ground truth directory.
