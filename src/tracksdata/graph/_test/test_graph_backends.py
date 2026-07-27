@@ -576,6 +576,22 @@ def test_update_node_attrs_emits_batched_node_updated_callback(graph_backend: Ba
     assert [attrs["x"] for attrs in calls[0][2]] == [10.0, 20.0, 30.0]
 
 
+def test_update_node_attrs_node_updated_carries_changed_keys(graph_backend: BaseGraph) -> None:
+    """node_updated delivers the set of written keys as a 4th arg, so connectors
+    can skip work when none of the keys they track changed."""
+    graph_backend.add_node_attr_key("x", pl.Float64)
+    graph_backend.add_node_attr_key("score", pl.Float64)
+
+    node_ids = graph_backend.bulk_add_nodes([{"t": 0, "x": 1.0, "score": 0.0}])
+
+    calls: list[set] = []
+    graph_backend.node_updated.connect(lambda node_ids, old_attrs, new_attrs, changed_keys: calls.append(changed_keys))
+
+    graph_backend.update_node_attrs(node_ids=node_ids, attrs={"score": 5.0})
+
+    assert calls == [{"score"}]
+
+
 def test_update_edge_attrs(graph_backend: BaseGraph) -> None:
     """Test updating edge attributes."""
     node1 = graph_backend.add_node({"t": 0})
@@ -591,6 +607,11 @@ def test_update_edge_attrs(graph_backend: BaseGraph) -> None:
     # wrong length
     with pytest.raises(ValueError):
         graph_backend.update_edge_attrs(edge_ids=[edge_id], attrs={"weight": [1.0, 2.0]})
+
+    # the caller's attrs dict must not be mutated (e.g. scalar broadcast to a list)
+    user_attrs = {"weight": 2.0}
+    graph_backend.update_edge_attrs(edge_ids=[edge_id], attrs=user_attrs)
+    assert user_attrs == {"weight": 2.0}
 
 
 def test_num_edges(graph_backend: BaseGraph) -> None:
@@ -709,6 +730,62 @@ def test_edge_attrs_include_targets(graph_backend: BaseGraph) -> None:
 
     msg = f"Single node include_targets=False: Expected {expected_single_exclusive}, got {single_exclusive_edge_ids}"
     assert single_exclusive_edge_ids == expected_single_exclusive, msg
+
+
+def test_edge_attrs_include_sources(graph_backend: BaseGraph) -> None:
+    """Edges must be unique and respect endpoint membership with include_sources."""
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
+
+    # node0 -> node1 -> node2
+    node0 = graph_backend.add_node({"t": 0})
+    node1 = graph_backend.add_node({"t": 1})
+    node2 = graph_backend.add_node({"t": 2})
+
+    edge0 = graph_backend.add_edge(node0, node1, attrs={"weight": 0.1})
+    edge1 = graph_backend.add_edge(node1, node2, attrs={"weight": 0.2})
+
+    # include_sources=True with both endpoints of edge0 selected:
+    # - edge0: node0 -> node1 ✓ (must appear exactly once)
+    # - edge1: node1 -> node2 ✗ (node2 not selected and include_targets=False)
+    edge_ids = graph_backend.filter(node_ids=[node0, node1], include_sources=True).edge_ids()
+    assert list(edge_ids) == [edge0]
+
+    # include_sources=True selecting only the target of edge0:
+    # - edge0: node0 -> node1 ✓ (in-edge with source outside the selection)
+    edge_ids = graph_backend.filter(node_ids=[node1], include_sources=True).edge_ids()
+    assert list(edge_ids) == [edge0]
+
+    # node attribute filters must constrain edge endpoints the same way
+    assert graph_backend.filter(NodeAttr("t") == 1).edge_ids() == []
+
+    edge_ids = graph_backend.filter(NodeAttr("t") == 1, include_targets=True).edge_ids()
+    assert list(edge_ids) == [edge1]
+
+    edge_ids = graph_backend.filter(NodeAttr("t") == 1, include_sources=True).edge_ids()
+    assert list(edge_ids) == [edge0]
+
+
+def test_filter_node_ids_with_include_flags(graph_backend: BaseGraph) -> None:
+    """Selected nodes must be kept when include flags extend the selection."""
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)
+
+    node0 = graph_backend.add_node({"t": 0})
+    node1 = graph_backend.add_node({"t": 1})
+    isolated = graph_backend.add_node({"t": 0})
+
+    graph_backend.add_edge(node0, node1, attrs={"weight": 0.5})
+
+    # explicitly selected nodes without edges must not be dropped
+    node_ids = graph_backend.filter(node_ids=[node0, isolated], include_targets=True).node_ids()
+    assert sorted(node_ids) == sorted([node0, node1, isolated])
+
+    # node attribute filters behave the same way
+    node_ids = graph_backend.filter(NodeAttr("t") == 0, include_targets=True).node_ids()
+    assert sorted(node_ids) == sorted([node0, node1, isolated])
+
+    # include_sources only extends with edge sources, not targets
+    node_ids = graph_backend.filter(node_ids=[node0, isolated], include_sources=True).node_ids()
+    assert sorted(node_ids) == sorted([node0, isolated])
 
 
 def test_from_ctc(

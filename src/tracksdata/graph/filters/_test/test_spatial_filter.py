@@ -413,6 +413,82 @@ def test_bbox_spatial_filter_update_non_bbox_attr_no_error(graph_backend: BaseGr
         assert node_id in spatial_filter[0:0.5, 0:3, 0:3].node_ids()
 
 
+def _spy_calls(obj: object, method_name: str) -> dict[str, int]:
+    """Wrap a bound method on ``obj`` with a call counter, still calling through."""
+    calls = {"n": 0}
+    orig = getattr(obj, method_name)
+
+    def wrapper(*args, **kwargs):
+        calls["n"] += 1
+        return orig(*args, **kwargs)
+
+    setattr(obj, method_name, wrapper)
+    return calls
+
+
+def test_bbox_spatial_filter_skips_reindex_on_non_spatial_update(graph_backend: BaseGraph) -> None:
+    """A non-spatial write (e.g. tracklet id) must not touch the rtree.
+
+    Regression guard for the assign_tracklet_ids slowdown: previously every
+    node_updated triggered a delete+reinsert per node even though bbox/frame
+    were unchanged.
+    """
+    graph_backend.add_node_attr_key("bbox", pl.Array(pl.Int64, 4))
+    graph_backend.add_node_attr_key("track_id", pl.Int64, -1)
+    node_id = graph_backend.add_node({"t": 0, "bbox": np.asarray([0, 0, 2, 2]), "track_id": -1})
+
+    for graph in [graph_backend, graph_backend.filter().subgraph()]:
+        spatial_filter = BBoxSpatialFilter(graph, frame_attr_key="t", bbox_attr_key="bbox")
+        removes = _spy_calls(spatial_filter, "_remove_node")
+        adds = _spy_calls(spatial_filter, "_add_node")
+
+        graph.update_node_attrs(attrs={"track_id": 7}, node_ids=[node_id])
+
+        assert removes["n"] == 0
+        assert adds["n"] == 0
+        # Node is still indexed at its original position.
+        assert node_id in spatial_filter[0:0.5, 0:3, 0:3].node_ids()
+
+
+def test_bbox_spatial_filter_reindexes_on_bbox_update(graph_backend: BaseGraph) -> None:
+    """A genuine bbox change must still re-index — guards against over-eager skipping.
+
+    Asserts the rtree is mutated (delete + reinsert); the resulting spatial-query
+    correctness is covered by ``test_bbox_spatial_filter_updates_node_position``.
+    """
+    graph_backend.add_node_attr_key("bbox", pl.Array(pl.Int64, 4))
+    node_id = graph_backend.add_node({"t": 0, "bbox": np.asarray([0, 0, 2, 2])})
+
+    for graph in [graph_backend, graph_backend.filter().subgraph()]:
+        spatial_filter = BBoxSpatialFilter(graph, frame_attr_key="t", bbox_attr_key="bbox")
+        removes = _spy_calls(spatial_filter, "_remove_node")
+        adds = _spy_calls(spatial_filter, "_add_node")
+
+        graph.update_node_attrs(attrs={"bbox": [np.asarray([20, 20, 22, 22])]}, node_ids=[node_id])
+
+        assert removes["n"] == 1
+        assert adds["n"] == 1
+
+
+def test_point_spatial_filter_skips_reindex_on_non_spatial_update(graph_backend: BaseGraph) -> None:
+    """The point-based SpatialFilter must also skip the rtree on non-spatial writes."""
+    graph_backend.add_node_attr_key("y", pl.Int64)
+    graph_backend.add_node_attr_key("x", pl.Int64)
+    graph_backend.add_node_attr_key("track_id", pl.Int64, -1)
+    node_id = graph_backend.add_node({"t": 0, "y": 10, "x": 20, "track_id": -1})
+
+    for graph in [graph_backend, graph_backend.filter().subgraph()]:
+        spatial_filter = SpatialFilter(graph, attr_keys=["y", "x"])
+        removes = _spy_calls(spatial_filter, "_remove_node")
+        adds = _spy_calls(spatial_filter, "_add_node")
+
+        graph.update_node_attrs(attrs={"track_id": 7}, node_ids=[node_id])
+
+        assert removes["n"] == 0
+        assert adds["n"] == 0
+        assert node_id in spatial_filter[5:15, 15:25].node_ids()
+
+
 def test_bbox_spatial_filter_handles_list_dtype(graph_backend: BaseGraph) -> None:
     """Ensure bounding boxes stored as list dtype still work with the spatial filter."""
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4))
