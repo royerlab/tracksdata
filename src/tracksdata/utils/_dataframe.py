@@ -2,7 +2,6 @@ from collections.abc import Collection
 
 import cloudpickle
 import polars as pl
-import polars.selectors as cs
 
 
 def unpack_array_attrs(df: pl.DataFrame) -> pl.DataFrame:
@@ -63,11 +62,22 @@ def unpickle_columns(df: pl.DataFrame, columns: Collection[str]) -> pl.DataFrame
     if not targets:
         return df
 
-    df = df.map_columns(cs.by_name(targets), lambda x: x.map_elements(cloudpickle.loads, return_dtype=pl.Object))
+    # `map_elements` converts a returned dict into polars-native containers even with
+    # `return_dtype=pl.Object`, turning e.g. a `Mask`'s numpy arrays into python lists.
+    # Building the object series directly keeps the unpickled values untouched.
+    df = df.with_columns(
+        pl.Series(col, [None if v is None else cloudpickle.loads(v) for v in df[col]], dtype=pl.Object)
+        for col in targets
+    )
     for col in targets:
         if isinstance(df.schema[col], pl.Object):
             try:
-                df = df.with_columns(pl.Series(df[col].to_list()).alias(col))
+                inferred = pl.Series(df[col].to_list())
             except Exception:
-                pass
+                continue
+            # Dict values (e.g. a `Mask`) infer as a struct, and polars converts the
+            # numpy arrays they hold into nested python lists. Keep those as objects.
+            if isinstance(inferred.dtype, pl.Struct):
+                continue
+            df = df.with_columns(inferred.alias(col))
     return df

@@ -7,7 +7,7 @@ import pytest
 import tracksdata as td
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.functional import shift_division
-from tracksdata.nodes._mask import Mask
+from tracksdata.nodes._mask import Mask, mask_equal
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -635,10 +635,10 @@ def _make_graph_with_mask() -> tuple[td.graph.RustWorkXGraph, dict[str, int]]:
     g = td.graph.RustWorkXGraph()
     g.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
 
-    mask_p = Mask(np.ones((4, 4), dtype=bool), bbox=np.array([0, 0, 4, 4]))
-    mask_d = Mask(np.ones((4, 4), dtype=bool), bbox=np.array([0, 0, 4, 4]))
-    mask_c1 = Mask(np.ones((2, 2), dtype=bool), bbox=np.array([0, 0, 2, 2]))
-    mask_c2 = Mask(np.ones((2, 2), dtype=bool), bbox=np.array([2, 2, 4, 4]))
+    mask_p = Mask(bbox=np.array([0, 0, 4, 4]), mask=np.ones((4, 4), dtype=bool))
+    mask_d = Mask(bbox=np.array([0, 0, 4, 4]), mask=np.ones((4, 4), dtype=bool))
+    mask_c1 = Mask(bbox=np.array([0, 0, 2, 2]), mask=np.ones((2, 2), dtype=bool))
+    mask_c2 = Mask(bbox=np.array([2, 2, 4, 4]), mask=np.ones((2, 2), dtype=bool))
 
     ids: dict[str, int] = {}
     ids["p"] = g.add_node({"t": 0, DEFAULT_ATTR_KEYS.MASK: mask_p})
@@ -704,16 +704,16 @@ def test_shift_division_ahead_mask() -> None:
 
     merged_id = result.successors(ids["d"])[0]
     merged_mask = result.nodes[merged_id][DEFAULT_ATTR_KEYS.MASK]
-    assert isinstance(merged_mask, Mask)
+    assert isinstance(merged_mask, dict)
 
     # Non-numeric fallback → first child's mask
     first_child = g.successors(ids["d"])[0]
     expected_mask = masks["c1"] if first_child == ids["c1"] else masks["c2"]
-    assert merged_mask == expected_mask
+    assert mask_equal(merged_mask, expected_mask)
 
     # p and d are untouched
-    assert result.nodes[ids["p"]][DEFAULT_ATTR_KEYS.MASK] == masks["p"]
-    assert result.nodes[ids["d"]][DEFAULT_ATTR_KEYS.MASK] == masks["d"]
+    assert mask_equal(result.nodes[ids["p"]][DEFAULT_ATTR_KEYS.MASK], masks["p"])
+    assert mask_equal(result.nodes[ids["d"]][DEFAULT_ATTR_KEYS.MASK], masks["d"])
 
 
 def test_shift_division_behind_mask() -> None:
@@ -732,9 +732,9 @@ def test_shift_division_behind_mask() -> None:
     # Each replacement node carries its respective child's mask
     got_masks = [result.nodes[nc][DEFAULT_ATTR_KEYS.MASK] for nc in new_children]
     expected_masks = [masks["c1"], masks["c2"]]
-    assert all(any(g == e for e in expected_masks) for g in got_masks)
-    assert all(any(e == g for g in got_masks) for e in expected_masks)
+    assert all(any(mask_equal(g, e) for e in expected_masks) for g in got_masks)
+    assert all(any(mask_equal(e, g) for g in got_masks) for e in expected_masks)
 
     # c1 and c2 are untouched
-    assert result.nodes[ids["c1"]][DEFAULT_ATTR_KEYS.MASK] == masks["c1"]
-    assert result.nodes[ids["c2"]][DEFAULT_ATTR_KEYS.MASK] == masks["c2"]
+    assert mask_equal(result.nodes[ids["c1"]][DEFAULT_ATTR_KEYS.MASK], masks["c1"])
+    assert mask_equal(result.nodes[ids["c2"]][DEFAULT_ATTR_KEYS.MASK], masks["c2"])

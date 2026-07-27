@@ -1,8 +1,57 @@
 """Node operators for creating nodes and their respective attributes (e.g. masks) in a graph."""
 
 from tracksdata.nodes._generic_nodes import GenericFuncNodeAttrs
-from tracksdata.nodes._mask import Mask, MaskDiskAttrs, as_mask
+from tracksdata.nodes._mask import (
+    MASK_DATA_FIELD,
+    Mask,
+    MaskDiskAttrs,
+    mask_bbox_struct_fields,
+    mask_crop,
+    mask_dilate,
+    mask_equal,
+    mask_from_coordinates,
+    mask_from_struct,
+    mask_indices,
+    mask_intersection,
+    mask_iou,
+    mask_move,
+    mask_paint_buffer,
+    mask_regionprops,
+    mask_size,
+    mask_struct_dtype,
+    mask_subtract,
+    mask_to_struct,
+    mask_union,
+    mask_validate,
+    masks_from_column,
+)
 from tracksdata.nodes._random import RandomNodes
 from tracksdata.nodes._regionprops import RegionPropsNodes
 
-__all__ = ["GenericFuncNodeAttrs", "Mask", "MaskDiskAttrs", "RandomNodes", "RegionPropsNodes", "as_mask"]
+__all__ = [
+    "MASK_DATA_FIELD",
+    "GenericFuncNodeAttrs",
+    "Mask",
+    "MaskDiskAttrs",
+    "RandomNodes",
+    "RegionPropsNodes",
+    "mask_bbox_struct_fields",
+    "mask_crop",
+    "mask_dilate",
+    "mask_equal",
+    "mask_from_coordinates",
+    "mask_from_struct",
+    "mask_indices",
+    "mask_intersection",
+    "mask_iou",
+    "mask_move",
+    "mask_paint_buffer",
+    "mask_regionprops",
+    "mask_size",
+    "mask_struct_dtype",
+    "mask_subtract",
+    "mask_to_struct",
+    "mask_union",
+    "mask_validate",
+    "masks_from_column",
+]

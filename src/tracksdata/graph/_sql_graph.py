@@ -2113,8 +2113,11 @@ class SQLGraph(BaseGraph):
                 raise ValueError(f"Length mismatch: {len(attrs[k])} values for {len(ids)} {id_key}s")
 
         attrs[id_key] = ids
-        # using polars is faster and simpler than iterating in python
-        update_data = pl.DataFrame(attrs).to_dicts()
+        # using polars is faster and simpler than iterating in python.
+        # Object-typed attrs need an explicit override: polars would otherwise infer a
+        # struct from dict values (e.g. a `Mask`) and turn their numpy arrays into lists.
+        object_overrides = {key: pl.Object for key in attrs if key in schemas and schemas[key].dtype == pl.Object}
+        update_data = pl.DataFrame(attrs, schema_overrides=object_overrides).to_dicts()
 
         LOG.info("update %s table with %d rows", table_class.__table__, len(update_data))
         LOG.info("update data sample: %s", update_data[:2])

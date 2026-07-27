@@ -145,7 +145,11 @@ class MaskMatching(Matching):
             Matching data: mapped_ref, mapped_comp, rows, cols, weights (IoU values).
         """
         # Local import: avoids the graph <-> nodes package import cycle.
-        from tracksdata.nodes._mask import as_mask
+        from tracksdata.nodes._mask import (
+            mask_intersection,
+            mask_size,
+            masks_from_column,
+        )
         from tracksdata.utils._dtypes import column_from_bytes
 
         # Handle serialized masks if needed
@@ -154,8 +158,10 @@ class MaskMatching(Matching):
             comp_group = column_from_bytes(comp_group, DEFAULT_ATTR_KEYS.MASK)
 
         # Materialize masks once, struct values decompress on conversion
-        ref_masks = [as_mask(m) for m in ref_group[DEFAULT_ATTR_KEYS.MASK]]
-        comp_masks = [as_mask(m) for m in comp_group[DEFAULT_ATTR_KEYS.MASK]]
+        ref_masks = masks_from_column(ref_group[DEFAULT_ATTR_KEYS.MASK])
+        comp_masks = masks_from_column(comp_group[DEFAULT_ATTR_KEYS.MASK])
+        ref_sizes = [mask_size(m) for m in ref_masks]
+        comp_sizes = [mask_size(m) for m in comp_masks]
 
         mapped_ref = []
         mapped_comp = []
@@ -166,8 +172,8 @@ class MaskMatching(Matching):
         for i, (ref_id, ref_mask) in enumerate(zip(ref_group[reference_graph_key], ref_masks, strict=True)):
             for j, (comp_id, comp_mask) in enumerate(zip(comp_group[input_graph_key], comp_masks, strict=True)):
                 # Intersection over reference is used to select the matches
-                inter = ref_mask.intersection(comp_mask)
-                ctc_score = inter / ref_mask.size
+                inter = mask_intersection(ref_mask, comp_mask)
+                ctc_score = inter / ref_sizes[i]
                 if ctc_score > self.min_reference_intersection:
                     mapped_ref.append(ref_id)
                     mapped_comp.append(comp_id)
@@ -175,7 +181,7 @@ class MaskMatching(Matching):
                     cols.append(j)
 
                     # IoU as the matching weight
-                    iou = inter / (ref_mask.size + comp_mask.size - inter)
+                    iou = inter / (ref_sizes[i] + comp_sizes[j] - inter)
                     weights.append(iou.item())
 
         return mapped_ref, mapped_comp, rows, cols, weights

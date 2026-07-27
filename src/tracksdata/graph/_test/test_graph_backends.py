@@ -16,7 +16,14 @@ from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph import BaseGraph, IndexedRXGraph, RustWorkXGraph, SQLGraph
 from tracksdata.io._numpy_array import from_array
 from tracksdata.nodes import RegionPropsNodes
-from tracksdata.nodes._mask import Mask, as_mask
+from tracksdata.nodes._mask import (
+    MASK_DATA_FIELD,
+    Mask,
+    mask_equal,
+    mask_from_struct,
+    mask_struct_dtype,
+    mask_to_struct,
+)
 from tracksdata.utils._dtypes import STRUCT_FIELD_SEP
 
 
@@ -448,7 +455,7 @@ def test_subgraph_with_node_ids_and_filters(graph_backend: BaseGraph) -> None:
         pytest.param(pl.String, "test_string", id="str-test_string"),
         pytest.param(pl.Array(pl.Int64, 3), np.array([1, 2, 3]), id="ndarray-1d"),
         pytest.param(pl.Array(pl.Float64, (2, 2)), np.array([[1.0, 2.0], [3.0, 4.0]]), id="ndarray-2d"),
-        pytest.param(pl.Object, Mask(mask=np.array([[True, False], [False, True]]), bbox=(0, 0, 2, 2)), id="mask"),
+        pytest.param(pl.Object, Mask(bbox=(0, 0, 2, 2), mask=np.array([[True, False], [False, True]])), id="mask"),
         pytest.param(pl.Boolean, True, id="bool-True"),
         pytest.param(pl.Boolean, False, id="bool-False"),
     ],
@@ -464,6 +471,9 @@ def test_add_node_attr_key(graph_backend: BaseGraph, dtype: pl.DataType, value: 
     new_attr_value = df["new_attribute"].to_list()[0]
     if isinstance(value, np.ndarray):
         np.testing.assert_array_equal(new_attr_value, value)
+    elif isinstance(value, dict):
+        # `Mask` is a TypedDict holding numpy arrays, `==` cannot be used
+        assert mask_equal(new_attr_value, value)
     else:
         assert new_attr_value == value
 
@@ -1129,13 +1139,13 @@ def test_match_method(graph_backend: BaseGraph) -> None:
 
     # Create masks for first graph
     mask1_data = np.array([[True, True], [True, True]], dtype=bool)
-    mask1 = Mask(mask1_data, bbox=np.array([0, 0, 2, 2]))
+    mask1 = Mask(bbox=np.array([0, 0, 2, 2]), mask=mask1_data)
 
     mask2_data = np.array([[True, False], [True, False]], dtype=bool)
-    mask2 = Mask(mask2_data, bbox=np.array([10, 10, 12, 12]))
+    mask2 = Mask(bbox=np.array([10, 10, 12, 12]), mask=mask2_data)
 
     mask3_data = np.array([[True, True, True, True, True]], dtype=bool)
-    mask3 = Mask(mask3_data, bbox=np.array([20, 20, 21, 25]))
+    mask3 = Mask(bbox=np.array([20, 20, 21, 25]), mask=mask3_data)
 
     # Add nodes to first graph
     node1 = graph_backend.add_node({"t": 0, "x": 1.0, "y": 1.0, DEFAULT_ATTR_KEYS.MASK: mask1})
@@ -1164,20 +1174,20 @@ def test_match_method(graph_backend: BaseGraph) -> None:
     # Create overlapping masks for second graph
     # This mask overlaps significantly with mask1 (IoU > 0.5)
     ref_mask1_data = np.array([[True, True], [True, False]], dtype=bool)
-    ref_mask1 = Mask(ref_mask1_data, bbox=np.array([0, 0, 2, 2]))
+    ref_mask1 = Mask(bbox=np.array([0, 0, 2, 2]), mask=ref_mask1_data)
 
     # This mask overlaps significantly with mask3 (IoU > 0.5)
     ref_mask2_data = np.array([[True, True, True, True]], dtype=bool)
-    ref_mask2 = Mask(ref_mask2_data, bbox=np.array([20, 20, 21, 24]))
+    ref_mask2 = Mask(bbox=np.array([20, 20, 21, 24]), mask=ref_mask2_data)
 
     # This mask should NOT overlap with other masks (IoU < 0.5, should not match)
     ref_mask3_data = np.array([[True]], dtype=bool)
-    ref_mask3 = Mask(ref_mask3_data, bbox=np.array([15, 15, 16, 16]))  # Different location
+    ref_mask3 = Mask(bbox=np.array([15, 15, 16, 16]), mask=ref_mask3_data)  # Different location
 
     # This mask also overlaps significantly with mask3 (IoU > 0.5) but less than `ref_mask2`
     # therefore it should not match
     ref_mask4_data = np.array([[True, True, True]], dtype=bool)
-    ref_mask4 = Mask(ref_mask4_data, bbox=np.array([20, 21, 21, 24]))
+    ref_mask4 = Mask(bbox=np.array([20, 21, 21, 24]), mask=ref_mask4_data)
 
     # Add nodes to reference graph
     ref_node1 = other_graph.add_node({"t": 0, "x": 1.1, "y": 1.1, DEFAULT_ATTR_KEYS.MASK: ref_mask1})
@@ -1731,10 +1741,10 @@ def test_form_other_regionprops_nodes(
         assert target_row["y"] == pytest.approx(source_row["y"])
         assert target_row["x"] == pytest.approx(source_row["x"])
 
-        source_mask = as_mask(source_row[DEFAULT_ATTR_KEYS.MASK])
-        target_mask = as_mask(target_row[DEFAULT_ATTR_KEYS.MASK])
-        np.testing.assert_array_equal(source_mask.mask, target_mask.mask)
-        np.testing.assert_array_equal(source_mask.bbox, target_mask.bbox)
+        source_mask = mask_from_struct(source_row[DEFAULT_ATTR_KEYS.MASK])
+        target_mask = mask_from_struct(target_row[DEFAULT_ATTR_KEYS.MASK])
+        np.testing.assert_array_equal(source_mask["mask"], target_mask["mask"])
+        np.testing.assert_array_equal(source_mask["bbox"], target_mask["bbox"])
 
 
 def test_compute_overlaps_basic(graph_backend: BaseGraph) -> None:
@@ -1743,10 +1753,10 @@ def test_compute_overlaps_basic(graph_backend: BaseGraph) -> None:
 
     # Create overlapping masks at time 0
     mask1_data = np.array([[True, True], [True, True]], dtype=bool)
-    mask1 = Mask(mask1_data, bbox=np.array([0, 0, 2, 2]))
+    mask1 = Mask(bbox=np.array([0, 0, 2, 2]), mask=mask1_data)
 
     mask2_data = np.array([[True, True], [False, False]], dtype=bool)
-    mask2 = Mask(mask2_data, bbox=np.array([0, 0, 2, 2]))
+    mask2 = Mask(bbox=np.array([0, 0, 2, 2]), mask=mask2_data)
 
     node1 = graph_backend.add_node({"t": 0, DEFAULT_ATTR_KEYS.MASK: mask1})
     node2 = graph_backend.add_node({"t": 0, DEFAULT_ATTR_KEYS.MASK: mask2})
@@ -1765,15 +1775,15 @@ def test_compute_overlaps_with_threshold(graph_backend: BaseGraph) -> None:
 
     # Create masks with different overlap levels
     mask1_data = np.array([[True, True], [True, True]], dtype=bool)
-    mask1 = Mask(mask1_data, bbox=np.array([0, 0, 2, 2]))
+    mask1 = Mask(bbox=np.array([0, 0, 2, 2]), mask=mask1_data)
 
     # Partially overlapping mask (IoU = 0.5)
     mask2_data = np.array([[True, True], [False, False]], dtype=bool)
-    mask2 = Mask(mask2_data, bbox=np.array([0, 0, 2, 2]))
+    mask2 = Mask(bbox=np.array([0, 0, 2, 2]), mask=mask2_data)
 
     # Non-overlapping mask
     mask3_data = np.array([[True, True], [True, True]], dtype=bool)
-    mask3 = Mask(mask3_data, bbox=np.array([10, 10, 12, 12]))
+    mask3 = Mask(bbox=np.array([10, 10, 12, 12]), mask=mask3_data)
 
     node1 = graph_backend.add_node({"t": 0, DEFAULT_ATTR_KEYS.MASK: mask1})
     node2 = graph_backend.add_node({"t": 0, DEFAULT_ATTR_KEYS.MASK: mask2})
@@ -1798,12 +1808,12 @@ def test_compute_overlaps_multiple_timepoints(graph_backend: BaseGraph) -> None:
     graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
 
     # Time 0: overlapping masks
-    mask1_t0 = Mask(np.array([[True, True], [True, True]], dtype=bool), bbox=np.array([0, 0, 2, 2]))
-    mask2_t0 = Mask(np.array([[True, True], [False, False]], dtype=bool), bbox=np.array([0, 0, 2, 2]))
+    mask1_t0 = Mask(bbox=np.array([0, 0, 2, 2]), mask=np.array([[True, True], [True, True]], dtype=bool))
+    mask2_t0 = Mask(bbox=np.array([0, 0, 2, 2]), mask=np.array([[True, True], [False, False]], dtype=bool))
 
     # Time 1: non-overlapping masks
-    mask1_t1 = Mask(np.array([[True, True], [True, True]], dtype=bool), bbox=np.array([0, 0, 2, 2]))
-    mask2_t1 = Mask(np.array([[True, True], [True, True]], dtype=bool), bbox=np.array([10, 10, 12, 12]))
+    mask1_t1 = Mask(bbox=np.array([0, 0, 2, 2]), mask=np.array([[True, True], [True, True]], dtype=bool))
+    mask2_t1 = Mask(bbox=np.array([10, 10, 12, 12]), mask=np.array([[True, True], [True, True]], dtype=bool))
 
     node1_t0 = graph_backend.add_node({"t": 0, DEFAULT_ATTR_KEYS.MASK: mask1_t0})
     node2_t0 = graph_backend.add_node({"t": 0, DEFAULT_ATTR_KEYS.MASK: mask2_t0})
@@ -1825,7 +1835,7 @@ def test_sql_graph_mask_update_survives_reload(tmp_path: Path) -> None:
     graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
 
     mask_data = np.array([[True, False], [False, True]], dtype=bool)
-    mask = Mask(mask_data, bbox=np.array([0, 0, 2, 2]))
+    mask = Mask(bbox=np.array([0, 0, 2, 2]), mask=mask_data)
     node_id = graph.add_node({"t": 0, DEFAULT_ATTR_KEYS.MASK: mask})
 
     # Dispose engine before reopening to ensure sqlite file is released.
@@ -1835,8 +1845,8 @@ def test_sql_graph_mask_update_survives_reload(tmp_path: Path) -> None:
     reloaded.update_node_attrs(node_ids=[node_id], attrs={DEFAULT_ATTR_KEYS.MASK: [mask]})
     stored_mask = reloaded.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.MASK])[DEFAULT_ATTR_KEYS.MASK].to_list()[0]
 
-    assert isinstance(stored_mask, Mask)
-    np.testing.assert_array_equal(stored_mask.mask, mask_data)
+    assert isinstance(stored_mask, dict)
+    np.testing.assert_array_equal(stored_mask["mask"], mask_data)
 
 
 def test_sql_graph_mask_struct_stored_raw_not_pickled(tmp_path: Path) -> None:
@@ -1847,13 +1857,13 @@ def test_sql_graph_mask_struct_stored_raw_not_pickled(tmp_path: Path) -> None:
     """
     db_path = tmp_path / "mask_struct.db"
     graph = SQLGraph("sqlite", str(db_path))
-    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, Mask.struct_dtype(2))
+    graph.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, mask_struct_dtype(2))
 
     mask_data = np.array([[True, False], [False, True]], dtype=bool)
-    mask = Mask(mask_data, bbox=np.array([0, 0, 2, 2]))
-    node_id = graph.add_node({"t": 0, DEFAULT_ATTR_KEYS.MASK: mask.to_struct()})
+    mask = Mask(bbox=np.array([0, 0, 2, 2]), mask=mask_data)
+    node_id = graph.add_node({"t": 0, DEFAULT_ATTR_KEYS.MASK: mask_to_struct(mask)})
 
-    data_col = f"{DEFAULT_ATTR_KEYS.MASK}{STRUCT_FIELD_SEP}{Mask.MASK_DATA_FIELD}"
+    data_col = f"{DEFAULT_ATTR_KEYS.MASK}{STRUCT_FIELD_SEP}{MASK_DATA_FIELD}"
     # The binary leaf must be a raw LargeBinary column, never a PickleType.
     assert isinstance(graph.Node.__table__.columns[data_col].type, sa.LargeBinary)
     assert not isinstance(graph.Node.__table__.columns[data_col].type, sa.PickleType)
@@ -1866,10 +1876,10 @@ def test_sql_graph_mask_struct_stored_raw_not_pickled(tmp_path: Path) -> None:
     assert not isinstance(reloaded.Node.__table__.columns[data_col].type, sa.PickleType)
 
     df = reloaded.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.MASK])
-    assert df.schema[DEFAULT_ATTR_KEYS.MASK] == Mask.struct_dtype(2)
-    restored = as_mask(df[DEFAULT_ATTR_KEYS.MASK].to_list()[0])
-    np.testing.assert_array_equal(restored.mask, mask_data)
-    np.testing.assert_array_equal(restored.bbox, mask.bbox)
+    assert df.schema[DEFAULT_ATTR_KEYS.MASK] == mask_struct_dtype(2)
+    restored = mask_from_struct(df[DEFAULT_ATTR_KEYS.MASK].to_list()[0])
+    np.testing.assert_array_equal(restored["mask"], mask_data)
+    np.testing.assert_array_equal(restored["bbox"], mask["bbox"])
 
     # Struct-field filtering still works against the flat physical bbox columns.
     assert reloaded.filter(NodeAttr(DEFAULT_ATTR_KEYS.MASK).struct.field("min_y") == 0).node_ids() == [node_id]
@@ -2824,7 +2834,7 @@ def _fill_mock_geff_graph(graph_backend: BaseGraph) -> None:
             "y": 1.0,
             "z": 1.0,
             "bbox": np.array([6, 6, 8, 8]),
-            "mask": Mask(np.array([[True, True], [True, True]], dtype=bool), bbox=np.array([6, 6, 8, 8])),
+            "mask": Mask(bbox=np.array([6, 6, 8, 8]), mask=np.array([[True, True], [True, True]], dtype=bool)),
             DEFAULT_ATTR_KEYS.TRACKLET_ID: 1,
             "ndfeature": np.asarray([[1.0], [2.0], [3.0]]),
         }
@@ -2837,8 +2847,8 @@ def _fill_mock_geff_graph(graph_backend: BaseGraph) -> None:
             "z": 2.0,
             "bbox": np.array([0, 0, 3, 3]),
             "mask": Mask(
-                np.array([[True, True, True], [True, True, True], [True, True, True]], dtype=bool),
                 bbox=np.array([0, 0, 3, 3]),
+                mask=np.array([[True, True, True], [True, True, True], [True, True, True]], dtype=bool),
             ),
             DEFAULT_ATTR_KEYS.TRACKLET_ID: 1,
             "ndfeature": np.asarray([[9.0], [10.0], [11.0]]),
@@ -2852,7 +2862,7 @@ def _fill_mock_geff_graph(graph_backend: BaseGraph) -> None:
             "y": 3.0,
             "z": 3.0,
             "bbox": np.array([2, 2, 4, 4]),
-            "mask": Mask(np.array([[True, True], [True, True]], dtype=bool), bbox=np.array([2, 2, 4, 4])),
+            "mask": Mask(bbox=np.array([2, 2, 4, 4]), mask=np.array([[True, True], [True, True]], dtype=bool)),
             DEFAULT_ATTR_KEYS.TRACKLET_ID: 1,
             "ndfeature": np.asarray([[5.0], [6.0], [7.0]]),
         }
@@ -2888,7 +2898,11 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
     assert set(graph_backend.edge_attr_keys()) == set(geff_graph.edge_attr_keys())
 
     for node_id in geff_graph.node_ids():
-        assert geff_graph.nodes[node_id].to_dict() == graph_backend.nodes[node_id].to_dict()
+        geff_attrs = geff_graph.nodes[node_id].to_dict()
+        source_attrs = graph_backend.nodes[node_id].to_dict()
+        # `Mask` is a TypedDict holding numpy arrays, `==` cannot be used
+        assert mask_equal(geff_attrs.pop(DEFAULT_ATTR_KEYS.MASK), source_attrs.pop(DEFAULT_ATTR_KEYS.MASK))
+        assert geff_attrs == source_attrs
 
     assert rx.is_isomorphic(
         rx_graph,
@@ -3034,7 +3048,7 @@ def test_pickle_roundtrip(graph_backend: BaseGraph) -> None:
     graph_backend.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, pl.Float64)
 
     bbox = np.array([0, 0, 2, 2])
-    mask = Mask(np.array([[True, True], [True, True]], dtype=bool), bbox=bbox)
+    mask = Mask(bbox=bbox, mask=np.array([[True, True], [True, True]], dtype=bool))
 
     node_1 = graph_backend.add_node(
         {
@@ -3106,23 +3120,23 @@ def test_to_traccuracy_graph(graph_backend: BaseGraph) -> None:
 
     # Create masks for first graph
     mask1_data = np.array([[True, True], [True, True]], dtype=bool)
-    mask1 = Mask(mask1_data, bbox=np.array([0, 0, 2, 2]))
+    mask1 = Mask(bbox=np.array([0, 0, 2, 2]), mask=mask1_data)
 
     mask2_data = np.array([[True, False], [True, False]], dtype=bool)
-    mask2 = Mask(mask2_data, bbox=np.array([10, 10, 12, 12]))
+    mask2 = Mask(bbox=np.array([10, 10, 12, 12]), mask=mask2_data)
 
     mask3_data = np.array([[True, True, True, True, True]], dtype=bool)
-    mask3 = Mask(mask3_data, bbox=np.array([20, 20, 21, 25]))
+    mask3 = Mask(bbox=np.array([20, 20, 21, 25]), mask=mask3_data)
 
     # Add nodes to first graph
     node1 = graph_backend.add_node(
-        {"t": 0, "x": 1.0, "y": 1.0, DEFAULT_ATTR_KEYS.MASK: mask1, DEFAULT_ATTR_KEYS.BBOX: mask1.bbox}
+        {"t": 0, "x": 1.0, "y": 1.0, DEFAULT_ATTR_KEYS.MASK: mask1, DEFAULT_ATTR_KEYS.BBOX: mask1["bbox"]}
     )
     node2 = graph_backend.add_node(
-        {"t": 1, "x": 2.0, "y": 2.0, DEFAULT_ATTR_KEYS.MASK: mask2, DEFAULT_ATTR_KEYS.BBOX: mask2.bbox}
+        {"t": 1, "x": 2.0, "y": 2.0, DEFAULT_ATTR_KEYS.MASK: mask2, DEFAULT_ATTR_KEYS.BBOX: mask2["bbox"]}
     )
     node3 = graph_backend.add_node(
-        {"t": 2, "x": 3.0, "y": 3.0, DEFAULT_ATTR_KEYS.MASK: mask3, DEFAULT_ATTR_KEYS.BBOX: mask3.bbox}
+        {"t": 2, "x": 3.0, "y": 3.0, DEFAULT_ATTR_KEYS.MASK: mask3, DEFAULT_ATTR_KEYS.BBOX: mask3["bbox"]}
     )
 
     graph_backend.add_edge_attr_key("weight", dtype=pl.Float64)

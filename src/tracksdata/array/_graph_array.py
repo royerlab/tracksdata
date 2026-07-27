@@ -345,15 +345,17 @@ class GraphArrayView(BaseReadOnlyArray):
         """
         # Local import: avoids the graph <-> nodes package import cycle (importing
         # tracksdata.nodes re-enters the partially-initialized graph package).
-        from tracksdata.nodes._mask import as_mask
+        from tracksdata.nodes._mask import mask_paint_buffer, masks_from_column
 
         subgraph = self._spatial_filter[(slice(time, time), *volume_slicing)]
         df = subgraph.node_attrs(
             attr_keys=[self._attr_key, DEFAULT_ATTR_KEYS.MASK],
         )
 
-        for mask, value in zip(df[DEFAULT_ATTR_KEYS.MASK], df[self._attr_key], strict=True):
-            as_mask(mask).paint_buffer(buffer, value, offset=self._offset)
+        masks = masks_from_column(df[DEFAULT_ATTR_KEYS.MASK])
+
+        for mask, value in zip(masks, df[self._attr_key], strict=True):
+            mask_paint_buffer(mask, buffer, value, offset=self._offset)
 
     def _offset_as_array(self, ndim: int) -> np.ndarray:
         """Normalize `offset` to a vector for each spatial axis."""
@@ -483,10 +485,19 @@ class GraphArrayView(BaseReadOnlyArray):
         The rendered region depends on the displayed attribute value and the mask
         pixels, so a mask swap with an unchanged bbox still requires invalidation.
         """
+        # Local import: avoids the graph <-> nodes package import cycle.
+        from tracksdata.nodes._mask import MASK_DATA_FIELD, mask_equal
+
         old_mask = old_attr.get(DEFAULT_ATTR_KEYS.MASK)
         new_mask = new_attr.get(DEFAULT_ATTR_KEYS.MASK)
         if old_mask is None and new_mask is None:
             return False
         elif old_mask is None or new_mask is None:
             return True
-        return old_mask != new_mask
+
+        # Struct values only hold scalars and the compressed blob, so they compare
+        # directly; a `Mask` holds numpy arrays and needs `mask_equal`.
+        if MASK_DATA_FIELD in old_mask and MASK_DATA_FIELD in new_mask:
+            return old_mask != new_mask
+
+        return not mask_equal(old_mask, new_mask)

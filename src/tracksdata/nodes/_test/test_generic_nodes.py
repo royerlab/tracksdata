@@ -5,7 +5,7 @@ from numpy.typing import NDArray
 
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph import RustWorkXGraph
-from tracksdata.nodes import GenericFuncNodeAttrs, Mask
+from tracksdata.nodes import GenericFuncNodeAttrs, Mask, mask_crop
 from tracksdata.options import get_options, options_context
 
 
@@ -101,10 +101,10 @@ def test_crop_func_attrs_function_with_frames() -> None:
 
     # Create test masks
     mask1_data = np.array([[True, True], [True, False]], dtype=bool)
-    mask1 = Mask(mask1_data, bbox=np.array([0, 0, 2, 2]))
+    mask1 = Mask(bbox=np.array([0, 0, 2, 2]), mask=mask1_data)
 
     mask2_data = np.array([[True, False], [False, False]], dtype=bool)
-    mask2 = Mask(mask2_data, bbox=np.array([0, 0, 2, 2]))
+    mask2 = Mask(bbox=np.array([0, 0, 2, 2]), mask=mask2_data)
 
     # Add nodes with masks
     node1 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, DEFAULT_ATTR_KEYS.MASK: mask1})
@@ -118,8 +118,8 @@ def test_crop_func_attrs_function_with_frames() -> None:
     )
 
     def intensity_sum(frame: NDArray, mask: Mask) -> float:
-        cropped = mask.crop(frame)
-        return float(np.sum(cropped[mask.mask]))
+        cropped = mask_crop(mask, frame)
+        return float(np.sum(cropped[mask["mask"]]))
 
     # Register output key before using operator
     graph.add_node_attr_key("intensity_sum", dtype=pl.Float64)
@@ -158,10 +158,10 @@ def test_crop_func_attrs_function_with_frames_and_attrs() -> None:
 
     # Create test masks
     mask1_data = np.array([[True, True], [True, False]], dtype=bool)
-    mask1 = Mask(mask1_data, bbox=np.array([0, 0, 2, 2]))
+    mask1 = Mask(bbox=np.array([0, 0, 2, 2]), mask=mask1_data)
 
     mask2_data = np.array([[True, False], [False, False]], dtype=bool)
-    mask2 = Mask(mask2_data, bbox=np.array([0, 0, 2, 2]))
+    mask2 = Mask(bbox=np.array([0, 0, 2, 2]), mask=mask2_data)
 
     # Add nodes with masks and multipliers
     node1 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, DEFAULT_ATTR_KEYS.MASK: mask1, "multiplier": 2.0})
@@ -175,8 +175,8 @@ def test_crop_func_attrs_function_with_frames_and_attrs() -> None:
     )
 
     def intensity_sum_times_multiplier(frame: NDArray, mask: Mask, multiplier: float) -> float:
-        cropped = mask.crop(frame)
-        return float(np.sum(cropped[mask.mask]) * multiplier)
+        cropped = mask_crop(mask, frame)
+        return float(np.sum(cropped[mask["mask"]]) * multiplier)
 
     # Register output key before using operator
     graph.add_node_attr_key("weighted_intensity", dtype=pl.Float64)
@@ -213,7 +213,7 @@ def test_crop_func_attrs_function_returns_different_types() -> None:
 
     # Create test mask
     mask_data = np.array([[True, True], [True, False]], dtype=bool)
-    mask = Mask(mask_data, bbox=np.array([0, 0, 2, 2]))
+    mask = Mask(bbox=np.array([0, 0, 2, 2]), mask=mask_data)
 
     # Add node
     graph.add_node({DEFAULT_ATTR_KEYS.T: 0, DEFAULT_ATTR_KEYS.MASK: mask})
@@ -286,13 +286,13 @@ def test_crop_func_attrs_error_handling_missing_attr_key() -> None:
 
     # Create test mask
     mask_data = np.array([[True, True], [True, False]], dtype=bool)
-    mask = Mask(mask_data, bbox=np.array([0, 0, 2, 2]))
+    mask = Mask(bbox=np.array([0, 0, 2, 2]), mask=mask_data)
 
     # Add node
     graph.add_node({DEFAULT_ATTR_KEYS.T: 0, DEFAULT_ATTR_KEYS.MASK: mask})
 
     def double_mask_sum(mask: Mask) -> float:
-        return float(np.sum(mask.mask)) * 2.0
+        return float(np.sum(mask["mask"])) * 2.0
 
     # Create operator with output key that is not registered
     operator = GenericFuncNodeAttrs(
@@ -316,10 +316,10 @@ def test_crop_func_attrs_function_with_frames_multiprocessing(n_workers: int) ->
 
     # Create test masks for multiple time points
     mask1_data = np.array([[True, True], [True, False]], dtype=bool)
-    mask1 = Mask(mask1_data, bbox=np.array([0, 0, 2, 2]))
+    mask1 = Mask(bbox=np.array([0, 0, 2, 2]), mask=mask1_data)
 
     mask2_data = np.array([[True, False], [False, False]], dtype=bool)
-    mask2 = Mask(mask2_data, bbox=np.array([0, 0, 2, 2]))
+    mask2 = Mask(bbox=np.array([0, 0, 2, 2]), mask=mask2_data)
 
     # Add nodes with masks at different time points
     node1 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, DEFAULT_ATTR_KEYS.MASK: mask1})
@@ -334,8 +334,8 @@ def test_crop_func_attrs_function_with_frames_multiprocessing(n_workers: int) ->
     )
 
     def intensity_sum(frame: NDArray, mask: Mask) -> float:
-        cropped = mask.crop(frame)
-        return float(np.sum(cropped[mask.mask]))
+        cropped = mask_crop(mask, frame)
+        return float(np.sum(cropped[mask["mask"]]))
 
     # Register output key before using operator
     graph.add_node_attr_key("intensity_sum", dtype=pl.Float64)
@@ -441,13 +441,13 @@ def test_crop_func_attrs_batch_processing_with_frames() -> None:
 
     # Create test masks
     mask1_data = np.array([[True, True], [True, False]], dtype=bool)
-    mask1 = Mask(mask1_data, bbox=np.array([0, 0, 2, 2]))
+    mask1 = Mask(bbox=np.array([0, 0, 2, 2]), mask=mask1_data)
 
     mask2_data = np.array([[True, False], [False, False]], dtype=bool)
-    mask2 = Mask(mask2_data, bbox=np.array([0, 0, 2, 2]))
+    mask2 = Mask(bbox=np.array([0, 0, 2, 2]), mask=mask2_data)
 
     mask3_data = np.array([[False, True], [True, True]], dtype=bool)
-    mask3 = Mask(mask3_data, bbox=np.array([0, 0, 2, 2]))
+    mask3 = Mask(bbox=np.array([0, 0, 2, 2]), mask=mask3_data)
 
     # Add nodes with masks
     node1 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, DEFAULT_ATTR_KEYS.MASK: mask1})
@@ -465,8 +465,8 @@ def test_crop_func_attrs_batch_processing_with_frames() -> None:
         """Batch function that calculates intensity sum for each mask."""
         results = []
         for m in mask:
-            cropped = m.crop(frame)
-            results.append(float(np.sum(cropped[m.mask])))
+            cropped = mask_crop(m, frame)
+            results.append(float(np.sum(cropped[m["mask"]])))
         return results
 
     # Register output key before using operator
