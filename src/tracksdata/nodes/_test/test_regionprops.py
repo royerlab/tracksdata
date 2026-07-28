@@ -3,7 +3,6 @@ import polars as pl
 import pytest
 from skimage.measure._regionprops import RegionProperties
 
-from tracksdata.attrs import NodeAttr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph import RustWorkXGraph
 from tracksdata.nodes import Mask, RegionPropsNodes
@@ -373,52 +372,18 @@ def test_regionprops_tuple_property_stored_as_array() -> None:
     assert "centroid_weighted_1" in unpacked.columns
 
 
-def test_regionprops_separate_arrays() -> None:
-    """`separate_arrays=True` flattens array props into filterable scalar columns (#269)."""
+def test_regionprops_multidim_array_property_unpacks() -> None:
+    """2D array props (e.g. inertia_tensor) unpack into row-major scalar columns."""
     graph = RustWorkXGraph()
 
     labels = np.array([[[1, 1, 0], [1, 0, 2], [0, 2, 2]]], dtype=np.int32)
-    intensity = np.zeros((1, 3, 3, 2), dtype=np.float32)
-    intensity[..., 0] = [[10, 20, 0], [30, 0, 40], [0, 50, 60]]
-    intensity[..., 1] = [[1, 2, 0], [3, 0, 4], [0, 5, 6]]
 
-    operator = RegionPropsNodes(extra_properties=["intensity_max", "inertia_tensor"], separate_arrays=True)
-    operator.add_nodes(graph, labels=labels, intensity_image=intensity)
+    operator = RegionPropsNodes(extra_properties=["inertia_tensor"])
+    operator.add_nodes(graph, labels=labels)
 
-    nodes_df = graph.node_attrs()
-    # 1D property -> single index suffix; 2D property -> row-major double index suffix
-    for col in ["intensity_max_0", "intensity_max_1", "inertia_tensor_0_0", "inertia_tensor_1_1"]:
-        assert col in nodes_df.columns
-        assert nodes_df[col].dtype == pl.Float64
+    assert isinstance(graph.node_attrs().schema["inertia_tensor"], pl.Array)
 
-    # the array column itself must not exist when separated
-    assert "intensity_max" not in nodes_df.columns
-
-    # separated columns are now filterable
-    subgraph = graph.filter(NodeAttr("intensity_max_0") > 30)
-    filtered = subgraph.node_attrs()
-    assert len(filtered) == 1
-    assert filtered["intensity_max_0"][0] == 60.0
-
-
-def test_regionprops_separate_arrays_matches_unpack() -> None:
-    """`separate_arrays=True` column names match `node_attrs(unpack=True)`."""
-    labels = np.array([[[1, 1, 0], [1, 0, 2], [0, 2, 2]]], dtype=np.int32)
-    intensity = np.zeros((1, 3, 3, 2), dtype=np.float32)
-    intensity[..., 0] = [[10, 20, 0], [30, 0, 40], [0, 50, 60]]
-    intensity[..., 1] = [[1, 2, 0], [3, 0, 4], [0, 5, 6]]
-
-    extra = ["intensity_max", "inertia_tensor"]
-
-    sep_graph = RustWorkXGraph()
-    RegionPropsNodes(extra_properties=extra, separate_arrays=True).add_nodes(
-        sep_graph, labels=labels, intensity_image=intensity
-    )
-
-    packed_graph = RustWorkXGraph()
-    RegionPropsNodes(extra_properties=extra).add_nodes(packed_graph, labels=labels, intensity_image=intensity)
-
-    def _prop_cols(df: pl.DataFrame) -> set[str]:
-        return {c for c in df.columns if c.startswith(("intensity_max", "inertia_tensor"))}
-
-    assert _prop_cols(sep_graph.node_attrs()) == _prop_cols(packed_graph.node_attrs(unpack=True))
+    unpacked = graph.node_attrs(unpack=True)
+    for col in ["inertia_tensor_0_0", "inertia_tensor_1_1"]:
+        assert col in unpacked.columns
+        assert unpacked[col].dtype == pl.Float64
