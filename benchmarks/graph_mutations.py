@@ -109,6 +109,53 @@ class GraphMutationsBenchmark:
         self.graph.filter(NodeAttr(DEFAULT_ATTR_KEYS.T) >= 1).node_ids()
 
 
+class InteractiveLatencyBenchmark:
+    """Per-frame query latency on a graph with many time points.
+
+    The mutation benchmarks above use ~50 time points, where a full scan of the
+    node table and an indexed seek into a single frame cost about the same. The
+    interactive-editing budget is set by the opposite shape -- thousands of
+    frames, where `filter(t == k)` touches a small slice of a large table -- so
+    this parametrizes on frame count instead of raw node count.
+
+    Guards the `node_id`-range rewrite of `t == k` filters: without it these
+    degrade to a full table scan and grow linearly with the graph.
+    """
+
+    param_names = ("backend", "n_frames")
+    params = (tuple(BACKENDS), (500,) if IS_CI else (500, 2_000))
+
+    timeout = 600
+
+    # Nodes per frame; total nodes are `n_frames * NODES_PER_FRAME`.
+    NODES_PER_FRAME = 200
+
+    def setup(self, backend_name: str, n_frames: int) -> None:
+        self.graph = BACKENDS[backend_name]()
+        self.graph.add_node_attr_key("score", dtype=pl.Float64)
+        for t in range(n_frames):
+            self.graph.bulk_add_nodes([{DEFAULT_ATTR_KEYS.T: t, "score": 0.0} for _ in range(self.NODES_PER_FRAME)])
+        self.mid_frame = n_frames // 2
+        self.frame_ids = self.graph.filter(NodeAttr(DEFAULT_ATTR_KEYS.T) == self.mid_frame).node_ids()
+
+    def time_frame_node_ids(self, backend_name: str, n_frames: int) -> None:
+        self.graph.filter(NodeAttr(DEFAULT_ATTR_KEYS.T) == self.mid_frame).node_ids()
+
+    def time_frame_node_attrs(self, backend_name: str, n_frames: int) -> None:
+        self.graph.filter(NodeAttr(DEFAULT_ATTR_KEYS.T) == self.mid_frame).node_attrs(attr_keys=["score"])
+
+    def time_frame_subgraph(self, backend_name: str, n_frames: int) -> None:
+        self.graph.filter(NodeAttr(DEFAULT_ATTR_KEYS.T) == self.mid_frame).subgraph()
+
+    def time_filter_by_frame_node_ids(self, backend_name: str, n_frames: int) -> None:
+        # Drives the `_SQLIDSet` inline-vs-scratch-table cutoff: a frame's worth
+        # of ids must stay inline rather than spilling to an on-disk table.
+        self.graph.filter(node_ids=self.frame_ids).node_attrs(attr_keys=["score"])
+
+    def time_update_single_node(self, backend_name: str, n_frames: int) -> None:
+        self.graph.update_node_attrs(node_ids=self.frame_ids[:1], attrs={"score": 1.0})
+
+
 def _build_bbox_graph(backend_name: str, n_nodes: int) -> td.graph.BaseGraph:
     """Graph whose nodes carry a bbox, so a real BBoxSpatialFilter can index them."""
     graph = BACKENDS[backend_name]()

@@ -1874,6 +1874,163 @@ def test_sql_graph_max_id_restored_per_timepoint(tmp_path: Path) -> None:
     assert next_id == first_id + 1
 
 
+def _sqlite_query_plan(graph: SQLGraph, query: sa.Select) -> str:
+    """Return SQLite's EXPLAIN QUERY PLAN output for *query* as one string."""
+    raw = graph._raw_query(query)
+    with graph._engine.connect() as conn:
+        rows = conn.execute(sa.text("EXPLAIN QUERY PLAN " + raw)).fetchall()
+    return "\n".join(str(row[-1]) for row in rows)
+
+
+def _time_encoded_graph(db_path: Path, n_times: int = 4, per_time: int = 5) -> SQLGraph:
+    graph = SQLGraph("sqlite", str(db_path))
+    graph.add_node_attr_key("score", pl.Float64)
+    for t in range(n_times):
+        graph.bulk_add_nodes([{DEFAULT_ATTR_KEYS.T: t, "score": float(i)} for i in range(per_time)])
+    return graph
+
+
+def test_sql_graph_time_filter_uses_node_id_range(tmp_path: Path) -> None:
+    """``t == k`` must seek on the node_id index instead of scanning the table.
+
+    ``t`` is unindexed, so without the redundant node_id range conjunct every
+    per-frame query degrades to a full scan of the node table.
+    """
+    graph = _time_encoded_graph(tmp_path / "time_band.db")
+    assert graph._time_encoded_ids
+
+    filtered = graph.filter(NodeAttr(DEFAULT_ATTR_KEYS.T) == 2)
+    plan = _sqlite_query_plan(graph, filtered._node_query)
+
+    assert "SEARCH" in plan and "node_id" in plan, plan
+    assert "SCAN" not in plan, plan
+    assert sorted(filtered.node_ids()) == sorted(graph.node_ids()[10:15])
+
+
+def test_sql_graph_time_filter_correct_with_compound_filters(tmp_path: Path) -> None:
+    """The node_id conjunct is logically implied, so it must not change results.
+
+    Exercises the boolean compositions where a wrongly-scoped extra predicate
+    would show up: OR, NOT, and a plain conjunction with another attribute.
+    """
+    graph = _time_encoded_graph(tmp_path / "compound.db")
+
+    t_attr = NodeAttr(DEFAULT_ATTR_KEYS.T)
+    both_frames = graph.filter((t_attr == 1) | (t_attr == 3)).node_ids()
+    assert sorted(both_frames) == sorted(graph.filter(t_attr == 1).node_ids() + graph.filter(t_attr == 3).node_ids())
+
+    not_frame = graph.filter(~(t_attr == 1)).node_ids()
+    assert sorted(not_frame) == sorted(set(graph.node_ids()) - set(graph.filter(t_attr == 1).node_ids()))
+
+    combined = graph.filter(t_attr == 2, NodeAttr("score") >= 3.0).node_ids()
+    assert sorted(combined) == sorted(graph.node_ids()[13:15])
+
+    # Non-integer right-hand sides must fall through unoptimized, not silently
+    # produce an empty band.
+    assert graph.filter(t_attr >= 2).node_ids() == graph.node_ids()[10:]
+
+
+def test_sql_graph_custom_indices_disable_time_band(tmp_path: Path) -> None:
+    """Ids outside the time band must permanently disable the range rewrite."""
+    db_path = tmp_path / "custom_ids.db"
+    graph = SQLGraph("sqlite", str(db_path))
+    graph.bulk_add_nodes([{DEFAULT_ATTR_KEYS.T: 0}, {DEFAULT_ATTR_KEYS.T: 1}], indices=[7, 11])
+
+    assert not graph._time_encoded_ids
+    assert graph.filter(NodeAttr(DEFAULT_ATTR_KEYS.T) == 1).node_ids() == [11]
+
+    plan = _sqlite_query_plan(graph, graph.filter(NodeAttr(DEFAULT_ATTR_KEYS.T) == 1)._node_query)
+    assert "node_id" not in plan, plan
+
+    # The flag is derived from the stored ids, so a reopened database must not
+    # re-enable the rewrite on ids that do not encode their time point.
+    graph._engine.dispose()
+    reloaded = SQLGraph("sqlite", str(db_path))
+    assert not reloaded._time_encoded_ids
+    assert reloaded.filter(NodeAttr(DEFAULT_ATTR_KEYS.T) == 1).node_ids() == [11]
+
+
+def test_sql_graph_custom_indices_inside_band_keep_optimization(tmp_path: Path) -> None:
+    """Custom ids that still encode their time point should stay optimized."""
+    graph = SQLGraph("sqlite", str(tmp_path / "in_band.db"))
+    multiplier = SQLGraph.node_id_time_multiplier
+    graph.bulk_add_nodes(
+        [{DEFAULT_ATTR_KEYS.T: 0}, {DEFAULT_ATTR_KEYS.T: 1}],
+        indices=[3, multiplier + 9],
+    )
+
+    assert graph._time_encoded_ids
+    assert graph.filter(NodeAttr(DEFAULT_ATTR_KEYS.T) == 1).node_ids() == [multiplier + 9]
+
+
+def test_sql_graph_applies_sqlite_pragmas(tmp_path: Path) -> None:
+    """Default connections should be WAL + NORMAL with a large page cache."""
+    graph = SQLGraph("sqlite", str(tmp_path / "pragmas.db"))
+    with graph._engine.connect() as conn:
+        assert conn.execute(sa.text("PRAGMA journal_mode")).scalar() == "wal"
+        assert conn.execute(sa.text("PRAGMA synchronous")).scalar() == 1
+        assert conn.execute(sa.text("PRAGMA cache_size")).scalar() == -262_144
+
+
+def test_sql_graph_sqlite_pragmas_overridable(tmp_path: Path) -> None:
+    """``sqlite_pragmas`` must let callers opt out of the durability trade."""
+    default_off = SQLGraph("sqlite", str(tmp_path / "no_pragmas.db"), sqlite_pragmas={})
+    with default_off._engine.connect() as conn:
+        assert conn.execute(sa.text("PRAGMA journal_mode")).scalar() == "delete"
+        assert conn.execute(sa.text("PRAGMA synchronous")).scalar() == 2
+
+    strict = SQLGraph("sqlite", str(tmp_path / "strict.db"), sqlite_pragmas={"synchronous": "FULL"})
+    with strict._engine.connect() as conn:
+        assert conn.execute(sa.text("PRAGMA synchronous")).scalar() == 2
+
+
+def test_sql_graph_chunk_size_uses_real_variable_limit() -> None:
+    """The bind-variable budget must reflect the linked SQLite, not the 999 era."""
+    graph = SQLGraph("sqlite", ":memory:")
+    assert graph._sql_chunk_size() > 999
+
+
+def test_sql_graph_update_node_attrs_signal_payload(tmp_path: Path) -> None:
+    """The derived post-update payload must match a full re-read.
+
+    ``update_node_attrs`` builds ``new_attrs`` from the pre-update row plus the
+    written values instead of re-querying, so this pins that the emitted payload
+    still carries every attribute with the updated values applied.
+    """
+    graph = _time_encoded_graph(tmp_path / "signals.db", n_times=2, per_time=3)
+    events: list[tuple[list[int], list[dict], list[dict], set[str]]] = []
+    graph.node_updated.connect(lambda *args: events.append(args))
+
+    targets = graph.node_ids()[:2]
+    graph.update_node_attrs(node_ids=targets, attrs={"score": [10.0, 20.0]})
+
+    (node_ids, old_attrs, new_attrs, changed_keys) = events[-1]
+    assert node_ids == targets
+    assert changed_keys == {"score"}
+    assert [a["score"] for a in old_attrs] == [0.0, 1.0]
+    assert [a["score"] for a in new_attrs] == [10.0, 20.0]
+    # Untouched attributes must still be present and unchanged.
+    assert [a[DEFAULT_ATTR_KEYS.T] for a in new_attrs] == [0, 0]
+    assert set(new_attrs[0]) == set(old_attrs[0])
+    # And the payload must agree with what the database now holds.
+    stored = graph.filter(node_ids=targets).node_attrs(attr_keys=["score"])
+    assert stored["score"].to_list() == [10.0, 20.0]
+
+
+def test_sql_graph_update_all_nodes_without_listener_skips_id_materialization(tmp_path: Path) -> None:
+    """``node_ids=None`` and no listener must not enumerate every node id."""
+    graph = _time_encoded_graph(tmp_path / "update_all.db", n_times=2, per_time=3)
+
+    def _fail() -> list[int]:
+        raise AssertionError("node_ids() should not be called without a listener")
+
+    graph.node_ids = _fail  # type: ignore[method-assign]
+    graph.update_node_attrs(attrs={"score": 5.0})
+    del graph.node_ids
+
+    assert graph.node_attrs(attr_keys=["score"])["score"].to_list() == [5.0] * 6
+
+
 def test_sql_graph_schema_defaults_survive_reload(tmp_path: Path) -> None:
     """Reloading a SQLGraph should preserve dtype and default schema metadata."""
     db_path = tmp_path / "schema_defaults.db"
