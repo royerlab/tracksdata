@@ -20,20 +20,10 @@ repos:
     hooks:
       - id: absolufy-imports
 
-  # sorting imports
-  - repo: https://github.com/pycqa/isort
-    rev: 5.12.0
-    hooks:
-      - id: isort
-        args: ["--profile", "black", "--filter-files"]
-
-  # formatting
-  - repo: https://github.com/psf/black
-    rev: 25.1.0
-    hooks:
-      - id: black
-        args: ["--line-length", "120"]
-
+  # linting, import sorting (ruff "I") and formatting
+  # NOTE: ruff-format is the single formatter here; do not add black/isort back,
+  # they disagree with it (magic trailing comma, string quotes, import grouping)
+  # and CI only runs `ruff check` + `ruff format --check`.
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Ruff version.
     rev: v0.16.0

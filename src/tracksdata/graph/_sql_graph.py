@@ -648,20 +648,28 @@ class SQLFilter(BaseFilter):
         nodes_df = self._read_attr_dataframe(node_query, self._graph.Node)
         edges_df = self._read_attr_dataframe(edge_query, self._graph.Edge)
 
-        node_map_to_root = {}
-        node_map_from_root = {}
         rx_graph = rx.PyDiGraph()
 
-        for data in nodes_df.iter_rows(named=True):
-            root_node_id = data.pop(DEFAULT_ATTR_KEYS.NODE_ID)
-            node_id = rx_graph.add_node(data)
-            node_map_to_root[node_id] = root_node_id
-            node_map_from_root[root_node_id] = node_id
+        # Build the view with two bulk rustworkx calls rather than one call per
+        # row. A frame-sized subgraph is tens of thousands of nodes and edges,
+        # and the per-row `add_node` / `add_edge` round trips dominated the cost
+        # of materializing it.
+        root_node_ids = nodes_df[DEFAULT_ATTR_KEYS.NODE_ID].to_list()
+        node_payloads = nodes_df.drop(DEFAULT_ATTR_KEYS.NODE_ID).to_dicts()
+        local_node_ids = list(rx_graph.add_nodes_from(node_payloads))
 
-        for data in edges_df.iter_rows(named=True):
-            source_id = node_map_from_root[data.pop(DEFAULT_ATTR_KEYS.EDGE_SOURCE)]
-            target_id = node_map_from_root[data.pop(DEFAULT_ATTR_KEYS.EDGE_TARGET)]
-            rx_graph.add_edge(source_id, target_id, data)
+        node_map_to_root = dict(zip(local_node_ids, root_node_ids, strict=True))
+        node_map_from_root = dict(zip(root_node_ids, local_node_ids, strict=True))
+
+        edge_sources = edges_df[DEFAULT_ATTR_KEYS.EDGE_SOURCE].to_list()
+        edge_targets = edges_df[DEFAULT_ATTR_KEYS.EDGE_TARGET].to_list()
+        edge_payloads = edges_df.drop(DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET).to_dicts()
+        rx_graph.add_edges_from(
+            [
+                (node_map_from_root[source_id], node_map_from_root[target_id], data)
+                for source_id, target_id, data in zip(edge_sources, edge_targets, edge_payloads, strict=True)
+            ]
+        )
 
         graph = GraphView(
             rx_graph=rx_graph,
@@ -859,24 +867,44 @@ class SQLGraph(BaseGraph):
         class Node(Base):
             __tablename__ = "Node"
 
-            # Use node_id as sole primary key for simpler updates
-            node_id = sa.Column(sa.BigInteger, primary_key=True, unique=True)
+            # Use node_id as sole primary key for simpler updates.
+            #
+            # The SQLite variant is deliberately ``INTEGER`` rather than
+            # ``BIGINT``: SQLite only aliases a primary key onto the rowid when
+            # the declared type is literally ``INTEGER``. With ``BIGINT`` the
+            # table gets a hidden rowid *plus* a separate unique index, so every
+            # node is stored twice and each lookup is an index seek followed by
+            # a rowid seek. As the alias, ids assigned as
+            # ``t * node_id_time_multiplier + n`` also cluster the table
+            # physically by time, which is what makes a per-frame id range scan
+            # sequential. The value range is unchanged -- SQLite rowids are
+            # signed 64-bit.
+            node_id = sa.Column(
+                sa.BigInteger().with_variant(sa.Integer(), "sqlite"),
+                primary_key=True,
+            )
 
-            # Add t as a regular column
-            # NOTE might want to use as index for fast time-based queries
+            # Add t as a regular column. Kept unindexed on purpose: `t == k`
+            # filters carry an equivalent `node_id` range (see
+            # `_time_band_clause`), so an index here would cost a write per node
+            # without speeding up the query it would serve.
             t = sa.Column(sa.Integer, nullable=False)
 
         node_tb_name = Node.__tablename__
 
+        # NOTE: no `unique=True` on the primary keys below. It is implied by
+        # `primary_key=True`, and stating it again makes SQLAlchemy emit a
+        # redundant UNIQUE constraint -- an entire extra B-tree over the table,
+        # which on the edge table is the single largest avoidable index.
         class Edge(Base):
             __tablename__ = "Edge"
-            edge_id = sa.Column(sa.Integer, sa.Identity(always=True), primary_key=True, unique=True)
+            edge_id = sa.Column(sa.Integer, sa.Identity(always=True), primary_key=True)
             source_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"), index=True, nullable=False)
             target_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"), index=True, nullable=False)
 
         class Overlap(Base):
             __tablename__ = "Overlap"
-            overlap_id = sa.Column(sa.Integer, sa.Identity(always=True), primary_key=True, unique=True)
+            overlap_id = sa.Column(sa.Integer, sa.Identity(always=True), primary_key=True)
             source_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"), index=True, nullable=False)
             target_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"), index=True, nullable=False)
 
@@ -1688,8 +1716,46 @@ class SQLGraph(BaseGraph):
             return [i for (i,) in session.query(self.Edge.edge_id).all()]
 
     def time_points(self) -> list[int]:
+        if self._time_encoded_ids:
+            return self._time_points_by_id_bands()
         with Session(self._engine) as session:
             return [t for (t,) in session.query(self.Node.t).distinct().all()]
+
+    def _time_points_by_id_bands(self) -> list[int]:
+        """List the occupied time points by skipping between node id bands.
+
+        ``SELECT DISTINCT t`` has to read every row -- and every row carries the
+        mask blob, so on a segmented graph that is the entire database. When ids
+        encode their time point, each occupied time point instead costs one
+        ``MIN(node_id)`` seek over the primary key: the walk jumps straight from
+        a frame's first node to the start of the next frame's band, so the cost
+        is proportional to the number of frames rather than the number of nodes.
+
+        Termination is guaranteed by the same invariant that gates this path: a
+        node at time ``t`` has ``node_id < (t + 1) * multiplier``, so each step
+        seeks strictly past the current row and the walk stops when the seek
+        finds nothing.
+        """
+        table = self.Node.__tablename__
+        stmt = sa.text(
+            f"""
+            WITH RECURSIVE walk(tval) AS (
+                SELECT t FROM "{table}" WHERE node_id = (SELECT MIN(node_id) FROM "{table}")
+              UNION ALL
+                SELECT (
+                    SELECT n.t FROM "{table}" AS n
+                    WHERE n.node_id = (
+                        SELECT MIN(m.node_id) FROM "{table}" AS m
+                        WHERE m.node_id >= (walk.tval + 1) * :multiplier
+                    )
+                )
+                FROM walk WHERE walk.tval IS NOT NULL
+            )
+            SELECT tval FROM walk WHERE tval IS NOT NULL
+            """
+        )
+        with Session(self._engine) as session:
+            return [int(t) for (t,) in session.execute(stmt, {"multiplier": self.node_id_time_multiplier}).all()]
 
     def _reorder_by_indices(
         self,
@@ -2221,7 +2287,7 @@ class SQLGraph(BaseGraph):
             if hasattr(ids, "tolist"):
                 ids = ids.tolist()
 
-        # Handle array values with bulk_update_mappings
+        # Handle array values with a per-row bulk update
         attrs = attrs.copy()
         _data_numpy_to_native(attrs)
         schemas = self._attr_schemas_for_table(table_class)
@@ -2260,7 +2326,46 @@ class SQLGraph(BaseGraph):
         LOG.info("update %s table with %d rows", table_class.__table__, len(update_data))
         LOG.info("update data sample: %s", update_data[:2])
 
-        self._chunked_sa_write(Session.bulk_update_mappings, update_data, table_class)
+        self._bulk_update_by_id(table_class, id_key, update_data)
+
+    # Bind parameter standing in for the row's primary key. Prefixed so it
+    # cannot collide with a user-defined attribute key, which becomes a real
+    # column name and therefore its own bind parameter below.
+    _PK_BIND_PARAM = "_tracksdata_pk"
+
+    def _bulk_update_by_id(
+        self,
+        table_class: type[DeclarativeBase],
+        id_key: str,
+        rows: list[dict[str, Any]],
+    ) -> None:
+        """Apply per-row updates keyed by primary key, via a Core executemany.
+
+        The ORM's ``bulk_update_mappings`` builds a unit-of-work update command
+        per row in Python, which is the dominant cost of any write-back over a
+        whole graph (``assign_tracklet_ids``, the solvers' solution columns).
+        Compiling the statement once and handing the DBAPI a parameter list lets
+        the driver run the loop instead, at roughly twice the throughput.
+        """
+        if len(rows) == 0:
+            return
+
+        table = table_class.__table__
+        value_keys = [key for key in rows[0] if key != id_key]
+        if not value_keys:
+            return
+
+        stmt = (
+            sa.update(table)
+            .where(table.c[id_key] == sa.bindparam(self._PK_BIND_PARAM))
+            # Binding through the column keeps each parameter's type -- notably
+            # PickleType -- so values are serialized exactly as on insert.
+            .values({key: sa.bindparam(key) for key in value_keys})
+        )
+        params = [{self._PK_BIND_PARAM: row[id_key], **{key: row[key] for key in value_keys}} for row in rows]
+
+        with self._engine.begin() as conn:
+            conn.execute(stmt, params)
 
     def _chunked_sa_write(
         self,
