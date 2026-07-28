@@ -9,6 +9,7 @@ from polars.datatypes import numpy_char_code_to_dtype
 from skimage.measure._regionprops import RegionProperties, regionprops
 from typing_extensions import override
 
+from tracksdata.attrs import NodeAttr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.nodes._base_nodes import BaseNodesOperator
@@ -17,14 +18,99 @@ from tracksdata.utils._logging import LOG
 from tracksdata.utils._multiprocessing import multiprocessing_apply
 
 
+def _validate_properties(properties: list[str | Callable[[RegionProperties], Any]]) -> None:
+    """
+    Reject properties that are already added by default by `RegionPropsNodes`.
+
+    Parameters
+    ----------
+    properties : list[str | Callable[[RegionProperties], Any]]
+        The requested region properties.
+    """
+    if "centroid" in properties:
+        raise ValueError(
+            "`centroid` is not supported as an extra property. It's already included by default as (z), y, x."
+        )
+    if "bbox" in properties:
+        raise ValueError("`bbox` is not supported as an extra property. It's already included by default.")
+
+
+def _add_missing_node_attr_keys(graph: BaseGraph, node_attrs: dict[str, Any]) -> None:
+    """
+    Register node attribute keys in the graph, inferring dtypes from sample values.
+
+    Keys already present in the graph are left untouched.
+
+    Parameters
+    ----------
+    graph : BaseGraph
+        The graph to register the attribute keys in.
+    node_attrs : dict[str, Any]
+        A sample of node attributes, mapping each key to a single value
+        used to infer the dtype.
+    """
+    node_attr_keys = graph.node_attr_keys(return_ids=True)
+    for key, value in node_attrs.items():
+        if key not in node_attr_keys:
+            if isinstance(value, np.ndarray):
+                default_value = np.zeros_like(value)
+                graph.add_node_attr_key(
+                    key, pl.Array(numpy_char_code_to_dtype(value.dtype), value.shape), default_value
+                )
+            elif np.isscalar(value):
+                dtype = numpy_char_code_to_dtype(value.dtype) if hasattr(value, "dtype") else type(value)
+                graph.add_node_attr_key(key, dtype)
+            elif type(value).__module__ != "builtins":
+                graph.add_node_attr_key(key, pl.Object)
+            else:
+                graph.add_node_attr_key(key, type(value))
+
+
+def _region_property_attrs(
+    obj: RegionProperties,
+    properties: list[str | Callable[[RegionProperties], Any]],
+) -> dict[str, Any]:
+    """
+    Compute the requested region properties for a single region.
+
+    Parameters
+    ----------
+    obj : RegionProperties
+        The scikit-image region to compute the properties for.
+    properties : list[str | Callable[[RegionProperties], Any]]
+        The properties to compute. Strings are looked up on ``obj``, callables
+        are called with ``obj`` and named after their ``__name__``.
+
+    Returns
+    -------
+    dict[str, Any]
+        Mapping from attribute key to value for this region.
+    """
+    attrs: dict[str, Any] = {}
+    for prop in properties:
+        if callable(prop):
+            attrs[prop.__name__] = prop(obj)
+        else:
+            attrs[prop] = getattr(obj, prop)
+
+    return attrs
+
+
 class RegionPropsNodes(BaseNodesOperator):
     """
-    Operator that adds nodes to a graph using scikit-image's regionprops.
+    Operator that adds nodes and (re-)computes their region properties using scikit-image's regionprops.
 
     Extracts region properties from labeled images to create graph nodes using
     scikit-image's regionprops function to compute geometric and intensity-based
     features. Automatically adds centroid coordinates and mask information, with
-    additional properties computed based on the extra_properties parameter.
+    additional properties computed based on the ``extra_properties`` parameter.
+
+    The same operator can also (re-)compute properties for nodes that already
+    exist in a graph, evaluating regionprops on each node's stored
+    [Mask][tracksdata.nodes.Mask] via [add_node_attrs][tracksdata.nodes.RegionPropsNodes.add_node_attrs].
+    This is useful to compute properties that were not requested when the nodes
+    were created (e.g. intensity features of an additional channel) or to refresh
+    properties after masks were modified, without rebuilding the graph.
 
     Parameters
     ----------
@@ -37,6 +123,9 @@ class RegionPropsNodes(BaseNodesOperator):
         Physical spacing between pixels. If provided, affects distance-based
         measurements. Should be (row_spacing, col_spacing) for 2D or
         (depth_spacing, row_spacing, col_spacing) for 3D.
+    mask_key : str, optional
+        The key of the node attribute holding the [Mask][tracksdata.nodes.Mask]
+        objects, used by [add_node_attrs][tracksdata.nodes.RegionPropsNodes.add_node_attrs].
 
     Attributes
     ----------
@@ -86,22 +175,26 @@ class RegionPropsNodes(BaseNodesOperator):
     labels_series = np.random.randint(0, 10, (10, 100, 100))
     node_op.add_nodes(graph, labels=labels_series)
     ```
+
+    Recompute properties of an additional channel on an existing graph:
+
+    ```python
+    node_op = RegionPropsNodes(extra_properties=["intensity_mean", "intensity_max"])
+    node_op.add_node_attrs(graph, intensity_image=second_channel)
+    ```
     """
 
     def __init__(
         self,
         extra_properties: list[str | Callable[[RegionProperties], Any]] | None = None,
         spacing: tuple[float, float] | None = None,
+        mask_key: str = DEFAULT_ATTR_KEYS.MASK,
     ):
         super().__init__()
         self._extra_properties = extra_properties or []
-        if "centroid" in self._extra_properties:
-            raise ValueError(
-                "`centroid` is not supported as an extra property. It's already included by default as (z), y, x."
-            )
-        if "bbox" in self._extra_properties:
-            raise ValueError("`bbox` is not supported as an extra property. It's already included by default.")
+        _validate_properties(self._extra_properties)
         self._spacing = spacing
+        self._mask_key = mask_key
 
     def _axis_names(self, labels: NDArray[np.integer]) -> list[str]:
         """
@@ -128,21 +221,7 @@ class RegionPropsNodes(BaseNodesOperator):
         """
         Initialize the node attributes for the graph.
         """
-        node_attr_keys = graph.node_attr_keys(return_ids=True)
-        for key, value in node_attrs.items():
-            if key not in node_attr_keys:
-                if isinstance(value, np.ndarray):
-                    default_value = np.zeros_like(value)
-                    graph.add_node_attr_key(
-                        key, pl.Array(numpy_char_code_to_dtype(value.dtype), value.shape), default_value
-                    )
-                elif np.isscalar(value):
-                    dtype = numpy_char_code_to_dtype(value.dtype) if hasattr(value, "dtype") else type(value)
-                    graph.add_node_attr_key(key, dtype)
-                elif type(value).__module__ != "builtins":
-                    graph.add_node_attr_key(key, pl.Object)
-                else:
-                    graph.add_node_attr_key(key, type(value))
+        _add_missing_node_attr_keys(graph, node_attrs)
 
     def attr_keys(self) -> list[str]:
         """
@@ -300,11 +379,7 @@ class RegionPropsNodes(BaseNodesOperator):
         ):
             attrs = dict(zip(axis_names, obj.centroid, strict=False))
 
-            for prop in self._extra_properties:
-                if callable(prop):
-                    attrs[prop.__name__] = prop(obj)
-                else:
-                    attrs[prop] = getattr(obj, prop)
+            attrs.update(_region_property_attrs(obj, self._extra_properties))
 
             attrs[DEFAULT_ATTR_KEYS.MASK] = Mask(obj.image, obj.bbox)
             attrs[DEFAULT_ATTR_KEYS.BBOX] = np.asarray(obj.bbox, dtype=int)
@@ -317,3 +392,121 @@ class RegionPropsNodes(BaseNodesOperator):
             LOG.warning("No valid nodes found for time point %d", t)
 
         return nodes_data
+
+    def add_node_attrs(
+        self,
+        graph: BaseGraph,
+        *,
+        t: int | None = None,
+        intensity_image: NDArray | None = None,
+    ) -> None:
+        """
+        (Re-)compute region properties from the node masks and store them as node attributes.
+
+        For each node, scikit-image's regionprops is evaluated on the node's
+        [Mask][tracksdata.nodes.Mask] attribute (``mask_key``), optionally combined
+        with a given intensity image cropped to the mask bounding box. Missing
+        output attribute keys are registered in the graph with dtypes inferred from
+        the first computed values; existing keys are overwritten.
+
+        Parameters
+        ----------
+        graph : BaseGraph
+            The graph to add attributes to.
+        t : int | None, optional
+            The time point to compute attributes for.
+            If None, attributes are computed for all time points of the graph.
+        intensity_image : NDArray | None, optional
+            Intensity image used for computing intensity-based properties,
+            indexed by time point such that `intensity_image[t]` is the frame
+            matching the masks at time point `t`.
+
+        Examples
+        --------
+        Compute intensity features from an additional channel on an existing graph:
+
+        ```python
+        node_op = RegionPropsNodes(extra_properties=["intensity_mean", "intensity_max"])
+        node_op.add_node_attrs(graph, intensity_image=second_channel)
+        ```
+        """
+        if not self._extra_properties:
+            raise ValueError("`extra_properties` must contain at least one region property to compute node attributes.")
+
+        if self._mask_key not in graph.node_attr_keys():
+            raise ValueError(f"Mask key '{self._mask_key}' not found in graph. Expected '{graph.node_attr_keys()}'")
+
+        if t is None:
+            time_points = graph.time_points()
+        else:
+            time_points = [t]
+
+        initialized = False
+        for node_ids, node_attrs in multiprocessing_apply(
+            func=partial(self._node_attrs_per_time, graph=graph, intensity_image=intensity_image),
+            sequence=time_points,
+            desc="Computing region properties attributes",
+        ):
+            if len(node_ids) == 0:
+                continue
+            if not initialized:
+                sample_attrs = {key: values[0] for key, values in node_attrs.items()}
+                _add_missing_node_attr_keys(graph, sample_attrs)
+                initialized = True
+            graph.update_node_attrs(node_ids=node_ids, attrs=node_attrs)
+
+    def _node_attrs_per_time(
+        self,
+        t: int,
+        *,
+        graph: BaseGraph,
+        intensity_image: NDArray | None = None,
+    ) -> tuple[list[int], dict[str, list[Any]]]:
+        """
+        Compute region properties for the nodes of a single time point.
+
+        Parameters
+        ----------
+        t : int
+            The time point to compute attributes for.
+        graph : BaseGraph
+            The graph to add attributes to.
+        intensity_image : NDArray | None, optional
+            Intensity image indexed by time point, see `add_node_attrs`.
+
+        Returns
+        -------
+        tuple[list[int], dict[str, list[Any]]]
+            The node ids and the attributes to add to the graph.
+        """
+        graph_filter = graph.filter(NodeAttr(DEFAULT_ATTR_KEYS.T) == t)
+        node_ids = graph_filter.node_ids()
+
+        if len(node_ids) == 0:
+            LOG.warning("No nodes found for time point %d", t)
+            return [], {}
+
+        masks = graph_filter.node_attrs(attr_keys=[self._mask_key])[self._mask_key].to_list()
+
+        frame = np.asarray(intensity_image[t]) if intensity_image is not None else None
+
+        results: dict[str, list[Any]] = {}
+        for mask in masks:
+            if not isinstance(mask, Mask):
+                raise TypeError(
+                    f"Expected `Mask` object in '{self._mask_key}' attribute, got '{type(mask)}'. "
+                    "Use `mask_key` to select the attribute holding the masks."
+                )
+
+            regionprops_kwargs: dict[str, Any] = {"spacing": self._spacing}
+            if frame is not None:
+                regionprops_kwargs["intensity_image"] = mask.crop(frame)
+
+            obj = mask.regionprops(**regionprops_kwargs)
+
+            for key, value in _region_property_attrs(obj, self._extra_properties).items():
+                results.setdefault(key, []).append(value)
+
+            obj._cache.clear()  # clearing to reduce memory footprint
+
+        return node_ids, results
