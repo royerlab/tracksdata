@@ -601,3 +601,231 @@ def test_mask_move() -> None:
     mask.move(offset=np.asarray([-3, 2]), image_shape=(7, 7))
     np.testing.assert_array_equal(mask.bbox, [2, 4, 3, 5])
     np.testing.assert_array_equal(mask.mask, point)
+
+
+def _subtract_via_canvas(
+    mask1: Mask,
+    mask2: Mask,
+    canvas_shape: tuple[int, ...],
+) -> np.ndarray:
+    """
+    Subtract two masks by painting both into a shared canvas.
+
+    Independent oracle for ``Mask.__sub__``: it resolves the masks to absolute
+    coordinates first, so it shares none of the bounding-box offset arithmetic
+    used by the operator itself.
+    """
+    painted1 = np.zeros(canvas_shape, dtype=bool)
+    mask1.paint_buffer(painted1, True)
+
+    painted2 = np.zeros(canvas_shape, dtype=bool)
+    mask2.paint_buffer(painted2, True)
+
+    return painted1 & ~painted2
+
+
+def test_mask_sub_returns_new_mask_without_mutating_operands() -> None:
+    """`mask1 - mask2` should return a new Mask and leave both operands unchanged."""
+    mask1 = Mask(np.ones((2, 2), dtype=bool), np.asarray([1, 1, 3, 3]))
+    mask2 = Mask(np.ones((2, 2), dtype=bool), np.asarray([2, 2, 4, 4]))
+
+    mask1_before = mask1.mask.copy()
+    mask2_before = mask2.mask.copy()
+
+    result = mask1 - mask2
+
+    assert result is not mask1
+    assert result.mask is not mask1.mask
+    # only the pixel shared with mask2 is removed
+    np.testing.assert_array_equal(result.mask, [[True, True], [True, False]])
+    np.testing.assert_array_equal(result.bbox, [1, 1, 3, 3])
+
+    # operands untouched
+    np.testing.assert_array_equal(mask1.mask, mask1_before)
+    np.testing.assert_array_equal(mask2.mask, mask2_before)
+    np.testing.assert_array_equal(mask1.bbox, [1, 1, 3, 3])
+
+
+def test_mask_sub_no_overlap_copies_input() -> None:
+    """Subtracting a disjoint mask should yield an equal but independent Mask."""
+    mask1 = Mask(np.ones((2, 2), dtype=bool), np.asarray([0, 0, 2, 2]))
+    mask2 = Mask(np.ones((2, 2), dtype=bool), np.asarray([5, 5, 7, 7]))
+
+    result = mask1 - mask2
+
+    assert result == mask1
+    assert result.mask is not mask1.mask
+    assert result.bbox is not mask1.bbox
+
+    # mutating the result must not affect the original
+    result.mask[0, 0] = False
+    assert mask1.mask[0, 0]
+
+
+def test_mask_sub_bbox_touching_but_not_overlapping() -> None:
+    """Bounding boxes that share an edge do not overlap, so nothing is removed."""
+    mask1 = Mask(np.ones((2, 2), dtype=bool), np.asarray([0, 0, 2, 2]))
+    # starts exactly where mask1 ends along axis 0
+    mask2 = Mask(np.ones((2, 2), dtype=bool), np.asarray([2, 0, 4, 2]))
+
+    result = mask1 - mask2
+
+    np.testing.assert_array_equal(result.mask, np.ones((2, 2), dtype=bool))
+    np.testing.assert_array_equal(result.bbox, [0, 0, 2, 2])
+
+
+def test_mask_sub_other_fully_contains_self() -> None:
+    """Subtracting a mask that covers this one entirely should empty it."""
+    mask1 = Mask(np.ones((2, 2), dtype=bool), np.asarray([2, 2, 4, 4]))
+    mask2 = Mask(np.ones((6, 6), dtype=bool), np.asarray([0, 0, 6, 6]))
+
+    result = mask1 - mask2
+
+    assert not result.mask.any()
+    # bbox is preserved even when the mask becomes empty
+    np.testing.assert_array_equal(result.bbox, [2, 2, 4, 4])
+
+
+def test_mask_sub_self_fully_contains_other() -> None:
+    """Subtracting a strictly interior mask should punch a hole."""
+    mask1 = Mask(np.ones((4, 4), dtype=bool), np.asarray([0, 0, 4, 4]))
+    mask2 = Mask(np.ones((2, 2), dtype=bool), np.asarray([1, 1, 3, 3]))
+
+    result = mask1 - mask2
+
+    expected = np.ones((4, 4), dtype=bool)
+    expected[1:3, 1:3] = False
+    np.testing.assert_array_equal(result.mask, expected)
+    np.testing.assert_array_equal(result.bbox, [0, 0, 4, 4])
+
+
+def test_mask_sub_partial_overlap_3d() -> None:
+    """Subtraction should align masks by bbox in 3D, not by array position."""
+    mask1 = Mask(np.ones((2, 2, 2), dtype=bool), np.asarray([0, 0, 0, 2, 2, 2]))
+    mask2 = Mask(np.ones((2, 2, 2), dtype=bool), np.asarray([1, 1, 1, 3, 3, 3]))
+
+    result = mask1 - mask2
+
+    expected = np.ones((2, 2, 2), dtype=bool)
+    expected[1, 1, 1] = False  # the single shared voxel
+    np.testing.assert_array_equal(result.mask, expected)
+    np.testing.assert_array_equal(result.bbox, [0, 0, 0, 2, 2, 2])
+
+
+def test_mask_sub_dimension_mismatch() -> None:
+    """Subtraction should raise when masks do not share the same dimensionality."""
+    mask_2d = Mask(np.ones((1, 2), dtype=bool), np.asarray([0, 0, 1, 2]))
+    mask_3d = Mask(np.ones((1, 1, 2), dtype=bool), np.asarray([0, 0, 0, 1, 1, 2]))
+
+    with pytest.raises(ValueError, match=r"Cannot compare masks of different dimensions: 2 and 3."):
+        _ = mask_2d - mask_3d
+
+    with pytest.raises(ValueError, match=r"Cannot compare masks of different dimensions: 3 and 2."):
+        _ = mask_3d - mask_2d
+
+
+def test_mask_isub_mutates_in_place() -> None:
+    """`mask1 -= mask2` should modify mask1's existing array and return it."""
+    mask1 = Mask(np.ones((2, 2), dtype=bool), np.asarray([1, 1, 3, 3]))
+    mask2 = Mask(np.ones((2, 2), dtype=bool), np.asarray([2, 2, 4, 4]))
+
+    original_array = mask1.mask
+    original = mask1
+
+    mask1 -= mask2
+
+    assert mask1 is original
+    assert mask1.mask is original_array
+    np.testing.assert_array_equal(mask1.mask, [[True, True], [True, False]])
+    np.testing.assert_array_equal(mask1.bbox, [1, 1, 3, 3])
+
+
+def test_mask_isub_no_overlap_is_noop() -> None:
+    """In-place subtraction of a disjoint mask should leave the mask untouched."""
+    mask1 = Mask(np.ones((2, 2), dtype=bool), np.asarray([0, 0, 2, 2]))
+    mask2 = Mask(np.ones((2, 2), dtype=bool), np.asarray([9, 9, 11, 11]))
+
+    original_array = mask1.mask
+    mask1 -= mask2
+
+    assert mask1.mask is original_array
+    np.testing.assert_array_equal(mask1.mask, np.ones((2, 2), dtype=bool))
+    np.testing.assert_array_equal(mask1.bbox, [0, 0, 2, 2])
+
+
+def test_mask_isub_does_not_mutate_other() -> None:
+    """In-place subtraction must not modify the subtrahend."""
+    mask1 = Mask(np.ones((3, 3), dtype=bool), np.asarray([0, 0, 3, 3]))
+    mask2 = Mask(np.ones((2, 2), dtype=bool), np.asarray([1, 1, 3, 3]))
+
+    mask2_before = mask2.mask.copy()
+    mask1 -= mask2
+
+    np.testing.assert_array_equal(mask2.mask, mask2_before)
+    np.testing.assert_array_equal(mask2.bbox, [1, 1, 3, 3])
+
+
+def test_mask_sub_and_isub_agree() -> None:
+    """`-` and `-=` should produce identical results for the same operands."""
+    bbox1 = np.asarray([1, 2, 4, 5])
+    bbox2 = np.asarray([2, 3, 5, 6])
+    mask_array = np.asarray(
+        [
+            [True, False, True],
+            [True, True, False],
+            [False, True, True],
+        ],
+        dtype=bool,
+    )
+
+    subtrahend = Mask(mask_array.copy(), bbox2.copy())
+
+    from_sub = Mask(mask_array.copy(), bbox1.copy()) - subtrahend
+
+    in_place = Mask(mask_array.copy(), bbox1.copy())
+    in_place -= subtrahend
+
+    assert from_sub == in_place
+
+
+@pytest.mark.parametrize("offset", [(-3, -3), (-1, 0), (0, 0), (0, 2), (1, 1), (2, -1), (4, 4)])
+def test_mask_sub_matches_canvas_subtraction_2d(offset: tuple[int, int]) -> None:
+    """Subtraction must agree with painting both masks into a shared canvas."""
+    canvas_shape = (12, 12)
+    rng = np.random.default_rng(abs(hash(offset)) % (2**32))
+
+    start1 = np.asarray([4, 4])
+    start2 = start1 + np.asarray(offset)
+    shape1, shape2 = (3, 3), (2, 4)
+
+    mask1 = Mask(rng.random(shape1) > 0.4, np.concatenate([start1, start1 + shape1]))
+    mask2 = Mask(rng.random(shape2) > 0.4, np.concatenate([start2, start2 + shape2]))
+
+    result = mask1 - mask2
+
+    painted = np.zeros(canvas_shape, dtype=bool)
+    result.paint_buffer(painted, True)
+
+    np.testing.assert_array_equal(painted, _subtract_via_canvas(mask1, mask2, canvas_shape))
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_mask_sub_matches_canvas_subtraction_3d(seed: int) -> None:
+    """Randomized 3D subtraction must agree with the shared-canvas oracle."""
+    canvas_shape = (10, 10, 10)
+    rng = np.random.default_rng(seed)
+
+    start1 = rng.integers(0, 5, 3)
+    start2 = rng.integers(0, 5, 3)
+    shape1 = rng.integers(1, 4, 3)
+    shape2 = rng.integers(1, 4, 3)
+
+    mask1 = Mask(rng.random(tuple(shape1)) > 0.4, np.concatenate([start1, start1 + shape1]))
+    mask2 = Mask(rng.random(tuple(shape2)) > 0.4, np.concatenate([start2, start2 + shape2]))
+
+    result = mask1 - mask2
+
+    painted = np.zeros(canvas_shape, dtype=bool)
+    result.paint_buffer(painted, True)
+
+    np.testing.assert_array_equal(painted, _subtract_via_canvas(mask1, mask2, canvas_shape))
