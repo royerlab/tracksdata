@@ -114,6 +114,10 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         self._sync = sync
         self._out_of_sync = False
 
+        # Register with the root so that writes made directly to the root are
+        # applied to this view. Held weakly, so no explicit teardown is needed.
+        root._views.add(self)
+
         # Existing for API compatibility for the SQLGraph generating GraphView,
         # but RXGraph always uses the root graph's attributes and just filtering them
         self._node_attr_keys = node_attr_keys
@@ -996,11 +1000,25 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
 
         # Block root signal so it doesn't fire while the view is still in old state;
         # re-emit at the end after both root and view are consistent.
-        with self._root.node_updated.blocked():
-            self._root.update_node_attrs(
-                node_ids=node_ids,
-                attrs=attrs,
-            )
+        #
+        # Detach this view for the duration of the root call, because the rest of
+        # this method already does what the root's view maintenance would do
+        # (write through locally, then emit `node_updated`). Without detaching,
+        # both would run and this view would be written and announced twice.
+        #
+        # This duplication only exists because the root's signal has to be
+        # deferred until the view has caught up; if that requirement were dropped,
+        # this method could simply delegate to the root and let the normal
+        # maintenance path update the view. See scratch notes on the signal replay.
+        self._root._views.discard(self)
+        try:
+            with self._root.node_updated.blocked():
+                self._root.update_node_attrs(
+                    node_ids=node_ids,
+                    attrs=attrs,
+                )
+        finally:
+            self._root._views.add(self)
         # because attributes are passed by reference, we need don't need if both are rustworkx graphs
         if not self._is_root_rx_graph:
             if self.sync:
@@ -1039,6 +1057,66 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
                     changed_keys,
                 )
 
+    def _apply_root_node_attrs(
+        self,
+        *,
+        node_ids: Sequence[int],
+        old_attrs_by_id: dict[int, dict[str, Any]],
+        new_attrs_by_id: dict[int, dict[str, Any]],
+        changed_keys: set[str],
+    ) -> None:
+        """
+        Absorb a node attribute update made directly on the root graph.
+
+        Brings this view up to date and *then* emits its own ``node_updated``
+        signal for the nodes it contains. Keeping the view consistent with its
+        root is an invariant, so the local update happens whether or not
+        anything is listening — only the emission is conditional.
+
+        Parameters
+        ----------
+        node_ids : Sequence[int]
+            Nodes updated on the root, in root ids.
+        old_attrs_by_id : dict[int, dict[str, Any]]
+            Attributes before the update, keyed by root id.
+        new_attrs_by_id : dict[int, dict[str, Any]]
+            Attributes after the update, keyed by root id.
+        changed_keys : set[str]
+            Attribute keys written by this update.
+        """
+        in_view = [node_id for node_id in node_ids if self.has_node(node_id)]
+        if not in_view:
+            return
+
+        # Maintain first. When the root is a rustworkx graph the view shares the
+        # root's attribute dicts, so the values are already current and writing
+        # again would be redundant. Otherwise (e.g. a SQLGraph root) the view
+        # holds its own copy and has to be written through.
+        if not self._is_root_rx_graph:
+            if self.sync:
+                local_attrs = {
+                    key: [new_attrs_by_id[node_id][key] for node_id in in_view]
+                    for key in changed_keys
+                    if all(key in new_attrs_by_id[node_id] for node_id in in_view)
+                }
+                if local_attrs:
+                    with self.node_updated.blocked():
+                        RustWorkXGraph.update_node_attrs(
+                            self,
+                            node_ids=self._map_to_local(in_view),
+                            attrs=local_attrs,
+                        )
+            else:
+                self._out_of_sync = True
+
+        # Notify second, now that root and view agree.
+        if is_signal_on(self.node_updated):
+            emit_node_updated_events(
+                self.node_updated,
+                ((node_id, old_attrs_by_id[node_id], new_attrs_by_id[node_id]) for node_id in in_view),
+                changed_keys,
+            )
+
     def update_edge_attrs(
         self,
         *,
@@ -1048,10 +1126,18 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         if edge_ids is None:
             edge_ids = self.edge_ids()
 
-        self._root.update_edge_attrs(
-            edge_ids=edge_ids,
-            attrs=attrs,
-        )
+        # Detach for the duration of the root call: this method writes through to
+        # the local copy itself, so letting the root's maintenance do it as well
+        # would write the same values twice. Unlike the node path there is no
+        # signal to defer, so no re-emission is needed here.
+        self._root._views.discard(self)
+        try:
+            self._root.update_edge_attrs(
+                edge_ids=edge_ids,
+                attrs=attrs,
+            )
+        finally:
+            self._root._views.add(self)
         # because attributes are passed by reference, we need don't need if both are rustworkx graphs
         if not self._is_root_rx_graph:
             if self.sync:
@@ -1061,6 +1147,48 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
                 )
             else:
                 self._out_of_sync = True
+
+    def _apply_root_edge_attrs(
+        self,
+        *,
+        edge_ids: Sequence[int],
+        attrs: dict[str, Any],
+    ) -> None:
+        """
+        Absorb an edge attribute update made directly on the root graph.
+
+        Parameters
+        ----------
+        edge_ids : Sequence[int]
+            Edges updated on the root, in root edge ids.
+        attrs : dict[str, Any]
+            The attributes written, in the same form passed to
+            ``update_edge_attrs``.
+        """
+        # When the root is a rustworkx graph the view shares the root's attribute
+        # dicts, so the values are already current.
+        if self._is_root_rx_graph:
+            return
+
+        # Keep positions, not just ids: per-edge values are positional, so the
+        # in-view subset has to be selected by the same indices.
+        in_view = [(i, edge_id) for i, edge_id in enumerate(edge_ids) if edge_id in self._edge_map_from_root]
+        if not in_view:
+            return
+
+        if not self.sync:
+            self._out_of_sync = True
+            return
+
+        positions = [i for i, _ in in_view]
+        local_attrs = {
+            key: value if np.isscalar(value) else [value[i] for i in positions] for key, value in attrs.items()
+        }
+
+        super().update_edge_attrs(
+            edge_ids=[self._edge_map_from_root[edge_id] for _, edge_id in in_view],
+            attrs=local_attrs,
+        )
 
     def in_degree(self, node_ids: list[int] | int | None = None) -> list[int] | int:
         """

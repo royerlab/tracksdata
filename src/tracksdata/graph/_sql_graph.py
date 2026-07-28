@@ -645,6 +645,7 @@ class SQLGraph(BaseGraph):
         engine_kwargs: dict[str, Any] | None = None,
         overwrite: bool = False,
     ):
+        super().__init__()
         self._url = sa.engine.URL.create(
             drivername,
             username=username,
@@ -2188,7 +2189,10 @@ class SQLGraph(BaseGraph):
             return
 
         attr_keys = self.node_attr_keys()
-        if is_signal_on(self.node_updated):
+        # Views must be maintained even with no listeners, so the before/after
+        # snapshots are needed whenever a signal is on *or* a view exists.
+        needs_attrs = is_signal_on(self.node_updated) or bool(self._views)
+        if needs_attrs:
             old_df = self.filter(node_ids=updated_node_ids).node_attrs(
                 attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, *attr_keys]
             )
@@ -2198,18 +2202,27 @@ class SQLGraph(BaseGraph):
 
         self._update_table(self.Node, node_ids, DEFAULT_ATTR_KEYS.NODE_ID, attrs)
 
-        if is_signal_on(self.node_updated):
+        if needs_attrs:
+            changed_keys = set(attrs.keys())
             new_df = self.filter(node_ids=updated_node_ids).node_attrs(
                 attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, *attr_keys]
             )
             new_attrs_by_id = new_df.rows_by_key(
                 key=DEFAULT_ATTR_KEYS.NODE_ID, named=True, unique=True, include_key=True
             )
-            emit_node_updated_events(
-                self.node_updated,
-                ((node_id, old_attrs_by_id[node_id], new_attrs_by_id[node_id]) for node_id in updated_node_ids),
-                set(attrs.keys()),
-            )
+            if is_signal_on(self.node_updated):
+                emit_node_updated_events(
+                    self.node_updated,
+                    ((node_id, old_attrs_by_id[node_id], new_attrs_by_id[node_id]) for node_id in updated_node_ids),
+                    changed_keys,
+                )
+            if self._views:
+                self._maintain_views_node_attrs(
+                    node_ids=updated_node_ids,
+                    old_attrs_by_id=old_attrs_by_id,
+                    new_attrs_by_id=new_attrs_by_id,
+                    changed_keys=changed_keys,
+                )
 
     def update_edge_attrs(
         self,
@@ -2218,6 +2231,10 @@ class SQLGraph(BaseGraph):
         edge_ids: Sequence[int] | None = None,
     ) -> None:
         self._update_table(self.Edge, edge_ids, DEFAULT_ATTR_KEYS.EDGE_ID, attrs)
+
+        if self._views:
+            updated_edge_ids = self.edge_ids() if edge_ids is None else list(edge_ids)
+            self._maintain_views_edge_attrs(edge_ids=updated_edge_ids, attrs=attrs)
 
     def assign_tracklet_ids(
         self,
@@ -2486,13 +2503,13 @@ class SQLGraph(BaseGraph):
                 _drop_scratch_table(source_root._engine, selected)
 
     def __getstate__(self) -> dict:
-        data_dict = self.__dict__.copy()
+        data_dict = super().__getstate__()
         for k in ["Base", "Node", "Edge", "Overlap", "Metadata", "_engine"]:
             del data_dict[k]
         return data_dict
 
     def __setstate__(self, state: dict) -> None:
-        self.__dict__.update(state)
+        super().__setstate__(state)
         # recreate deleted objects
         self._engine = sa.create_engine(self._url, **self._engine_kwargs)
         self._define_schema(overwrite=False)
