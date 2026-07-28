@@ -1,5 +1,5 @@
 from collections.abc import Callable, Sequence
-from typing import Any, Literal, cast, overload
+from typing import Any, Literal, overload
 
 import bidict
 import numpy as np
@@ -392,12 +392,11 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         validate_keys: bool = True,
         index: int | None = None,
     ) -> int:
-        with self._root.node_added.blocked():
-            parent_node_id = self._root.add_node(
-                attrs=attrs,
-                validate_keys=validate_keys,
-                index=index,
-            )
+        parent_node_id = self._root.add_node(
+            attrs=attrs,
+            validate_keys=validate_keys,
+            index=index,
+        )
 
         if self.sync:
             # Local primitive: pure rx_graph + _time_to_nodes, no validation, no signal.
@@ -406,14 +405,12 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         else:
             self._out_of_sync = True
 
-        emit_node_added_events(self._root.node_added, [(parent_node_id, attrs)])
         emit_node_added_events(self.node_added, [(parent_node_id, attrs)])
 
         return parent_node_id
 
     def bulk_add_nodes(self, nodes: list[dict[str, Any]], indices: list[int] | None = None) -> list[int]:
-        with self._root.node_added.blocked():
-            parent_node_ids = self._root.bulk_add_nodes(nodes, indices=indices)
+        parent_node_ids = self._root.bulk_add_nodes(nodes, indices=indices)
 
         if self._is_root_rx_graph:
             # The rx root stored these exact dict objects by reference (and does not
@@ -435,7 +432,6 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         else:
             self._out_of_sync = True
 
-        emit_node_added_events(self._root.node_added, zip(parent_node_ids, emitted_nodes, strict=True))
         emit_node_added_events(self.node_added, zip(parent_node_ids, emitted_nodes, strict=True))
 
         return parent_node_ids
@@ -490,9 +486,9 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
             raise ValueError(f"Node {missing[0]} does not exist in the graph.")
 
         view_signal_on = is_signal_on(self.node_removed)
-        root_signal_on = is_signal_on(self._root.node_removed)
         old_attrs_per_node: dict[int, dict[str, Any]] = {}
-        if view_signal_on or root_signal_on:
+        if view_signal_on:
+            # Must be captured before removal, while the attributes still exist.
             # Single batched query instead of one filter+materialize per node.
             # include_key defaults to False, so NODE_ID is excluded from each attrs
             # dict, matching the previous per-node NodeInterface.to_dict() behaviour.
@@ -502,8 +498,7 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
                 .rows_by_key(key=DEFAULT_ATTR_KEYS.NODE_ID, named=True, unique=True)
             )
 
-        with self._root.node_removed.blocked():
-            self._root.bulk_remove_nodes(node_ids)
+        self._root.bulk_remove_nodes(node_ids)
 
         if self.sync:
             local_ids = [self._external_to_local[nid] for nid in node_ids]
@@ -518,8 +513,6 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         else:
             self._out_of_sync = True
 
-        if root_signal_on:
-            emit_node_removed_events(self._root.node_removed, ((nid, old_attrs_per_node[nid]) for nid in node_ids))
         if view_signal_on:
             emit_node_removed_events(self.node_removed, ((nid, old_attrs_per_node[nid]) for nid in node_ids))
 
@@ -966,96 +959,19 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         attrs: dict[str, Any],
         node_ids: Sequence[int] | None = None,
     ) -> None:
+        """
+        Update node attributes through this view.
+
+        Delegates to the root, which applies the change back to this view (and any
+        sibling views) through the normal maintenance path, so there is a single
+        implementation of "absorb a node attribute change".
+        """
         if node_ids is None:
             node_ids = self.node_ids()
         else:
             node_ids = list(node_ids)
 
-        # Capture signal state once so slots connecting mid-call cannot toggle behavior
-        # between the old/new attr captures or between the two emit blocks.
-        view_signal_on = is_signal_on(self.node_updated)
-        root_signal_on = is_signal_on(self._root.node_updated)
-        if view_signal_on or root_signal_on:
-            existing_keys = set(self._root.node_attr_keys(return_ids=True))
-            signal_keys = list(
-                dict.fromkeys(
-                    k
-                    for k in [
-                        DEFAULT_ATTR_KEYS.NODE_ID,
-                        DEFAULT_ATTR_KEYS.T,
-                        DEFAULT_ATTR_KEYS.Z,
-                        DEFAULT_ATTR_KEYS.Y,
-                        DEFAULT_ATTR_KEYS.X,
-                        DEFAULT_ATTR_KEYS.BBOX,
-                        *attrs.keys(),
-                    ]
-                    if k in existing_keys
-                )
-            )
-            old_attrs_by_id = (
-                self._root.filter(node_ids=node_ids)
-                .node_attrs(attr_keys=signal_keys)
-                .rows_by_key(key=DEFAULT_ATTR_KEYS.NODE_ID, named=True, unique=True, include_key=True)
-            )
-
-        # Block root signal so it doesn't fire while the view is still in old state;
-        # re-emit at the end after both root and view are consistent.
-        #
-        # Detach this view for the duration of the root call, because the rest of
-        # this method already does what the root's view maintenance would do
-        # (write through locally, then emit `node_updated`). Without detaching,
-        # both would run and this view would be written and announced twice.
-        #
-        # This duplication only exists because the root's signal has to be
-        # deferred until the view has caught up; if that requirement were dropped,
-        # this method could simply delegate to the root and let the normal
-        # maintenance path update the view. See scratch notes on the signal replay.
-        self._root._views.discard(self)
-        try:
-            with self._root.node_updated.blocked():
-                self._root.update_node_attrs(
-                    node_ids=node_ids,
-                    attrs=attrs,
-                )
-        finally:
-            self._root._views.add(self)
-        # because attributes are passed by reference, we need don't need if both are rustworkx graphs
-        if not self._is_root_rx_graph:
-            if self.sync:
-                with self.node_updated.blocked():
-                    super().update_node_attrs(
-                        node_ids=self._map_to_local(node_ids),
-                        attrs=attrs,
-                    )
-            else:
-                self._out_of_sync = True
-
-        if view_signal_on or root_signal_on:
-            old_attrs_by_id = cast(dict[int, dict[str, Any]], old_attrs_by_id)  # for mypy
-            # Derive new_attrs by overlaying applied `attrs` onto old_attrs, instead of
-            # re-querying root. Mirrors the broadcasting semantics of
-            # `_root.update_node_attrs`: scalars apply to all nodes, sequences index by
-            # position in `node_ids`.
-            new_attrs_by_id: dict[int, dict[str, Any]] = {}
-            for i, node_id in enumerate(node_ids):
-                new_attrs = dict(old_attrs_by_id[node_id])
-                for k, v in attrs.items():
-                    if k in new_attrs:
-                        new_attrs[k] = v if np.isscalar(v) else v[i]
-                new_attrs_by_id[node_id] = new_attrs
-            changed_keys = set(attrs.keys())
-            if root_signal_on:
-                emit_node_updated_events(
-                    self._root.node_updated,
-                    ((node_id, old_attrs_by_id[node_id], new_attrs_by_id[node_id]) for node_id in node_ids),
-                    changed_keys,
-                )
-            if view_signal_on:
-                emit_node_updated_events(
-                    self.node_updated,
-                    ((node_id, old_attrs_by_id[node_id], new_attrs_by_id[node_id]) for node_id in node_ids),
-                    changed_keys,
-                )
+        self._root.update_node_attrs(node_ids=node_ids, attrs=attrs)
 
     def _apply_root_node_attrs(
         self,
@@ -1123,30 +1039,19 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         attrs: dict[str, Any],
         edge_ids: Sequence[int] | None = None,
     ) -> None:
+        """
+        Update edge attributes through this view.
+
+        Delegates to the root, which applies the change back to this view (and any
+        sibling views) through the normal maintenance path.
+        """
         if edge_ids is None:
             edge_ids = self.edge_ids()
 
-        # Detach for the duration of the root call: this method writes through to
-        # the local copy itself, so letting the root's maintenance do it as well
-        # would write the same values twice. Unlike the node path there is no
-        # signal to defer, so no re-emission is needed here.
-        self._root._views.discard(self)
-        try:
-            self._root.update_edge_attrs(
-                edge_ids=edge_ids,
-                attrs=attrs,
-            )
-        finally:
-            self._root._views.add(self)
-        # because attributes are passed by reference, we need don't need if both are rustworkx graphs
-        if not self._is_root_rx_graph:
-            if self.sync:
-                super().update_edge_attrs(
-                    edge_ids=[self._edge_map_from_root[eid] for eid in edge_ids],
-                    attrs=attrs,
-                )
-            else:
-                self._out_of_sync = True
+        self._root.update_edge_attrs(
+            edge_ids=edge_ids,
+            attrs=attrs,
+        )
 
     def _apply_root_edge_attrs(
         self,

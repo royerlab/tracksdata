@@ -24,13 +24,13 @@ from tracksdata.graph import BaseGraph, RustWorkXGraph
 from tracksdata.graph._rustworkx_graph import IndexedRXGraph
 
 
-def test_view_node_signals_fire_with_consistent_state(graph_backend: BaseGraph) -> None:
-    """add_node / remove_node: when either signal fires (on root or view), the
-    two graphs must agree on `has_node`.
+def test_node_signals_fire_after_the_emitting_graph_is_updated(graph_backend: BaseGraph) -> None:
+    """add_node / remove_node: a signal must reflect the graph that emitted it.
 
-    Today used to fail on `remove_node` because `GraphView.remove_node` does not
-    block the root signal — root emits while the view's local rx_graph still
-    holds the node.
+    Each graph is responsible for its own signal only. A listener on the root
+    sees the root updated; a listener on the view sees the view updated. Neither
+    is required to observe the *other* graph in any particular state — see
+    royerlab/tracksdata#324.
     """
     graph_backend.add_node_attr_key("x", pl.Float64)
     graph_backend.add_node({"t": 0, "x": 0.0})
@@ -38,36 +38,42 @@ def test_view_node_signals_fire_with_consistent_state(graph_backend: BaseGraph) 
     view = graph_backend.filter().subgraph()
     observations: list = []
 
-    def make_slot(source: str, signal: str):
+    def make_slot(graph: BaseGraph, source: str, signal: str):
         def slot(node_ids: list[int], *_args) -> None:
             for node_id in node_ids:
-                observations.append((source, signal, node_id, graph_backend.has_node(node_id), view.has_node(node_id)))
+                observations.append((source, signal, node_id, graph.has_node(node_id)))
 
         return slot
 
-    graph_backend.node_added.connect(make_slot("root", "added"))
-    graph_backend.node_removed.connect(make_slot("root", "removed"))
-    view.node_added.connect(make_slot("view", "added"))
-    view.node_removed.connect(make_slot("view", "removed"))
+    graph_backend.node_added.connect(make_slot(graph_backend, "root", "added"))
+    graph_backend.node_removed.connect(make_slot(graph_backend, "root", "removed"))
+    view.node_added.connect(make_slot(view, "view", "added"))
+    view.node_removed.connect(make_slot(view, "view", "removed"))
 
     new_id = view.add_node({"t": 1, "x": 1.0})
     view.remove_node(new_id)
 
-    inconsistent = [obs for obs in observations if obs[3] != obs[4]]
+    # every "added" must see the node present, every "removed" must see it gone,
+    # each in the graph that emitted the signal
+    wrong = [obs for obs in observations if obs[3] != (obs[1] == "added")]
     detail = "\n".join(
-        f"  {source}.{signal}(node={nid}): root.has_node={rh}, view.has_node={vh}"
-        for source, signal, nid, rh, vh in inconsistent
+        f"  {source}.{signal}(node={nid}): {source}.has_node={present}" for source, signal, nid, present in wrong
     )
-    assert not inconsistent, f"Listener saw root and view in inconsistent state at signal time:\n{detail}"
+    assert not wrong, f"Signal did not reflect the state of the graph that emitted it:\n{detail}"
+    # both graphs emitted both events
+    assert {(source, signal) for source, signal, _, _ in observations} == {
+        ("root", "added"),
+        ("root", "removed"),
+        ("view", "added"),
+        ("view", "removed"),
+    }
 
 
-def test_view_update_node_attrs_signal_fires_with_consistent_value(graph_backend: BaseGraph) -> None:
-    """update_node_attrs: when either signal fires, root and view must hold
-    the same value for the updated attribute.
+def test_update_node_attrs_signal_reflects_the_emitting_graph(graph_backend: BaseGraph) -> None:
+    """update_node_attrs: each graph's signal must carry that graph's new value.
 
-    This used to fail on backends where root and view do not share an attribute
-    storage (SQLGraph): root emits with the new value while the view's local
-    rx_graph still holds the old one.
+    As with add/remove, a listener is only promised that the graph it subscribed
+    to is current — not that root and view agree at that instant.
     """
     graph_backend.add_node_attr_key("x", pl.Float64)
     node_id = graph_backend.add_node({"t": 0, "x": 0.0})
@@ -79,23 +85,22 @@ def test_view_update_node_attrs_signal_fires_with_consistent_value(graph_backend
         df = graph.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, "x"])
         return df.filter(pl.col(DEFAULT_ATTR_KEYS.NODE_ID) == nid)["x"].item()
 
-    def make_slot(source: str):
-        def slot(node_ids: list[int], _old: list[dict], _new: list[dict]) -> None:
+    def make_slot(graph: BaseGraph, source: str):
+        def slot(node_ids: list[int], _old: list[dict], _new: list[dict], *_rest) -> None:
             for nid in node_ids:
-                observations.append((source, nid, attr_value(graph_backend, nid), attr_value(view, nid)))
+                observations.append((source, nid, attr_value(graph, nid)))
 
         return slot
 
-    graph_backend.node_updated.connect(make_slot("root"))
-    view.node_updated.connect(make_slot("view"))
+    graph_backend.node_updated.connect(make_slot(graph_backend, "root"))
+    view.node_updated.connect(make_slot(view, "view"))
 
     view.update_node_attrs(attrs={"x": 5.0}, node_ids=[node_id])
 
-    inconsistent = [obs for obs in observations if obs[2] != obs[3]]
-    detail = "\n".join(
-        f"  {source}.node_updated(node={nid}): root.x={rx}, view.x={vx}" for source, nid, rx, vx in inconsistent
-    )
-    assert not inconsistent, f"Listener saw root and view holding different attribute values at signal time:\n{detail}"
+    stale = [obs for obs in observations if obs[2] != 5.0]
+    detail = "\n".join(f"  {source}.node_updated(node={nid}): {source}.x={value}" for source, nid, value in stale)
+    assert not stale, f"Signal fired before the emitting graph held the new value:\n{detail}"
+    assert {source for source, _, _ in observations} == {"root", "view"}
 
 
 # --------------------------------------------------------------------------
