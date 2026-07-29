@@ -20,18 +20,11 @@ import tracksdata as td
 graph = td.graph.InMemoryGraph()
 
 # Generate random nodes for testing
-node_generator = td.nodes.RandomNodes(
-    n_time_points=5,
-    n_nodes_per_tp=(10, 15),
-    n_dim=2
-)
+node_generator = td.nodes.RandomNodes(n_time_points=5, n_nodes_per_tp=(10, 15), n_dim=2)
 node_generator.add_nodes(graph)
 
 # Connect nearby nodes across time
-edge_generator = td.edges.DistanceEdges(
-    distance_threshold=0.3,
-    n_neighbors=3
-)
+edge_generator = td.edges.DistanceEdges(distance_threshold=0.3, n_neighbors=3)
 edge_generator.add_edges(graph)
 
 # Solve the tracking problem

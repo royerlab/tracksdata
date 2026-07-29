@@ -7,7 +7,7 @@ This section provides practical examples of using TracksData for multi-object tr
 Here's a complete basic example that demonstrates the core workflow of TracksData. This example is available as an executable Python file at [`docs/examples/basic.py`](examples/basic.py).
 
 ```python
---8<-- "docs/examples/basic.py"
+--8 < --"docs/examples/basic.py"
 ```
 
 ## Key Components Explained
