@@ -1378,16 +1378,19 @@ class BaseGraph(abc.ABC):
             raise ValueError("iou_threshold must be between 0.0 and 1.0")
 
         def _estimate_overlaps(t: int) -> list[list[int, 2]]:
+            # Local import: avoids the graph <-> nodes package import cycle.
+            from tracksdata.nodes._mask import mask_iou, masks_from_column
+
             node_attrs = self.filter(NodeAttr(DEFAULT_ATTR_KEYS.T) == t).node_attrs(
                 attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.MASK],
             )
             node_ids = node_attrs[DEFAULT_ATTR_KEYS.NODE_ID].to_list()
-            masks = node_attrs[DEFAULT_ATTR_KEYS.MASK].to_list()
+            masks = masks_from_column(node_attrs[DEFAULT_ATTR_KEYS.MASK])
             overlaps = []
             for i in range(len(masks)):
                 mask_i = masks[i]
                 for j in range(i + 1, len(masks)):
-                    if mask_i.iou(masks[j]) > iou_threshold:
+                    if mask_iou(mask_i, masks[j]) > iou_threshold:
                         overlaps.append([node_ids[i], node_ids[j]])
             return overlaps
 
@@ -1840,8 +1843,8 @@ class BaseGraph(abc.ABC):
             # unsafe operation, changing graph content inplace
             for node_attr in indexed_graph.rx_graph.nodes():
                 node_attr[DEFAULT_ATTR_KEYS.MASK] = Mask(
-                    node_attr[DEFAULT_ATTR_KEYS.MASK].astype(bool),
-                    bbox=node_attr[DEFAULT_ATTR_KEYS.BBOX],
+                    bbox=np.asarray(node_attr[DEFAULT_ATTR_KEYS.BBOX], dtype=np.int64),
+                    mask=node_attr[DEFAULT_ATTR_KEYS.MASK].astype(bool),
                 )
 
         if cls == IndexedRXGraph:
@@ -1939,8 +1942,11 @@ class BaseGraph(abc.ABC):
         }
 
         if DEFAULT_ATTR_KEYS.MASK in node_attrs.columns:
+            # Local import: avoids the graph <-> nodes package import cycle.
+            from tracksdata.nodes._mask import masks_from_column
+
             node_dict[DEFAULT_ATTR_KEYS.MASK] = construct_var_len_props(
-                [mask.mask.astype(bool) for mask in node_attrs[DEFAULT_ATTR_KEYS.MASK]]
+                [mask.mask.astype(bool) for mask in masks_from_column(node_attrs[DEFAULT_ATTR_KEYS.MASK])]
             )
 
         edge_dict = {k: {"values": column_to_numpy(v), "missing": None} for k, v in edge_attrs.to_dict().items()}

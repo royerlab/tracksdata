@@ -60,10 +60,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-spatial = ["spatial-graph"]
+# witty 0.3.2 changed `source_files` from "files to watch for cache
+# invalidation" to "files to compile and link". spatial-graph still lists its
+# .h headers there, so building its C extensions fails with
+# `UnknownFileType: unknown file type '.h'`. Allow a future fixed release.
+spatial = ["spatial-graph", "witty!=0.3.2"]
 motile = ["motile"]
 test = [
   "spatial-graph",
+  "witty!=0.3.2",
   "motile",
   "pytest>=7.0",
   "pytest-cov",
@@ -129,6 +134,9 @@ select = [
 
 # https://docs.astral.sh/ruff/formatter/
 [tool.ruff.format]
+# ruff >= 0.16 formats markdown code blocks, which rewrites the mkdocs
+# snippet directives (`--8<-- "..."`) in docs/ into invalid syntax.
+exclude = ["*.md"]
 docstring-code-format = true
 skip-magic-trailing-comma = false # default is false
 

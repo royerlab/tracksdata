@@ -635,10 +635,10 @@ def _make_graph_with_mask() -> tuple[td.graph.RustWorkXGraph, dict[str, int]]:
     g = td.graph.RustWorkXGraph()
     g.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
 
-    mask_p = Mask(np.ones((4, 4), dtype=bool), bbox=np.array([0, 0, 4, 4]))
-    mask_d = Mask(np.ones((4, 4), dtype=bool), bbox=np.array([0, 0, 4, 4]))
-    mask_c1 = Mask(np.ones((2, 2), dtype=bool), bbox=np.array([0, 0, 2, 2]))
-    mask_c2 = Mask(np.ones((2, 2), dtype=bool), bbox=np.array([2, 2, 4, 4]))
+    mask_p = Mask(bbox=np.array([0, 0, 4, 4]), mask=np.ones((4, 4), dtype=bool))
+    mask_d = Mask(bbox=np.array([0, 0, 4, 4]), mask=np.ones((4, 4), dtype=bool))
+    mask_c1 = Mask(bbox=np.array([0, 0, 2, 2]), mask=np.ones((2, 2), dtype=bool))
+    mask_c2 = Mask(bbox=np.array([2, 2, 4, 4]), mask=np.ones((2, 2), dtype=bool))
 
     ids: dict[str, int] = {}
     ids["p"] = g.add_node({"t": 0, DEFAULT_ATTR_KEYS.MASK: mask_p})

@@ -106,7 +106,11 @@ def column_from_bytes(df: pl.DataFrame, column: str) -> pl.DataFrame:
     pl.DataFrame
         The converted DataFrame.
     """
-    return df.with_columns(pl.col(column).map_elements(loads, return_dtype=pl.Object))
+    # `map_elements` converts a returned dict into polars-native containers even with
+    # `return_dtype=pl.Object`, turning e.g. a `Mask`'s numpy arrays into python lists.
+    # Building the object series directly keeps the unpickled values untouched.
+    values = [None if v is None else loads(v) for v in df[column]]
+    return df.with_columns(pl.Series(column, values, dtype=pl.Object))
 
 
 def column_to_numpy(series: pl.Series) -> np.ndarray:
@@ -392,6 +396,9 @@ _POLARS_TO_SQLALCHEMY_TYPE_MAP = {
     # String types
     pl.String: sa.String,
     pl.Utf8: sa.String,
+    # Raw binary blobs are stored as-is (no pickle round-trip), e.g. the
+    # blosc2-compressed `data` leaf of a Mask struct attribute.
+    pl.Binary: sa.LargeBinary,
 }
 
 

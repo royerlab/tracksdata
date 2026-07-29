@@ -5,7 +5,7 @@ import pytest
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.functional import to_napari_format
 from tracksdata.graph import RustWorkXGraph
-from tracksdata.nodes import MaskDiskAttrs
+from tracksdata.nodes import MaskDiskAttrs, masks_from_column
 
 
 @pytest.mark.parametrize("metadata_shape", [True, False])
@@ -45,7 +45,7 @@ def test_napari_conversion(metadata_shape: bool) -> None:
 
     # Maybe we should update the MaskDiskAttrs to handle bounding boxes
     graph.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, dtype=pl.Array(pl.Int64, 6))
-    masks = graph.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.MASK])[DEFAULT_ATTR_KEYS.MASK]
+    masks = masks_from_column(graph.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.MASK])[DEFAULT_ATTR_KEYS.MASK])
     graph.update_node_attrs(
         attrs={DEFAULT_ATTR_KEYS.BBOX: [mask.bbox for mask in masks]},
         node_ids=graph.node_ids(),

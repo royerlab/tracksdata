@@ -4,7 +4,12 @@ from skimage.measure._regionprops import RegionProperties
 
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph import RustWorkXGraph
-from tracksdata.nodes import Mask, RegionPropsNodes
+from tracksdata.nodes import (
+    Mask,
+    RegionPropsNodes,
+    mask_struct_dtype,
+    masks_from_column,
+)
 from tracksdata.options import get_options, options_context
 
 
@@ -278,15 +283,16 @@ def test_regionprops_mask_creation() -> None:
     assert "shape" in graph.metadata
     assert graph.metadata["shape"] == labels.shape
 
-    # Check that masks were created
+    # Check that masks were created as struct attributes
     nodes_df = graph.node_attrs()
     masks = nodes_df[DEFAULT_ATTR_KEYS.MASK]
+    assert masks.dtype == mask_struct_dtype(labels.ndim - 1)
 
-    # All masks should be Mask objects
-    for mask in masks:
+    # All masks should convert back to Mask objects
+    for mask in masks_from_column(masks):
         assert isinstance(mask, Mask)
-        assert mask._mask is not None
-        assert mask._bbox is not None
+        assert mask.mask is not None
+        assert mask.bbox is not None
 
 
 def test_regionprops_spacing() -> None:

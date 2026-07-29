@@ -4,6 +4,7 @@ import pytest
 
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.edges import IoUEdgeAttr
+from tracksdata.edges._iou_edges import _mask_iou
 from tracksdata.graph import RustWorkXGraph
 from tracksdata.nodes import Mask
 from tracksdata.options import get_options, options_context
@@ -15,7 +16,7 @@ def test_iou_edges_init_default() -> None:
 
     assert operator.output_key == "iou_score"
     assert operator.attr_keys == DEFAULT_ATTR_KEYS.MASK
-    assert operator.func == Mask.iou
+    assert operator.func == _mask_iou
 
 
 def test_iou_edges_init_custom() -> None:
@@ -24,7 +25,7 @@ def test_iou_edges_init_custom() -> None:
 
     assert operator.output_key == "custom_iou"
     assert operator.attr_keys == "custom_mask"
-    assert operator.func == Mask.iou
+    assert operator.func == _mask_iou
 
 
 @pytest.mark.parametrize("n_workers", [1, 2])
@@ -38,13 +39,13 @@ def test_iou_edges_add_weights(n_workers: int) -> None:
 
     # Create test masks
     mask1_data = np.array([[True, True], [True, False]], dtype=bool)
-    mask1 = Mask(mask1_data, bbox=np.array([0, 0, 2, 2]))
+    mask1 = Mask(bbox=np.array([0, 0, 2, 2]), mask=mask1_data)
 
     mask2_data = np.array([[True, False], [False, False]], dtype=bool)
-    mask2 = Mask(mask2_data, bbox=np.array([0, 0, 2, 2]))
+    mask2 = Mask(bbox=np.array([0, 0, 2, 2]), mask=mask2_data)
 
     mask3_data = np.array([[True, True], [True, True]], dtype=bool)
-    mask3 = Mask(mask3_data, bbox=np.array([0, 0, 2, 2]))
+    mask3 = Mask(bbox=np.array([0, 0, 2, 2]), mask=mask3_data)
 
     # Add nodes with masks
     node1 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, DEFAULT_ATTR_KEYS.MASK: mask1})
@@ -88,10 +89,10 @@ def test_iou_edges_no_overlap() -> None:
 
     # Create non-overlapping masks
     mask1_data = np.array([[True, True], [False, False]], dtype=bool)
-    mask1 = Mask(mask1_data, bbox=np.array([0, 0, 2, 2]))
+    mask1 = Mask(bbox=np.array([0, 0, 2, 2]), mask=mask1_data)
 
     mask2_data = np.array([[False, False], [True, True]], dtype=bool)
-    mask2 = Mask(mask2_data, bbox=np.array([0, 0, 2, 2]))
+    mask2 = Mask(bbox=np.array([0, 0, 2, 2]), mask=mask2_data)
 
     # Add nodes with masks
     node1 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, DEFAULT_ATTR_KEYS.MASK: mask1})
@@ -127,8 +128,8 @@ def test_iou_edges_perfect_overlap() -> None:
 
     # Create identical masks
     mask_data = np.array([[True, True], [True, False]], dtype=bool)
-    mask1 = Mask(mask_data, bbox=np.array([0, 0, 2, 2]))
-    mask2 = Mask(mask_data, bbox=np.array([0, 0, 2, 2]))
+    mask1 = Mask(bbox=np.array([0, 0, 2, 2]), mask=mask_data)
+    mask2 = Mask(bbox=np.array([0, 0, 2, 2]), mask=mask_data)
 
     # Add nodes with masks
     node1 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, DEFAULT_ATTR_KEYS.MASK: mask1})
@@ -163,10 +164,10 @@ def test_iou_edges_custom_mask_key() -> None:
 
     # Create test masks
     mask1_data = np.array([[True, True], [True, True]], dtype=bool)
-    mask1 = Mask(mask1_data, bbox=np.array([0, 0, 2, 2]))
+    mask1 = Mask(bbox=np.array([0, 0, 2, 2]), mask=mask1_data)
 
     mask2_data = np.array([[True, True], [False, False]], dtype=bool)
-    mask2 = Mask(mask2_data, bbox=np.array([0, 0, 2, 2]))
+    mask2 = Mask(bbox=np.array([0, 0, 2, 2]), mask=mask2_data)
 
     # Add nodes with custom mask key
     node1 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "custom_mask": mask1})

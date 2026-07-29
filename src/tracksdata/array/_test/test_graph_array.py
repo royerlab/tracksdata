@@ -86,7 +86,7 @@ def test_graph_array_view_getitem_with_nodes(graph_backend: BaseGraph) -> None:
 
     # Create a mask
     mask_data = np.array([[True, True], [True, False]], dtype=bool)
-    mask = Mask(mask_data, bbox=np.array([10, 20, 12, 22]))  # y_min, x_min, y_max, x_max
+    mask = Mask(bbox=np.array([10, 20, 12, 22]), mask=mask_data)  # y_min, x_min, y_max, x_max
 
     # Add a node with mask and label
     graph_backend.add_node(
@@ -136,10 +136,10 @@ def test_graph_array_view_getitem_multiple_nodes(graph_backend: BaseGraph) -> No
 
     # Create two masks at different locations
     mask1_data = np.array([[True, True]], dtype=bool)
-    mask1 = Mask(mask1_data, bbox=np.array([10, 20, 11, 22]))
+    mask1 = Mask(bbox=np.array([10, 20, 11, 22]), mask=mask1_data)
 
     mask2_data = np.array([[True]], dtype=bool)
-    mask2 = Mask(mask2_data, bbox=np.array([30, 40, 31, 41]))
+    mask2 = Mask(bbox=np.array([30, 40, 31, 41]), mask=mask2_data)
 
     # Add nodes with different labels
     graph_backend.add_node(
@@ -191,7 +191,7 @@ def test_graph_array_view_getitem_boolean_dtype(graph_backend: BaseGraph) -> Non
 
     # Create a mask
     mask_data = np.array([[True]], dtype=bool)
-    mask = Mask(mask_data, bbox=np.array([10, 20, 11, 21]))
+    mask = Mask(bbox=np.array([10, 20, 11, 21]), mask=mask_data)
 
     # Add a node with boolean attribute
     graph_backend.add_node(
@@ -228,7 +228,7 @@ def test_graph_array_view_dtype_inference(graph_backend: BaseGraph) -> None:
 
     # Create a mask
     mask_data = np.array([[True]], dtype=bool)
-    mask = Mask(mask_data, bbox=np.array([10, 20, 11, 21]))
+    mask = Mask(bbox=np.array([10, 20, 11, 21]), mask=mask_data)
 
     # Add a node with float attribute
     graph_backend.add_node(
@@ -407,7 +407,7 @@ def test_graph_array_raise_error_on_non_scalar_attr_key(graph_backend: BaseGraph
         {
             DEFAULT_ATTR_KEYS.T: 0,
             "label": np.array([1, 2]),  # Non-scalar value
-            DEFAULT_ATTR_KEYS.MASK: Mask(np.array([[True]], dtype=bool), bbox=np.array([0, 0, 1, 1])),
+            DEFAULT_ATTR_KEYS.MASK: Mask(bbox=np.array([0, 0, 1, 1]), mask=np.array([[True]], dtype=bool)),
         }
     )
 
@@ -422,7 +422,7 @@ def _add_graph_array_node_attrs(graph_backend: BaseGraph) -> None:
 
 
 def _make_square_mask(y: int, x: int, size: int = 2) -> Mask:
-    return Mask(np.ones((size, size), dtype=bool), bbox=np.array([y, x, y + size, x + size]))
+    return Mask(bbox=np.array([y, x, y + size, x + size]), mask=np.ones((size, size), dtype=bool))
 
 
 def test_graph_array_view_invalidates_only_affected_chunk_on_add(graph_backend: BaseGraph) -> None:
@@ -695,7 +695,7 @@ def test_graph_array_view_invalidates_once_when_mask_changes_but_bbox_unchanged(
     np.testing.assert_array_equal(array_view._cache._store[0].ready, np.ones((2, 2), dtype=bool))
 
     # Same bbox [1, 1, 3, 3], but only the diagonal pixels are set.
-    new_mask = Mask(np.array([[True, False], [False, True]], dtype=bool), bbox=np.array([1, 1, 3, 3]))
+    new_mask = Mask(bbox=np.array([1, 1, 3, 3]), mask=np.array([[True, False], [False, True]], dtype=bool))
     mock_invalidate = MagicMock(wraps=array_view._invalidate_bbox)
     with patch.object(array_view, "_invalidate_bbox", mock_invalidate):
         graph_backend.update_node_attrs(
@@ -737,7 +737,7 @@ def test_graph_array_view_no_invalidation_when_mask_unchanged(graph_backend: Bas
     np.testing.assert_array_equal(array_view._cache._store[0].ready, np.ones((2, 2), dtype=bool))
 
     # A fresh Mask object with identical bbox and pixels: no rendered change.
-    same_mask = Mask(np.ones((2, 2), dtype=bool), bbox=np.array([1, 1, 3, 3]))
+    same_mask = Mask(bbox=np.array([1, 1, 3, 3]), mask=np.ones((2, 2), dtype=bool))
     mock_invalidate = MagicMock(wraps=array_view._invalidate_bbox)
     with patch.object(array_view, "_invalidate_bbox", mock_invalidate):
         graph_backend.update_node_attrs(

@@ -44,7 +44,7 @@ class GenericFuncNodeAttrs(BaseNodeAttrsOperator):
 
 
     def intensity_median_times_t(image: NDArray, mask: Mask, t: int) -> float:
-        cropped_frame = mask.crop(image)
+        cropped_frame = mask_crop(mask, image)
         valid_pixels = cropped_frame[mask.mask]
         return np.median(valid_pixels) * t
 
@@ -70,7 +70,7 @@ class GenericFuncNodeAttrs(BaseNodeAttrsOperator):
     def intensity_median_times_t(image: NDArray, masks: list[Mask], t: list[int]) -> list[float]:
         results = []
         for i in range(len(masks)):
-            cropped_frame = masks[i].crop(image)
+            cropped_frame = mask_crop(masks[i], image)
             valid_pixels = cropped_frame[masks[i].mask]
             value = np.median(valid_pixels) * t[i]
             results.append(value)

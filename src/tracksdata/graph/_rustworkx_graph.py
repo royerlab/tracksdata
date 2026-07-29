@@ -66,7 +66,10 @@ def _pop_time_eq(
 def _maybe_fill_null(s: pl.Series, schema: AttrSchema) -> pl.Series:
     if s.has_nulls() and schema.default_value is not None:
         if schema.dtype == pl.Object:
-            value = pl.lit(schema.default_value, allow_object=True)
+            # `pl.lit` infers a struct from a dict default (e.g. a `Mask`), which then
+            # has no supertype with the object column. Wrapping in an object-typed
+            # series forces the literal to stay an object.
+            value = pl.lit(pl.Series([schema.default_value], dtype=pl.Object)).first()
         elif isinstance(schema.dtype, pl.Array):
             if isinstance(schema.default_value, np.ndarray):
                 value = schema.default_value.tolist()

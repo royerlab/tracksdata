@@ -13,7 +13,7 @@ from tracksdata.nodes._mask import Mask
 def create_2d_mask_from_coords(coords: list[tuple[int, int]]) -> Mask:
     """Create a 2D Mask object from a list of (y, x) coordinates."""
     if not coords:
-        return Mask(np.array([[False]]), np.array([0, 0, 1, 1]))
+        return Mask(bbox=np.array([0, 0, 1, 1]), mask=np.array([[False]]))
 
     y_coords, x_coords = [c[0] for c in coords], [c[1] for c in coords]
     y_min, y_max = min(y_coords), max(y_coords)
@@ -23,7 +23,7 @@ def create_2d_mask_from_coords(coords: list[tuple[int, int]]) -> Mask:
     for y, x in coords:
         mask_arr[y - y_min, x - x_min] = True
 
-    return Mask(mask_arr, np.array([y_min, x_min, y_max + 1, x_max + 1]))
+    return Mask(bbox=np.array([y_min, x_min, y_max + 1, x_max + 1]), mask=mask_arr)
 
 
 class TestMaskMatching:
@@ -49,7 +49,7 @@ class TestMaskMatching:
         graph1 = RustWorkXGraph()
         graph2 = RustWorkXGraph()
 
-        default_mask = Mask(np.array([[False]]), np.array([0, 0, 1, 1]))
+        default_mask = Mask(bbox=np.array([0, 0, 1, 1]), mask=np.array([[False]]))
         graph1.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=default_mask)
         graph2.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=default_mask)
 
@@ -285,7 +285,7 @@ class TestMatchingIntegration:
         graph1 = RustWorkXGraph()
         graph2 = RustWorkXGraph()
 
-        default_mask = Mask(np.array([[False]]), np.array([0, 0, 1, 1]))
+        default_mask = Mask(bbox=np.array([0, 0, 1, 1]), mask=np.array([[False]]))
         graph1.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=default_mask)
         graph2.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, dtype=pl.Object, default_value=default_mask)
 
