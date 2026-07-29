@@ -1,6 +1,5 @@
 import cloudpickle
 import polars as pl
-import polars.selectors as cs
 
 
 def unpack_array_attrs(df: pl.DataFrame) -> pl.DataFrame:
@@ -33,6 +32,12 @@ def unpickle_bytes_columns(df: pl.DataFrame) -> pl.DataFrame:
     """
     Unpickle bytes columns from the database.
 
+    The result is left as :class:`polars.Object`. Every caller pairs this with
+    ``SQLGraph._cast_columns``, which casts each pickled column to its declared
+    schema dtype, so narrowing the dtype here would only build an intermediate
+    that is immediately rebuilt -- and for a column of opaque payloads (masks)
+    the attempt materializes every value just to fail and be discarded.
+
     Parameters
     ----------
     df : pl.DataFrame
@@ -43,11 +48,18 @@ def unpickle_bytes_columns(df: pl.DataFrame) -> pl.DataFrame:
     pl.DataFrame
         The DataFrame with the bytes columns unpickled.
     """
-    df = df.map_columns(cs.binary(), lambda x: x.map_elements(cloudpickle.loads, return_dtype=pl.Object))
-    for col, dtype in zip(df.columns, df.dtypes, strict=True):
-        if isinstance(dtype, pl.Object):
-            try:
-                df = df.with_columns(pl.Series(df[col].to_list()).alias(col))
-            except Exception:
-                pass
-    return df
+    binary_cols = [name for name, dtype in df.schema.items() if dtype == pl.Binary]
+    if not binary_cols:
+        return df
+
+    # A plain comprehension rather than `map_elements`: these are opaque Python
+    # objects either way, so routing them through the expression engine adds
+    # per-element dispatch without buying any vectorization.
+    return df.with_columns(
+        pl.Series(
+            name,
+            [None if value is None else cloudpickle.loads(value) for value in df[name]],
+            dtype=pl.Object,
+        )
+        for name in binary_cols
+    )

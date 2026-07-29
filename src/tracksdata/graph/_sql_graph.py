@@ -1,9 +1,11 @@
 import binascii
 import functools
+import operator
 import re
+import sqlite3
 import uuid
 import weakref
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -50,6 +52,75 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 
+# SQLite's defaults are tuned for small databases where durability matters more
+# than speed: a 2 MB page cache, a rollback journal, and an fsync on every
+# commit. At tracking scale both hurt badly -- the page cache means a near-total
+# miss rate on every B-tree descent, and the per-commit fsync dominates the
+# latency of interactive single-node edits.
+#
+# ``synchronous=NORMAL`` under WAL is crash-safe against process death; only an
+# OS crash or power loss can lose the most recent commits. That is the right
+# trade for derived tracking data, but it *is* a durability change, so pass
+# ``sqlite_pragmas={"synchronous": "FULL"}`` (or ``{}`` to disable all of these)
+# to opt out.
+DEFAULT_SQLITE_PRAGMAS: dict[str, Any] = {
+    "journal_mode": "WAL",  # commit without writing/fsyncing a rollback journal
+    "synchronous": "NORMAL",  # fsync at checkpoint rather than at every commit
+    "cache_size": -262_144,  # negative => KiB, i.e. 256 MB of page cache
+    "temp_store": "MEMORY",  # keep sorter/scratch spill out of the filesystem
+    "mmap_size": 1 << 30,  # 1 GiB memory-mapped read window
+}
+
+# Conservative floor: SQLITE_MAX_VARIABLE_NUMBER before SQLite 3.32 (2020).
+_LEGACY_SQLITE_MAX_VARIABLES = 999
+# SQLITE_MAX_VARIABLE_NUMBER default since SQLite 3.32.
+_MODERN_SQLITE_MAX_VARIABLES = 32_766
+
+
+@functools.cache
+def _sqlite_max_variables() -> int:
+    """Return the bound-variable ceiling of the linked SQLite library.
+
+    SQLite raised ``SQLITE_MAX_VARIABLE_NUMBER`` from 999 to 32766 in 3.32
+    (2020). Assuming the legacy limit forces write batches and ``IN (...)``
+    lists roughly 30x smaller than necessary, which in turn pushes
+    :class:`_SQLIDSet` onto its on-disk scratch-table path for id lists that
+    would comfortably fit inline.
+    """
+    try:
+        with sqlite3.connect(":memory:") as conn:
+            limit = conn.getlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER)
+    except (AttributeError, sqlite3.Error):
+        # ``getlimit`` needs Python 3.11+; fall back to the version heuristic.
+        limit = _MODERN_SQLITE_MAX_VARIABLES if sqlite3.sqlite_version_info >= (3, 32) else _LEGACY_SQLITE_MAX_VARIABLES
+    # Leave headroom for the handful of non-id parameters a statement also binds.
+    return max(_LEGACY_SQLITE_MAX_VARIABLES, limit - 100)
+
+
+def _register_sqlite_pragmas(engine: sa.Engine, pragmas: dict[str, Any]) -> None:
+    """Apply *pragmas* to every new connection handed out by *engine*.
+
+    Registered on ``connect`` rather than executed once, because each pooled
+    connection carries its own cache/mmap settings. Failures are logged and
+    swallowed: ``journal_mode=WAL`` is rejected on some network filesystems and
+    on ``:memory:`` databases, and neither should be fatal.
+    """
+    if not pragmas:
+        return
+
+    @sa.event.listens_for(engine, "connect")
+    def _set_pragmas(dbapi_connection: Any, _connection_record: Any) -> None:
+        cursor = dbapi_connection.cursor()
+        try:
+            for name, value in pragmas.items():
+                try:
+                    cursor.execute(f"PRAGMA {name}={value}")
+                except Exception as exc:  # pragma: no cover - filesystem dependent
+                    LOG.debug("Failed to set SQLite PRAGMA %s=%s: %s", name, value, exc)
+        finally:
+            cursor.close()
+
+
 def _is_builtin(obj: Any) -> bool:
     """Check if an object is a built-in type."""
     return getattr(obj.__class__, "__module__", None) == "builtins"
@@ -92,21 +163,69 @@ def _resolve_attr_filter_column(
     return getattr(table, flat_col)
 
 
-def _to_sql_clause(f: Filter, table: type[DeclarativeBase]) -> Any:
+def _time_band_clause(
+    table: type[DeclarativeBase],
+    f: AttrComparison,
+    multiplier: int,
+) -> Any | None:
+    """Return a ``node_id`` range clause implied by a ``t == k`` comparison.
+
+    Node ids assigned by :meth:`SQLGraph.bulk_add_nodes` are
+    ``t * multiplier + n``, so every node at time ``k`` necessarily has an id in
+    ``[k * multiplier, (k + 1) * multiplier)``. The returned clause is therefore
+    *logically redundant* -- it is implied by ``t == k`` and cannot change which
+    rows match under any boolean composition. It exists purely so the planner
+    has an indexed range to seek on: ``t`` is unindexed, so without it
+    ``WHERE t = k`` degrades to a full table scan.
+
+    Returns ``None`` when the comparison is not an integer equality on ``t``, or
+    when the table has no ``node_id`` column (e.g. the edge table).
+    """
+    if f.op is not operator.eq or f.attr.field_path or str(f.column) != DEFAULT_ATTR_KEYS.T:
+        return None
+
+    other = f.other
+    # bool is an int subclass but is never a meaningful time point.
+    if isinstance(other, bool) or not isinstance(other, int | np.integer):
+        return None
+
+    node_id_col = getattr(table, DEFAULT_ATTR_KEYS.NODE_ID, None)
+    if node_id_col is None:
+        return None
+
+    time = int(other)
+    return sa.and_(node_id_col >= time * multiplier, node_id_col < (time + 1) * multiplier)
+
+
+def _to_sql_clause(
+    f: Filter,
+    table: type[DeclarativeBase],
+    time_multiplier: int | None = None,
+) -> Any:
     """Translate an AttrComparison or AttrFilter into a SQLAlchemy clause.
 
     Routes ``AttrComparison`` leaves through ``_resolve_attr_filter_column`` so
     struct-field comparisons resolve to the flat physical column.
+
+    When *time_multiplier* is given, ``t == k`` leaves are additionally
+    constrained by the equivalent ``node_id`` range -- see
+    :func:`_time_band_clause`. Pass ``None`` to disable, which callers must do
+    whenever node ids are not known to encode their time point.
     """
     if isinstance(f, AttrComparison):
-        return f.op(_resolve_attr_filter_column(table, f), f.other)
+        clause = f.op(_resolve_attr_filter_column(table, f), f.other)
+        if time_multiplier is not None:
+            band = _time_band_clause(table, f, time_multiplier)
+            if band is not None:
+                clause = sa.and_(clause, band)
+        return clause
 
     assert isinstance(f, AttrFilter)
     if f.op == "not":
         # AttrFilter.__init__ enforces exactly one operand for "not"
-        return sa.not_(_to_sql_clause(f.operands[0], table))
+        return sa.not_(_to_sql_clause(f.operands[0], table, time_multiplier))
 
-    clauses = [_to_sql_clause(o, table) for o in f.operands]
+    clauses = [_to_sql_clause(o, table, time_multiplier) for o in f.operands]
     if f.op == "and":
         return sa.and_(*clauses)
     if f.op == "or":
@@ -194,6 +313,7 @@ def _filter_query(
     query: sa.Select,
     table: type[DeclarativeBase],
     attr_filters: Sequence[Filter],
+    time_multiplier: int | None = None,
 ) -> sa.Select:
     """
     Filter a query by a list of attribute filters (AND-ed together at the top
@@ -208,6 +328,10 @@ def _filter_query(
         The table to filter.
     attr_filters : Sequence[Filter]
         The attribute filters to apply.
+    time_multiplier : int | None
+        When given, ``t == k`` comparisons also emit the equivalent ``node_id``
+        range so the planner can seek instead of scanning. See
+        :func:`_time_band_clause`.
 
     Returns
     -------
@@ -215,7 +339,7 @@ def _filter_query(
         The filtered query.
     """
     LOG.info("Filter query:\n%s", attr_filters)
-    query = query.filter(*[_to_sql_clause(f, table) for f in attr_filters])
+    query = query.filter(*[_to_sql_clause(f, table, time_multiplier) for f in attr_filters])
     return query
 
 
@@ -268,6 +392,10 @@ class SQLFilter(BaseFilter):
                 self._edge_query = self._edge_query.filter(id_set.in_clause(self._graph.Edge.source_id))
             node_filtered = True
 
+        # Only valid while node ids still encode their time point; the graph
+        # turns this off permanently if a custom index ever breaks the encoding.
+        time_multiplier = self._graph.node_id_time_multiplier if self._graph._time_encoded_ids else None
+
         if self._node_attr_comps:
             node_filtered = True
             # filtering nodes by attributes
@@ -275,6 +403,7 @@ class SQLFilter(BaseFilter):
                 self._node_query,
                 self._graph.Node,
                 self._node_attr_comps,
+                time_multiplier,
             )
 
             # if both node and edge attributes are filtered
@@ -295,6 +424,7 @@ class SQLFilter(BaseFilter):
                     self._edge_query,
                     SourceNode,
                     self._node_attr_comps,
+                    time_multiplier,
                 )
 
             if self._include_sources or include_none:
@@ -306,6 +436,7 @@ class SQLFilter(BaseFilter):
                     self._edge_query,
                     TargetNode,
                     self._node_attr_comps,
+                    time_multiplier,
                 )
 
         if self._edge_attr_comps:
@@ -517,20 +648,28 @@ class SQLFilter(BaseFilter):
         nodes_df = self._read_attr_dataframe(node_query, self._graph.Node)
         edges_df = self._read_attr_dataframe(edge_query, self._graph.Edge)
 
-        node_map_to_root = {}
-        node_map_from_root = {}
         rx_graph = rx.PyDiGraph()
 
-        for data in nodes_df.iter_rows(named=True):
-            root_node_id = data.pop(DEFAULT_ATTR_KEYS.NODE_ID)
-            node_id = rx_graph.add_node(data)
-            node_map_to_root[node_id] = root_node_id
-            node_map_from_root[root_node_id] = node_id
+        # Build the view with two bulk rustworkx calls rather than one call per
+        # row. A frame-sized subgraph is tens of thousands of nodes and edges,
+        # and the per-row `add_node` / `add_edge` round trips dominated the cost
+        # of materializing it.
+        root_node_ids = nodes_df[DEFAULT_ATTR_KEYS.NODE_ID].to_list()
+        node_payloads = nodes_df.drop(DEFAULT_ATTR_KEYS.NODE_ID).to_dicts()
+        local_node_ids = list(rx_graph.add_nodes_from(node_payloads))
 
-        for data in edges_df.iter_rows(named=True):
-            source_id = node_map_from_root[data.pop(DEFAULT_ATTR_KEYS.EDGE_SOURCE)]
-            target_id = node_map_from_root[data.pop(DEFAULT_ATTR_KEYS.EDGE_TARGET)]
-            rx_graph.add_edge(source_id, target_id, data)
+        node_map_to_root = dict(zip(local_node_ids, root_node_ids, strict=True))
+        node_map_from_root = dict(zip(root_node_ids, local_node_ids, strict=True))
+
+        edge_sources = edges_df[DEFAULT_ATTR_KEYS.EDGE_SOURCE].to_list()
+        edge_targets = edges_df[DEFAULT_ATTR_KEYS.EDGE_TARGET].to_list()
+        edge_payloads = edges_df.drop(DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET).to_dicts()
+        rx_graph.add_edges_from(
+            [
+                (node_map_from_root[source_id], node_map_from_root[target_id], data)
+                for source_id, target_id, data in zip(edge_sources, edge_targets, edge_payloads, strict=True)
+            ]
+        )
 
         graph = GraphView(
             rx_graph=rx_graph,
@@ -579,9 +718,18 @@ class SQLGraph(BaseGraph):
         Database host. Not required for SQLite.
     port : int, optional
         Database port. Not required for SQLite.
+    engine_kwargs : dict[str, Any], optional
+        Extra keyword arguments forwarded to ``sqlalchemy.create_engine``.
     overwrite : bool, default False
         If True, drop and recreate all tables. Use with caution as this
         will delete all existing data.
+    sqlite_pragmas : dict[str, Any], optional
+        PRAGMAs applied to every SQLite connection. Defaults to
+        [DEFAULT_SQLITE_PRAGMAS][tracksdata.graph._sql_graph.DEFAULT_SQLITE_PRAGMAS],
+        which trades a small amount of durability for large gains in write
+        latency and cache hit rate — see that constant for the exact trade.
+        Pass ``{}`` to keep SQLite's own defaults, or a dict to override
+        individual PRAGMAs. Ignored for non-SQLite drivers.
 
     Attributes
     ----------
@@ -644,6 +792,7 @@ class SQLGraph(BaseGraph):
         port: int | None = None,
         engine_kwargs: dict[str, Any] | None = None,
         overwrite: bool = False,
+        sqlite_pragmas: dict[str, Any] | None = None,
     ):
         self._url = sa.engine.URL.create(
             drivername,
@@ -654,7 +803,13 @@ class SQLGraph(BaseGraph):
             database=database,
         )
         self._engine_kwargs = engine_kwargs if engine_kwargs is not None else {}
-        self._engine = sa.create_engine(self._url, **self._engine_kwargs)
+        self._sqlite_pragmas = sqlite_pragmas
+        self._engine = self._create_engine()
+
+        # Whether every node id encodes its time point as
+        # ``t * node_id_time_multiplier + n``. Recomputed from the data in
+        # ``_update_max_id_per_time`` and maintained by ``bulk_add_nodes``.
+        self._time_encoded_ids = True
 
         # Create unique classes for this instance
         self._define_schema(overwrite=overwrite)
@@ -668,6 +823,14 @@ class SQLGraph(BaseGraph):
         self._update_max_id_per_time()
         self._node_attr_schemas_cache: dict | None = None
         self._edge_attr_schemas_cache: dict | None = None
+
+    def _create_engine(self) -> sa.Engine:
+        """Build the engine and attach dialect-specific connection tuning."""
+        engine = sa.create_engine(self._url, **self._engine_kwargs)
+        if engine.dialect.name == "sqlite":
+            pragmas = DEFAULT_SQLITE_PRAGMAS if self._sqlite_pragmas is None else self._sqlite_pragmas
+            _register_sqlite_pragmas(engine, pragmas)
+        return engine
 
     def supports_custom_indices(self) -> bool:
         return True
@@ -704,24 +867,44 @@ class SQLGraph(BaseGraph):
         class Node(Base):
             __tablename__ = "Node"
 
-            # Use node_id as sole primary key for simpler updates
-            node_id = sa.Column(sa.BigInteger, primary_key=True, unique=True)
+            # Use node_id as sole primary key for simpler updates.
+            #
+            # The SQLite variant is deliberately ``INTEGER`` rather than
+            # ``BIGINT``: SQLite only aliases a primary key onto the rowid when
+            # the declared type is literally ``INTEGER``. With ``BIGINT`` the
+            # table gets a hidden rowid *plus* a separate unique index, so every
+            # node is stored twice and each lookup is an index seek followed by
+            # a rowid seek. As the alias, ids assigned as
+            # ``t * node_id_time_multiplier + n`` also cluster the table
+            # physically by time, which is what makes a per-frame id range scan
+            # sequential. The value range is unchanged -- SQLite rowids are
+            # signed 64-bit.
+            node_id = sa.Column(
+                sa.BigInteger().with_variant(sa.Integer(), "sqlite"),
+                primary_key=True,
+            )
 
-            # Add t as a regular column
-            # NOTE might want to use as index for fast time-based queries
+            # Add t as a regular column. Kept unindexed on purpose: `t == k`
+            # filters carry an equivalent `node_id` range (see
+            # `_time_band_clause`), so an index here would cost a write per node
+            # without speeding up the query it would serve.
             t = sa.Column(sa.Integer, nullable=False)
 
         node_tb_name = Node.__tablename__
 
+        # NOTE: no `unique=True` on the primary keys below. It is implied by
+        # `primary_key=True`, and stating it again makes SQLAlchemy emit a
+        # redundant UNIQUE constraint -- an entire extra B-tree over the table,
+        # which on the edge table is the single largest avoidable index.
         class Edge(Base):
             __tablename__ = "Edge"
-            edge_id = sa.Column(sa.Integer, sa.Identity(always=True), primary_key=True, unique=True)
+            edge_id = sa.Column(sa.Integer, sa.Identity(always=True), primary_key=True)
             source_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"), index=True, nullable=False)
             target_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"), index=True, nullable=False)
 
         class Overlap(Base):
             __tablename__ = "Overlap"
-            overlap_id = sa.Column(sa.Integer, sa.Identity(always=True), primary_key=True, unique=True)
+            overlap_id = sa.Column(sa.Integer, sa.Identity(always=True), primary_key=True)
             source_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"), index=True, nullable=False)
             target_id = sa.Column(sa.BigInteger, sa.ForeignKey(f"{node_tb_name}.node_id"), index=True, nullable=False)
 
@@ -941,10 +1124,33 @@ class SQLGraph(BaseGraph):
         Scans the database to find the current maximum node ID for each time
         point and updates the internal cache to ensure newly created nodes
         have unique IDs.
+
+        Also re-derives ``_time_encoded_ids`` from the data. Taking the per-time
+        minimum alongside the maximum costs nothing extra on top of the
+        group-by that is already needed, and deriving the flag rather than
+        trusting stored metadata means a database written by an older version --
+        or via the raw SQL copy path in :meth:`_sqlite_table_dump` -- can never
+        silently enable the ``node_id`` range rewrite on ids that don't encode
+        their time point.
         """
         with Session(self._engine) as session:
-            stmt = sa.select(self.Node.t, sa.func.max(self.Node.node_id)).group_by(self.Node.t)
-            self._max_id_per_time = {int(time): int(max_id) for time, max_id in session.execute(stmt).all()}
+            stmt = sa.select(
+                self.Node.t,
+                sa.func.min(self.Node.node_id),
+                sa.func.max(self.Node.node_id),
+            ).group_by(self.Node.t)
+            rows = [(int(time), int(min_id), int(max_id)) for time, min_id, max_id in session.execute(stmt).all()]
+
+        self._max_id_per_time = {time: max_id for time, _, max_id in rows}
+        self._time_encoded_ids = all(
+            self._node_id_encodes_time(time, min_id) and self._node_id_encodes_time(time, max_id)
+            for time, min_id, max_id in rows
+        )
+
+    def _node_id_encodes_time(self, time: int, node_id: int) -> bool:
+        """Whether *node_id* falls in the id band that :meth:`bulk_add_nodes` assigns for *time*."""
+        multiplier = self.node_id_time_multiplier
+        return time * multiplier <= node_id < (time + 1) * multiplier
 
     def filter(
         self,
@@ -1039,6 +1245,12 @@ class SQLGraph(BaseGraph):
                 self._max_id_per_time[time] = node_id
             else:
                 node_id = indices[i]
+                # A caller-supplied id outside the time band breaks the
+                # assumption behind the `node_id` range rewrite in
+                # `_to_sql_clause`, so disable it for the rest of this graph's
+                # life rather than return wrong rows for `t == k` queries.
+                if self._time_encoded_ids and not self._node_id_encodes_time(time, node_id):
+                    self._time_encoded_ids = False
 
             node_ids.append(node_id)
             insert_rows.append({**node, DEFAULT_ATTR_KEYS.NODE_ID: node_id})
@@ -1504,8 +1716,46 @@ class SQLGraph(BaseGraph):
             return [i for (i,) in session.query(self.Edge.edge_id).all()]
 
     def time_points(self) -> list[int]:
+        if self._time_encoded_ids:
+            return self._time_points_by_id_bands()
         with Session(self._engine) as session:
             return [t for (t,) in session.query(self.Node.t).distinct().all()]
+
+    def _time_points_by_id_bands(self) -> list[int]:
+        """List the occupied time points by skipping between node id bands.
+
+        ``SELECT DISTINCT t`` has to read every row -- and every row carries the
+        mask blob, so on a segmented graph that is the entire database. When ids
+        encode their time point, each occupied time point instead costs one
+        ``MIN(node_id)`` seek over the primary key: the walk jumps straight from
+        a frame's first node to the start of the next frame's band, so the cost
+        is proportional to the number of frames rather than the number of nodes.
+
+        Termination is guaranteed by the same invariant that gates this path: a
+        node at time ``t`` has ``node_id < (t + 1) * multiplier``, so each step
+        seeks strictly past the current row and the walk stops when the seek
+        finds nothing.
+        """
+        table = self.Node.__tablename__
+        stmt = sa.text(
+            f"""
+            WITH RECURSIVE walk(tval) AS (
+                SELECT t FROM "{table}" WHERE node_id = (SELECT MIN(node_id) FROM "{table}")
+              UNION ALL
+                SELECT (
+                    SELECT n.t FROM "{table}" AS n
+                    WHERE n.node_id = (
+                        SELECT MIN(m.node_id) FROM "{table}" AS m
+                        WHERE m.node_id >= (walk.tval + 1) * :multiplier
+                    )
+                )
+                FROM walk WHERE walk.tval IS NOT NULL
+            )
+            SELECT tval FROM walk WHERE tval IS NOT NULL
+            """
+        )
+        with Session(self._engine) as session:
+            return [int(t) for (t,) in session.execute(stmt, {"multiplier": self.node_id_time_multiplier}).all()]
 
     def _reorder_by_indices(
         self,
@@ -2010,13 +2260,17 @@ class SQLGraph(BaseGraph):
             return int(session.query(self.Node).count())
 
     def _sql_chunk_size(self) -> int:
-        if self._engine.dialect.name == "postgresql":
-            chunk_size = 30_000
-        else:  # for now everything else will use sqlite chunk size
-            # elif self._engine.dialect.name == "sqlite":
-            chunk_size = 900
+        """Maximum number of bound values to put in a single statement.
 
-        return chunk_size
+        Write batches are chunked to this (divided by the column count), and it
+        also sets the cutoff above which :class:`_SQLIDSet` spills an id list
+        into an on-disk scratch table instead of inlining it.
+        """
+        if self._engine.dialect.name == "postgresql":
+            return 30_000
+        # Everything else is treated as SQLite. Query the linked library rather
+        # than assuming the pre-3.32 limit of 999.
+        return _sqlite_max_variables()
 
     def _update_table(
         self,
@@ -2033,7 +2287,7 @@ class SQLGraph(BaseGraph):
             if hasattr(ids, "tolist"):
                 ids = ids.tolist()
 
-        # Handle array values with bulk_update_mappings
+        # Handle array values with a per-row bulk update
         attrs = attrs.copy()
         _data_numpy_to_native(attrs)
         schemas = self._attr_schemas_for_table(table_class)
@@ -2072,7 +2326,46 @@ class SQLGraph(BaseGraph):
         LOG.info("update %s table with %d rows", table_class.__table__, len(update_data))
         LOG.info("update data sample: %s", update_data[:2])
 
-        self._chunked_sa_write(Session.bulk_update_mappings, update_data, table_class)
+        self._bulk_update_by_id(table_class, id_key, update_data)
+
+    # Bind parameter standing in for the row's primary key. Prefixed so it
+    # cannot collide with a user-defined attribute key, which becomes a real
+    # column name and therefore its own bind parameter below.
+    _PK_BIND_PARAM = "_tracksdata_pk"
+
+    def _bulk_update_by_id(
+        self,
+        table_class: type[DeclarativeBase],
+        id_key: str,
+        rows: list[dict[str, Any]],
+    ) -> None:
+        """Apply per-row updates keyed by primary key, via a Core executemany.
+
+        The ORM's ``bulk_update_mappings`` builds a unit-of-work update command
+        per row in Python, which is the dominant cost of any write-back over a
+        whole graph (``assign_tracklet_ids``, the solvers' solution columns).
+        Compiling the statement once and handing the DBAPI a parameter list lets
+        the driver run the loop instead, at roughly twice the throughput.
+        """
+        if len(rows) == 0:
+            return
+
+        table = table_class.__table__
+        value_keys = [key for key in rows[0] if key != id_key]
+        if not value_keys:
+            return
+
+        stmt = (
+            sa.update(table)
+            .where(table.c[id_key] == sa.bindparam(self._PK_BIND_PARAM))
+            # Binding through the column keeps each parameter's type -- notably
+            # PickleType -- so values are serialized exactly as on insert.
+            .values({key: sa.bindparam(key) for key in value_keys})
+        )
+        params = [{self._PK_BIND_PARAM: row[id_key], **{key: row[key] for key in value_keys}} for row in rows]
+
+        with self._engine.begin() as conn:
+            conn.execute(stmt, params)
 
     def _chunked_sa_write(
         self,
@@ -2183,33 +2476,41 @@ class SQLGraph(BaseGraph):
         if "t" in attrs:
             raise ValueError("Node attribute 't' cannot be updated.")
 
+        # Without a listener nothing needs the attribute payload, so skip the
+        # reads entirely. `node_ids=None` in particular must stay None so
+        # `_update_table` issues a single unqualified UPDATE rather than
+        # materializing every id in the graph just to filter on them.
+        if not is_signal_on(self.node_updated):
+            self._update_table(self.Node, node_ids, DEFAULT_ATTR_KEYS.NODE_ID, attrs)
+            return
+
         updated_node_ids = self.node_ids() if node_ids is None else list(node_ids)
         if len(updated_node_ids) == 0:
             return
 
         attr_keys = self.node_attr_keys()
-        if is_signal_on(self.node_updated):
-            old_df = self.filter(node_ids=updated_node_ids).node_attrs(
-                attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, *attr_keys]
-            )
-            old_attrs_by_id = old_df.rows_by_key(
-                key=DEFAULT_ATTR_KEYS.NODE_ID, named=True, unique=True, include_key=True
-            )
+        old_df = self.filter(node_ids=updated_node_ids).node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, *attr_keys])
+        old_attrs_by_id = old_df.rows_by_key(key=DEFAULT_ATTR_KEYS.NODE_ID, named=True, unique=True, include_key=True)
 
         self._update_table(self.Node, node_ids, DEFAULT_ATTR_KEYS.NODE_ID, attrs)
 
-        if is_signal_on(self.node_updated):
-            new_df = self.filter(node_ids=updated_node_ids).node_attrs(
-                attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, *attr_keys]
-            )
-            new_attrs_by_id = new_df.rows_by_key(
-                key=DEFAULT_ATTR_KEYS.NODE_ID, named=True, unique=True, include_key=True
-            )
-            emit_node_updated_events(
-                self.node_updated,
-                ((node_id, old_attrs_by_id[node_id], new_attrs_by_id[node_id]) for node_id in updated_node_ids),
-                set(attrs.keys()),
-            )
+        # Derive the post-update payload from the pre-update one plus the values
+        # just written, rather than re-reading every attribute of every touched
+        # node. `_update_table` writes exactly `attrs` and nothing else, so the
+        # result is identical -- and it matches what `RustWorkXGraph` already
+        # emits, which reads back the written values rather than a round-trip.
+        n_nodes = len(updated_node_ids)
+        # Same broadcasting rule `_update_table` applies: scalars fan out across
+        # the batch, anything else is already one value per node.
+        written = {key: ([value] * n_nodes if np.isscalar(value) else list(value)) for key, value in attrs.items()}
+
+        def _events() -> Iterator[tuple[int, dict[str, Any], dict[str, Any]]]:
+            for i, node_id in enumerate(updated_node_ids):
+                old_attrs = old_attrs_by_id[node_id]
+                new_attrs = {**old_attrs, **{key: values[i] for key, values in written.items()}}
+                yield node_id, old_attrs, new_attrs
+
+        emit_node_updated_events(self.node_updated, _events(), set(attrs.keys()))
 
     def update_edge_attrs(
         self,
@@ -2494,7 +2795,8 @@ class SQLGraph(BaseGraph):
     def __setstate__(self, state: dict) -> None:
         self.__dict__.update(state)
         # recreate deleted objects
-        self._engine = sa.create_engine(self._url, **self._engine_kwargs)
+        self._sqlite_pragmas = state.get("_sqlite_pragmas")
+        self._engine = self._create_engine()
         self._define_schema(overwrite=False)
 
     def tracklet_graph(
