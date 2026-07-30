@@ -811,7 +811,7 @@ class SQLGraph(BaseGraph):
 
     def _pickled_physical_columns(self, table_class: type[DeclarativeBase]) -> list[str]:
         """Physical column names whose values are pickled (vs stored natively)."""
-        return [col.name for col in table_class.__table__.columns if self._is_pickled_sql_type(col.type)]
+        return [col.name for col in table_class.__table__.columns if isinstance(col.type, sa.PickleType)]
 
     def _raw_binary_physical_columns(self, table_class: type[DeclarativeBase]) -> set[str]:
         """Physical column names that hold raw ``pl.Binary`` bytes (never pickled).
