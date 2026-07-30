@@ -1060,7 +1060,7 @@ class SQLGraph(BaseGraph):
                 node_id = int(indices[i])
 
             node_ids.append(node_id)
-            insert_rows.append({**node, DEFAULT_ATTR_KEYS.T: time, DEFAULT_ATTR_KEYS.NODE_ID: node_id})
+            insert_rows.append({**node, DEFAULT_ATTR_KEYS.NODE_ID: node_id})
 
         # Flatten struct-typed attrs into their physical leaf columns before write.
         # Non-struct keys (incl. NODE_ID) pass through unchanged.
