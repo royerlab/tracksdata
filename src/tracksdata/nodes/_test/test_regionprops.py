@@ -401,6 +401,133 @@ def test_regionprops_separate_arrays() -> None:
     assert filtered["intensity_max_0"][0] == 60.0
 
 
+def _multichannel_data() -> tuple[np.ndarray, np.ndarray]:
+    labels = np.array([[[1, 1, 0], [1, 0, 2], [0, 2, 2]]], dtype=np.int32)
+    intensity = np.zeros((1, 3, 3, 2), dtype=np.float32)
+    intensity[..., 0] = [[10, 20, 0], [30, 0, 40], [0, 50, 60]]
+    intensity[..., 1] = [[1, 2, 0], [3, 0, 4], [0, 5, 6]]
+    return labels, intensity
+
+
+def test_regionprops_channel_names() -> None:
+    """`channel_names` splits intensity props into one attribute per named channel."""
+    graph = RustWorkXGraph()
+    labels, intensity = _multichannel_data()
+
+    operator = RegionPropsNodes(extra_properties=["intensity_max", "area"], channel_names=["dapi", "gfp"])
+    operator.add_nodes(graph, labels=labels, intensity_image=intensity)
+
+    nodes_df = graph.node_attrs()
+    # the packed array column is replaced by one scalar column per channel
+    assert "intensity_max" not in nodes_df.columns
+    assert nodes_df["intensity_max_dapi"].dtype == pl.Float64
+    assert nodes_df["intensity_max_gfp"].dtype == pl.Float64
+    # non-intensity properties are untouched
+    assert "area" in nodes_df.columns
+
+    assert sorted(nodes_df["intensity_max_dapi"]) == [30.0, 60.0]
+    assert sorted(nodes_df["intensity_max_gfp"]) == [3.0, 6.0]
+
+    # per-channel columns are filterable
+    filtered = graph.filter(NodeAttr("intensity_max_gfp") > 4).node_attrs()
+    assert len(filtered) == 1
+    assert filtered["intensity_max_dapi"][0] == 60.0
+
+
+def test_regionprops_channel_names_multi_axis_property() -> None:
+    """Channel splitting keeps the remaining axes of multi-axis intensity props as arrays."""
+    graph = RustWorkXGraph()
+    labels, intensity = _multichannel_data()
+
+    operator = RegionPropsNodes(extra_properties=["centroid_weighted"], channel_names=["dapi", "gfp"])
+    operator.add_nodes(graph, labels=labels, intensity_image=intensity)
+
+    nodes_df = graph.node_attrs()
+    for name in ["dapi", "gfp"]:
+        col = f"centroid_weighted_{name}"
+        assert isinstance(nodes_df.schema[col], pl.Array)
+        # (y, x) is kept as a fixed-shape array
+        assert nodes_df.schema[col].shape == (2,)
+
+
+def test_regionprops_channel_names_with_separate_arrays() -> None:
+    """`separate_arrays` further splits the per-channel values into scalars."""
+    graph = RustWorkXGraph()
+    labels, intensity = _multichannel_data()
+
+    operator = RegionPropsNodes(
+        extra_properties=["intensity_max", "centroid_weighted"],
+        channel_names=["dapi", "gfp"],
+        separate_arrays=True,
+    )
+    operator.add_nodes(graph, labels=labels, intensity_image=intensity)
+
+    nodes_df = graph.node_attrs()
+    for col in [
+        "intensity_max_dapi",
+        "intensity_max_gfp",
+        "centroid_weighted_dapi_0",
+        "centroid_weighted_dapi_1",
+        "centroid_weighted_gfp_0",
+        "centroid_weighted_gfp_1",
+    ]:
+        assert col in nodes_df.columns
+        assert nodes_df[col].dtype == pl.Float64
+
+
+def test_regionprops_channel_names_custom_property_not_split() -> None:
+    """Custom callables keep their own layout, they are not split per channel."""
+    graph = RustWorkXGraph()
+    labels, intensity = _multichannel_data()
+
+    def max_per_channel(region: RegionProperties) -> np.ndarray:
+        return np.asarray(region.intensity_max)
+
+    operator = RegionPropsNodes(extra_properties=[max_per_channel], channel_names=["dapi", "gfp"])
+    operator.add_nodes(graph, labels=labels, intensity_image=intensity)
+
+    nodes_df = graph.node_attrs()
+    assert isinstance(nodes_df.schema["max_per_channel"], pl.Array)
+    assert nodes_df.schema["max_per_channel"].shape == (2,)
+
+
+def test_regionprops_channel_names_attr_keys() -> None:
+    """attr_keys lists intensity properties once per channel."""
+    operator = RegionPropsNodes(extra_properties=["area", "intensity_mean"], channel_names=["dapi", "gfp"])
+    assert operator.attr_keys() == ["area", "intensity_mean_dapi", "intensity_mean_gfp"]
+
+
+@pytest.mark.parametrize(
+    "channel_names,match",
+    [
+        ([], "must not be empty"),
+        (["dapi", "dapi"], "must be unique"),
+        (["dapi", 0], "must be strings"),
+    ],
+)
+def test_regionprops_channel_names_invalid(channel_names: list, match: str) -> None:
+    """Invalid `channel_names` are rejected at construction time."""
+    with pytest.raises(ValueError, match=match):
+        RegionPropsNodes(channel_names=channel_names)
+
+
+def test_regionprops_channel_names_shape_mismatch() -> None:
+    """The intensity image must have a trailing axis matching `channel_names`."""
+    graph = RustWorkXGraph()
+    labels, intensity = _multichannel_data()
+
+    operator = RegionPropsNodes(extra_properties=["intensity_max"], channel_names=["dapi", "gfp", "rfp"])
+    with pytest.raises(ValueError, match="must have shape"):
+        operator.add_nodes(graph, labels=labels, intensity_image=intensity)
+
+    # single-channel intensity image, no trailing channel axis
+    with pytest.raises(ValueError, match="must have shape"):
+        operator.add_nodes(graph, labels=labels, intensity_image=intensity[..., 0])
+
+    with pytest.raises(ValueError, match="`intensity_image` is None"):
+        operator.add_nodes(graph, labels=labels)
+
+
 def test_regionprops_separate_arrays_matches_unpack() -> None:
     """`separate_arrays=True` column names match `node_attrs(unpack=True)`."""
     labels = np.array([[[1, 1, 0], [1, 0, 2], [0, 2, 2]]], dtype=np.int32)
