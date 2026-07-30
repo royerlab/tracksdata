@@ -422,7 +422,7 @@ class SQLFilter(BaseFilter):
                 schema_overrides=self._graph._polars_schema_override(table),
             )
 
-        df = unpickle_bytes_columns(df)
+        df = unpickle_bytes_columns(df, self._graph._pickled_column_dtypes(table))
         return self._graph._cast_columns(table, df)
 
     def _query_from_attr_keys(
@@ -845,27 +845,46 @@ class SQLGraph(BaseGraph):
             if isinstance(column.type, sa.LargeBinary):
                 column.type = sa.PickleType()
 
-    def _polars_schema_override(self, table_class: type[DeclarativeBase]) -> SchemaDict:
-        """Return polars dtype overrides for physical columns in *table_class*.
+    def _declared_column_dtypes(self, table_class: type[DeclarativeBase], *, pickled: bool) -> SchemaDict:
+        """Return the declared polars dtype of the physical columns in *table_class*.
 
         Flat struct leaf columns are included with their native leaf dtypes.
-        Pickled columns are excluded here and handled in a second pass by
-        ``_cast_array_columns``.
+
+        Parameters
+        ----------
+        table_class : type[DeclarativeBase]
+            The table to describe.
+        pickled : bool
+            Whether to return the columns stored as pickled blobs (arrays, lists,
+            objects, ...) or the ones stored as native SQL scalars.
         """
-        overrides: SchemaDict = {}
+        dtypes: SchemaDict = {}
         schemas = self._attr_schemas_for_table(table_class)
         table_cols = table_class.__table__.columns
 
         for key, schema in schemas.items():
             if isinstance(schema.dtype, pl.Struct):
-                # Emit overrides for each leaf physical column.
+                # Emit one entry per leaf physical column.
                 for flat_col, leaf_dtype in flatten_struct_dtype(key, schema.dtype):
-                    if flat_col in table_cols and not self._is_pickled_sql_type(table_cols[flat_col].type):
-                        overrides[flat_col] = leaf_dtype
-            elif key in table_cols and not self._is_pickled_sql_type(table_cols[key].type):
-                overrides[key] = schema.dtype
+                    if flat_col in table_cols and self._is_pickled_sql_type(table_cols[flat_col].type) == pickled:
+                        dtypes[flat_col] = leaf_dtype
+            elif key in table_cols and self._is_pickled_sql_type(table_cols[key].type) == pickled:
+                dtypes[key] = schema.dtype
 
-        return overrides
+        return dtypes
+
+    def _polars_schema_override(self, table_class: type[DeclarativeBase]) -> SchemaDict:
+        """Return polars dtype overrides for the natively stored columns in *table_class*.
+
+        Pickled columns are excluded here: the raw query returns their bytes, so
+        their dtype can only be applied once the blobs have been unpickled, which
+        ``unpickle_bytes_columns`` does with ``_pickled_column_dtypes``.
+        """
+        return self._declared_column_dtypes(table_class, pickled=False)
+
+    def _pickled_column_dtypes(self, table_class: type[DeclarativeBase]) -> SchemaDict:
+        """Return the declared polars dtype of the pickled columns in *table_class*."""
+        return self._declared_column_dtypes(table_class, pickled=True)
 
     @staticmethod
     def _build_struct_expr(key: str, dtype: pl.Struct) -> pl.Expr:
@@ -1357,7 +1376,7 @@ class SQLGraph(BaseGraph):
                     filter_node_ids,
                     self.Node,
                 )
-            node_df = unpickle_bytes_columns(node_df)
+            node_df = unpickle_bytes_columns(node_df, self._pickled_column_dtypes(self.Node))
             node_df = self._cast_columns(self.Node, node_df)
 
         if single_node:
@@ -1550,7 +1569,7 @@ class SQLGraph(BaseGraph):
                 connection=session.connection(),
                 schema_overrides=self._polars_schema_override(self.Node),
             )
-            nodes_df = unpickle_bytes_columns(nodes_df)
+            nodes_df = unpickle_bytes_columns(nodes_df, self._pickled_column_dtypes(self.Node))
             nodes_df = self._cast_columns(self.Node, nodes_df)
 
         # Select using logical keys (struct columns are now reconstructed).
@@ -1596,7 +1615,7 @@ class SQLGraph(BaseGraph):
                 connection=session.connection(),
                 schema_overrides=self._polars_schema_override(self.Edge),
             )
-            edges_df = unpickle_bytes_columns(edges_df)
+            edges_df = unpickle_bytes_columns(edges_df, self._pickled_column_dtypes(self.Edge))
             edges_df = self._cast_columns(self.Edge, edges_df)
 
         if unpack:
