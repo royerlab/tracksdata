@@ -309,29 +309,10 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         dtype: pl.DataType | None = None,
         default_value: Any = None,
     ) -> None:
-        # Delegate to root with all parameters (root handles overloading)
+        # Delegate to root with all parameters (root handles overloading). The root
+        # applies the key back to this view -- and to its sibling views -- through
+        # `_maintain_views_attr_key`, so there is nothing to do locally here.
         self._root.add_node_attr_key(key_or_schema, dtype, default_value)
-
-        # Extract key for local tracking
-        if isinstance(key_or_schema, AttrSchema):
-            key = key_or_schema.key
-        else:
-            key = key_or_schema
-
-        if self._node_attr_keys is not None:
-            self._node_attr_keys.append(key)
-
-        # Sync logic
-        if not self._is_root_rx_graph:
-            if self.sync:
-                # Get the schema from root to get the actual default value used
-                schema = self._root._node_attr_schemas()[key]
-                # Apply to local rx_graph
-                rx_graph = self.rx_graph
-                for node_id in rx_graph.node_indices():
-                    rx_graph[node_id][key] = schema.default_value
-            else:
-                self._out_of_sync = True
 
     def remove_node_attr_key(self, key: str) -> None:
         self._root.remove_node_attr_key(key)
@@ -351,28 +332,47 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         dtype: pl.DataType | None = None,
         default_value: Any = None,
     ) -> None:
-        # Delegate to root with all parameters (root handles overloading)
+        # See `add_node_attr_key`: the root propagates the key back to this view.
         self._root.add_edge_attr_key(key_or_schema, dtype, default_value)
 
-        # Extract key for local tracking
-        if isinstance(key_or_schema, AttrSchema):
-            key = key_or_schema.key
+    def _apply_root_attr_key(self, schema: AttrSchema, mode: Literal["node", "edge"]) -> None:
+        """
+        Absorb a new attribute key registered on the root graph.
+
+        A view that pins an explicit key list has to record the new key there, or
+        it keeps reporting a stale schema. Beyond that, when the root is a
+        rustworkx graph the view shares the root's attribute dicts, so the column
+        already exists on every row; otherwise (e.g. a SQLGraph root) the view
+        holds its own copy and has to grow the column itself, filling existing
+        rows with the schema's default value.
+
+        Parameters
+        ----------
+        schema : AttrSchema
+            The schema of the newly added key, as stored by the root. The default
+            value is read from here rather than from the caller's arguments, since
+            the root may have inferred it.
+        mode : Literal["node", "edge"]
+            Whether the key was added to the nodes or the edges.
+        """
+        local_keys = self._node_attr_keys if mode == "node" else self._edge_attr_keys
+        if local_keys is not None and schema.key not in local_keys:
+            local_keys.append(schema.key)
+
+        if self._is_root_rx_graph:
+            return
+
+        if not self.sync:
+            self._out_of_sync = True
+            return
+
+        rx_graph = self.rx_graph
+        if mode == "node":
+            for node_id in rx_graph.node_indices():
+                rx_graph[node_id][schema.key] = schema.default_value
         else:
-            key = key_or_schema
-
-        if self._edge_attr_keys is not None:
-            self._edge_attr_keys.append(key)
-
-        # Sync logic
-        if not self._is_root_rx_graph:
-            if self.sync:
-                # Get the schema from root to get the actual default value used
-                schema = self._root._edge_attr_schemas()[key]
-                # Apply to local rx_graph
-                for _, _, edge_attr in self.rx_graph.weighted_edge_list():
-                    edge_attr[key] = schema.default_value
-            else:
-                self._out_of_sync = True
+            for _, _, edge_attr in rx_graph.weighted_edge_list():
+                edge_attr[schema.key] = schema.default_value
 
     def remove_edge_attr_key(self, key: str) -> None:
         self._root.remove_edge_attr_key(key)

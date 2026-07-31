@@ -1076,6 +1076,8 @@ class RustWorkXGraph(BaseGraph):
         # Store schema
         self.__node_attr_schemas[schema.key] = schema
 
+        self._maintain_views_attr_key(schema, "node")
+
     def remove_node_attr_key(self, key: str) -> None:
         """
         Remove an existing node attribute key from the graph.
@@ -1115,6 +1117,8 @@ class RustWorkXGraph(BaseGraph):
 
         # Store schema
         self.__edge_attr_schemas[schema.key] = schema
+
+        self._maintain_views_attr_key(schema, "edge")
 
     def remove_edge_attr_key(self, key: str) -> None:
         """

@@ -2093,3 +2093,54 @@ def test_update_root_edge_key_outside_view_attr_keys(graph_backend: BaseGraph) -
     # the keys the view does track are still maintained
     root.update_edge_attrs(attrs={"weight": [7.0]}, edge_ids=[root.edge_ids()[0]])
     assert view.edge_attrs(attr_keys=["weight"])["weight"].to_list() == [7.0]
+
+
+def test_add_node_attr_key_on_root_reaches_live_view(graph_backend: BaseGraph) -> None:
+    """A key registered on the root must reach the views already derived from it.
+
+    A rustworkx-rooted view reports the root's keys and shares its attribute
+    dicts, so it picks the key up for free. A SQLGraph-rooted view holds its own
+    copy of both and has to be told.
+    """
+    root = _root_with_two_connected_nodes(graph_backend)
+    view = root.filter().subgraph()
+
+    root.add_node_attr_key("foo", default_value=-1, dtype=pl.Int64)
+
+    assert "foo" in root.node_attr_keys()
+    assert "foo" in view.node_attr_keys()
+    assert view.node_attrs(attr_keys=["foo"])["foo"].to_list() == [-1, -1]
+
+    # the view's local store accepts writes to the new key, on either side
+    root.update_node_attrs(attrs={"foo": [7]}, node_ids=[root.node_ids()[0]])
+    assert view.node_attrs(attr_keys=["foo"])["foo"].to_list() == [7, -1]
+
+
+def test_add_edge_attr_key_on_root_reaches_live_view(graph_backend: BaseGraph) -> None:
+    """The edge counterpart of `test_add_node_attr_key_on_root_reaches_live_view`."""
+    root = _root_with_two_connected_nodes(graph_backend)
+    view = root.filter().subgraph()
+
+    root.add_edge_attr_key("w", default_value=-1.0, dtype=pl.Float64)
+
+    assert "w" in root.edge_attr_keys()
+    assert "w" in view.edge_attr_keys()
+    assert view.edge_attrs(attr_keys=["w"])["w"].to_list() == [-1.0]
+
+    root.update_edge_attrs(attrs={"w": [1.5]}, edge_ids=[root.edge_ids()[0]])
+    assert view.edge_attrs(attr_keys=["w"])["w"].to_list() == [1.5]
+
+
+def test_add_attr_key_on_view_reaches_sibling_view(graph_backend: BaseGraph) -> None:
+    """Registering through one view must reach the other views of the same root."""
+    root = _root_with_two_connected_nodes(graph_backend)
+    view_a = root.filter().subgraph()
+    view_b = root.filter().subgraph()
+
+    view_a.add_node_attr_key("foo", default_value=-1, dtype=pl.Int64)
+    view_a.add_edge_attr_key("w", default_value=-1.0, dtype=pl.Float64)
+
+    assert "foo" in view_b.node_attr_keys()
+    assert "w" in view_b.edge_attr_keys()
+    assert view_b.node_attrs(attr_keys=["foo"])["foo"].to_list() == [-1, -1]
+    assert view_b.edge_attrs(attr_keys=["w"])["w"].to_list() == [-1.0]

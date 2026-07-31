@@ -197,6 +197,22 @@ class BaseGraph(abc.ABC):
         for view in self._views:
             view._apply_root_edge_attrs(edge_ids=edge_ids, attrs=attrs)
 
+    def _maintain_views_attr_key(self, schema: AttrSchema, mode: Literal["node", "edge"]) -> None:
+        """
+        Bring every registered view up to date after a new attribute key is added.
+
+        The schema counterpart of `_maintain_views_node_attrs`, called by concrete
+        ``add_node_attr_key`` / ``add_edge_attr_key`` implementations once the key
+        exists on this graph. A view that keeps its own copy of the attributes has
+        to grow the column too, otherwise it keeps reporting a stale schema and
+        rejects later writes to the new key.
+
+        Adding a key is a schema operation, so this runs once per key rather than
+        once per row of a write.
+        """
+        for view in self._views:
+            view._apply_root_attr_key(schema, mode)
+
     @staticmethod
     def _validate_attributes(
         attrs: dict[str, Any],
