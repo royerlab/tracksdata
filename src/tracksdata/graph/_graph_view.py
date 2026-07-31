@@ -1010,10 +1010,14 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         # holds its own copy and has to be written through.
         if not self._is_root_rx_graph:
             if self.sync:
+                # A view may track only a subset of the root's keys; the ones it
+                # left out have no local column to write to, so they are skipped
+                # rather than forwarded (the local store would reject them).
+                local_keys = set(self.node_attr_keys(return_ids=True))
                 local_attrs = {
                     key: [new_attrs_by_id[node_id][key] for node_id in in_view]
                     for key in changed_keys
-                    if all(key in new_attrs_by_id[node_id] for node_id in in_view)
+                    if key in local_keys and all(key in new_attrs_by_id[node_id] for node_id in in_view)
                 }
                 if local_attrs:
                     with self.node_updated.blocked():
@@ -1085,10 +1089,17 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
             self._out_of_sync = True
             return
 
+        # See `_apply_root_node_attrs`: keys this view does not track have no
+        # local column and are skipped.
+        local_keys = set(self.edge_attr_keys(return_ids=True))
         positions = [i for i, _ in in_view]
         local_attrs = {
-            key: value if np.isscalar(value) else [value[i] for i in positions] for key, value in attrs.items()
+            key: value if np.isscalar(value) else [value[i] for i in positions]
+            for key, value in attrs.items()
+            if key in local_keys
         }
+        if not local_attrs:
+            return
 
         super().update_edge_attrs(
             edge_ids=[self._edge_map_from_root[edge_id] for _, edge_id in in_view],

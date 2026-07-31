@@ -2045,3 +2045,51 @@ def test_sql_graph_filter_borderline_node_ids(tmp_path, monkeypatch: pytest.Monk
     del filtered, subgraph
     gc.collect()
     assert _scratch_table_count(graph) == 0
+
+
+def _root_with_two_connected_nodes(graph_backend: BaseGraph) -> BaseGraph:
+    """A root graph with two nodes, one edge, and two attribute keys on each."""
+    graph_backend.add_node_attr_key("area", default_value=0.0, dtype=pl.Float64)
+    graph_backend.add_node_attr_key("bar", default_value=0.0, dtype=pl.Float64)
+    graph_backend.add_edge_attr_key("weight", default_value=0.0, dtype=pl.Float64)
+    graph_backend.add_edge_attr_key("cost", default_value=0.0, dtype=pl.Float64)
+    source = graph_backend.add_node({"t": 0, "area": 1.0, "bar": 1.0})
+    target = graph_backend.add_node({"t": 1, "area": 2.0, "bar": 2.0})
+    graph_backend.add_edge(source, target, {"weight": 1.0, "cost": 1.0})
+    return graph_backend
+
+
+def test_update_root_node_key_outside_view_attr_keys(graph_backend: BaseGraph) -> None:
+    """A view tracking a subset of keys tolerates root updates to the keys it excluded.
+
+    A view built with an explicit `node_attr_keys` has no local column for the
+    keys it left out, so the update must not be propagated into it.
+    """
+    root = _root_with_two_connected_nodes(graph_backend)
+    view = root.filter().subgraph(node_attr_keys=["area"])
+
+    assert "bar" not in view.node_attr_keys()
+
+    root.update_node_attrs(attrs={"bar": [9.0]}, node_ids=[root.node_ids()[0]])
+
+    assert root.node_attrs(attr_keys=["bar"])["bar"].to_list() == [9.0, 2.0]
+    assert "bar" not in view.node_attr_keys()
+    # the keys the view does track are still maintained
+    root.update_node_attrs(attrs={"area": [7.0]}, node_ids=[root.node_ids()[0]])
+    assert view.node_attrs(attr_keys=["area"])["area"].to_list() == [7.0, 2.0]
+
+
+def test_update_root_edge_key_outside_view_attr_keys(graph_backend: BaseGraph) -> None:
+    """The edge counterpart of `test_update_root_node_key_outside_view_attr_keys`."""
+    root = _root_with_two_connected_nodes(graph_backend)
+    view = root.filter().subgraph(edge_attr_keys=["weight"])
+
+    assert "cost" not in view.edge_attr_keys()
+
+    root.update_edge_attrs(attrs={"cost": [9.0]}, edge_ids=[root.edge_ids()[0]])
+
+    assert root.edge_attrs(attr_keys=["cost"])["cost"].to_list() == [9.0]
+    assert "cost" not in view.edge_attr_keys()
+    # the keys the view does track are still maintained
+    root.update_edge_attrs(attrs={"weight": [7.0]}, edge_ids=[root.edge_ids()[0]])
+    assert view.edge_attrs(attr_keys=["weight"])["weight"].to_list() == [7.0]
