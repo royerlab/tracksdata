@@ -1966,6 +1966,8 @@ class SQLGraph(BaseGraph):
         node_schemas[schema.key] = schema
         self.__node_attr_schemas = node_schemas
 
+        self._maintain_views_attr_key(schema, "node")
+
     def remove_node_attr_key(self, key: str) -> None:
         if key not in self.node_attr_keys():
             raise ValueError(f"Node attribute key {key} does not exist")
@@ -1992,6 +1994,8 @@ class SQLGraph(BaseGraph):
         self._add_new_column(self.Edge, schema)
         edge_schemas[schema.key] = schema
         self.__edge_attr_schemas = edge_schemas
+
+        self._maintain_views_attr_key(schema, "edge")
 
     def remove_edge_attr_key(self, key: str) -> None:
         if key not in self.edge_attr_keys():
