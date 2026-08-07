@@ -4,6 +4,7 @@ import operator
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, overload
+from weakref import WeakSet
 
 import geff
 import numpy as np
@@ -117,12 +118,100 @@ class BaseGraph(abc.ABC):
 
     def __init__(self) -> None:
         self._cache = {}
+        # Views derived from this graph, to be kept up to date when it changes.
+        # Views add themselves on construction (see GraphView.__init__).
+        #
+        # Held weakly: once nothing else references a view, nobody can observe
+        # whether it is current, so maintaining it would be pure overhead.
+        # Dropping the last reference to a view is all that is needed to stop
+        # maintaining it.
+        self._views: WeakSet[BaseGraph] = WeakSet()
 
     def supports_custom_indices(self) -> bool:
         """
         Whether the graph backend supports custom indices.
         """
         return False
+
+    def __getstate__(self) -> dict[str, Any]:
+        """
+        Drop the view registry when serializing.
+
+        Views are runtime relationships between live objects, not data, so an
+        unpickled graph starts with none. A ``WeakSet`` is also not picklable,
+        as it holds an internal callback closure.
+        """
+        state = self.__dict__.copy()
+        state.pop("_views", None)
+        return state
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        self.__dict__.update(state)
+        # Excluded by __getstate__, so restore it empty: an unpickled graph has
+        # no live views.
+        self._views = WeakSet()
+
+    def _maintain_views_node_attrs(
+        self,
+        node_ids: Sequence[int],
+        old_attrs_by_id: dict[int, dict[str, Any]],
+        new_attrs_by_id: dict[int, dict[str, Any]],
+        changed_keys: set[str],
+    ) -> None:
+        """
+        Bring every registered view up to date after a node attribute update.
+
+        Called by concrete ``update_node_attrs`` implementations after the root
+        graph has been updated and its own signal emitted. Each view absorbs
+        the change for the nodes it contains and then emits its own signals.
+
+        This is deliberately *not* routed through the signal system: keeping a
+        view consistent with its root is an invariant, so it must happen whether
+        or not anything is listening to the view.
+
+        `node_ids` and the attribute dicts are keyed by this graph's own node
+        ids, which is what views map from.
+        """
+        for view in self._views:
+            view._apply_root_node_attrs(
+                node_ids=node_ids,
+                old_attrs_by_id=old_attrs_by_id,
+                new_attrs_by_id=new_attrs_by_id,
+                changed_keys=changed_keys,
+            )
+
+    def _maintain_views_edge_attrs(
+        self,
+        edge_ids: Sequence[int],
+        attrs: dict[str, Any],
+    ) -> None:
+        """
+        Bring every registered view up to date after an edge attribute update.
+
+        The edge counterpart of `_maintain_views_node_attrs`. There is no
+        ``edge_updated`` signal, so this only propagates data — no notification
+        step and no before/after snapshots.
+
+        `edge_ids` are this graph's own edge ids, which is what views map from.
+        """
+        for view in self._views:
+            view._apply_root_edge_attrs(edge_ids=edge_ids, attrs=attrs)
+
+    def _maintain_views_attr_key(self, schema: AttrSchema, mode: Literal["node", "edge"]) -> None:
+        """
+        Bring every registered view up to date after a new attribute key is added.
+
+        The schema counterpart of `_maintain_views_node_attrs`, called by concrete
+        ``add_node_attr_key`` / ``add_edge_attr_key`` implementations once the key
+        exists on this graph. A view that keeps its own copy of the attributes has
+        to grow the column too, otherwise it keeps reporting a stale schema and
+        rejects later writes to the new key.
+
+        Adding a key is a schema operation, so this runs once per key rather than
+        once per row of a write.
+        """
+        for view in self._views:
+            view._apply_root_attr_key(schema, mode)
 
     @staticmethod
     def _validate_attributes(
