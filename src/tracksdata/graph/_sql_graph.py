@@ -834,39 +834,6 @@ class SQLGraph(BaseGraph):
             if isinstance(column.type, sa.LargeBinary):
                 column.type = sa.PickleType()
 
-    def _declared_column_dtypes(self, table_class: type[DeclarativeBase], *, pickled: bool) -> SchemaDict:
-        """Return the declared polars dtype of the physical columns in *table_class*.
-
-        Flat struct leaf columns are included with their native leaf dtypes.
-
-        Parameters
-        ----------
-        table_class : type[DeclarativeBase]
-            The table to describe.
-        pickled : bool
-            Whether to return the columns stored as pickled blobs (arrays, lists,
-            objects, ...) or the ones stored as native SQL scalars.
-        """
-        dtypes: SchemaDict = {}
-        schemas = self._attr_schemas_for_table(table_class)
-        table_cols = table_class.__table__.columns
-
-        flat_key_to_dtype: list[tuple[str, pl.DataType]] = []
-        # flatten structs into their leaf columns
-        for key, schema in schemas.items():
-            if isinstance(schema.dtype, pl.Struct):
-                flat_key_to_dtype.extend(
-                    (flat_col, leaf_dtype) for flat_col, leaf_dtype in flatten_struct_dtype(key, schema.dtype)
-                )
-            else:
-                flat_key_to_dtype.append((key, schema.dtype))
-
-        for key, dtype in flat_key_to_dtype:
-            if key in table_cols and self._is_pickled_sql_type(table_cols[key].type) == pickled:
-                dtypes[key] = dtype
-
-        return dtypes
-
     def _read_database(
         self,
         query: sa.Select,
@@ -884,13 +851,64 @@ class SQLGraph(BaseGraph):
             with Session(self._engine) as session:
                 return self._read_database(query, table_class, session.connection())
 
+        native_dtypes, pickled_dtypes, struct_dtypes = self._database_column_dtypes(table_class)
         df = pl.read_database(
             self._raw_query(query),
             connection=connection,
-            schema_overrides=self._declared_column_dtypes(table_class, pickled=False),
+            schema_overrides=native_dtypes,
         )
-        df = unpickle_bytes_columns(df, self._declared_column_dtypes(table_class, pickled=True))
-        return self._cast_columns(table_class, df)
+        df = unpickle_bytes_columns(df, pickled_dtypes)
+        return self._reconstruct_struct_columns(df, struct_dtypes)
+
+    def _database_column_dtypes(
+        self,
+        table_class: type[DeclarativeBase],
+    ) -> tuple[SchemaDict, SchemaDict, dict[str, pl.Struct]]:
+        """Partition physical column dtypes by storage and collect logical structs."""
+        native_dtypes: SchemaDict = {}
+        pickled_dtypes: SchemaDict = {}
+        struct_dtypes: dict[str, pl.Struct] = {}
+        table_cols = table_class.__table__.columns
+
+        for key, schema in self._attr_schemas_for_table(table_class).items():
+            is_struct = isinstance(schema.dtype, pl.Struct)
+            if is_struct:
+                struct_dtypes[key] = schema.dtype
+            physical_dtypes = flatten_struct_dtype(key, schema.dtype) if is_struct else ((key, schema.dtype),)
+
+            for column_name, dtype in physical_dtypes:
+                if column_name not in table_cols:
+                    continue
+                target = pickled_dtypes if self._is_pickled_sql_type(table_cols[column_name].type) else native_dtypes
+                target[column_name] = dtype
+
+        return native_dtypes, pickled_dtypes, struct_dtypes
+
+    def _reconstruct_struct_columns(
+        self,
+        df: pl.DataFrame,
+        struct_dtypes: dict[str, pl.Struct],
+    ) -> pl.DataFrame:
+        """Reconstruct logical struct columns from flat physical columns."""
+        struct_exprs: list[pl.Expr] = []
+        flat_cols_to_drop: list[str] = []
+        for key, dtype in struct_dtypes.items():
+            flat_cols = [column_name for column_name, _ in flatten_struct_dtype(key, dtype)]
+            missing_cols = [column_name for column_name in flat_cols if column_name not in df.columns]
+            if len(missing_cols) == len(flat_cols):
+                continue
+            if missing_cols:
+                raise ValueError(
+                    f"Struct attribute '{key}' is partially present in the DataFrame "
+                    f"(missing: {missing_cols}). Cannot reconstruct the struct column."
+                )
+            struct_exprs.append(self._build_struct_expr(key, dtype).alias(key))
+            flat_cols_to_drop.extend(flat_cols)
+
+        if struct_exprs:
+            df = df.with_columns(struct_exprs).drop(flat_cols_to_drop)
+
+        return df
 
     @staticmethod
     def _build_struct_expr(key: str, dtype: pl.Struct) -> pl.Expr:
@@ -903,61 +921,6 @@ class SQLGraph(BaseGraph):
             else:
                 fields.append(pl.col(flat_col).alias(field_name))
         return pl.struct(fields)
-
-    def _cast_columns(self, table_class: type[DeclarativeBase], df: pl.DataFrame) -> pl.DataFrame:
-        """Cast pickled columns to their target dtype and reconstruct struct columns."""
-        schemas = self._attr_schemas_for_table(table_class)
-        table_cols = table_class.__table__.columns
-
-        casts: list[pl.Series] = []
-        struct_keys: list[tuple[str, pl.Struct]] = []
-
-        for key, schema in schemas.items():
-            if isinstance(schema.dtype, pl.Struct):
-                # Cast any pickled flat leaf columns to their proper dtypes before
-                # reconstruction so Array/List fields have correct dtype.
-                for flat_col, leaf_dtype in flatten_struct_dtype(key, schema.dtype):
-                    if flat_col not in df.columns or flat_col not in table_cols:
-                        continue
-                    if not self._is_pickled_sql_type(table_cols[flat_col].type):
-                        continue
-                    try:
-                        casts.append(pl.Series(flat_col, df[flat_col].to_list(), dtype=leaf_dtype))
-                    except Exception:
-                        continue
-                struct_keys.append((key, schema.dtype))
-                continue
-
-            if key not in df.columns or key not in table_cols:
-                continue
-
-            if not self._is_pickled_sql_type(table_cols[key].type):
-                continue
-
-            try:
-                casts.append(pl.Series(key, df[key].to_list(), dtype=schema.dtype))
-            except Exception:
-                # Keep original dtype when values cannot be cast to the target schema.
-                continue
-
-        if casts:
-            df = df.with_columns(casts)
-
-        # Reconstruct struct columns from their flat physical columns.
-        for key, dtype in struct_keys:
-            flat_cols = [fc for fc, _ in flatten_struct_dtype(key, dtype)]
-            present = [fc for fc in flat_cols if fc in df.columns]
-            if not present:
-                continue  # struct was not part of this query; skip
-            missing = [fc for fc in flat_cols if fc not in df.columns]
-            if missing:
-                raise ValueError(
-                    f"Struct attribute '{key}' is partially present in the DataFrame "
-                    f"(missing: {missing}). Cannot reconstruct the struct column."
-                )
-            df = df.with_columns(self._build_struct_expr(key, dtype).alias(key)).drop(flat_cols)
-
-        return df
 
     def _update_max_id_per_time(self) -> None:
         """
@@ -1640,7 +1603,7 @@ class SQLGraph(BaseGraph):
 
         Logical keys are what the user sees (``"measurements"``); physical columns are
         what actually exists in the table (``"measurements__score"``, ...). The two
-        diverge only for struct attributes; ``_cast_columns`` reassembles the struct
+        diverge only for struct attributes; ``_read_database`` reassembles the struct
         on the result DataFrame.
         """
         schemas = self._attr_schemas_for_table(table_class)
