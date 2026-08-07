@@ -9,6 +9,7 @@ import polars as pl
 import pytest
 import rustworkx as rx
 import sqlalchemy as sa
+from geff_spec import GeffMetadata
 from zarr.storage import MemoryStore
 
 from tracksdata.attrs import EdgeAttr, NodeAttr
@@ -2859,6 +2860,55 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
         rx_graph,
         geff_graph.rx_graph,
     )
+
+
+def test_geff_roundtrip_custom_metadata(graph_backend: BaseGraph) -> None:
+    """Graph metadata must survive `to_geff` when the caller supplies its own `GeffMetadata`."""
+
+    _fill_mock_geff_graph(graph_backend)
+    graph_backend.metadata["shape"] = (5, 100, 100)
+
+    # a downstream library supplying its own metadata: same props as the auto-generated
+    # one, but with its own `extra` namespace instead of tracksdata's.
+    reference_store = MemoryStore()
+    graph_backend.to_geff(geff_store=reference_store)
+    custom_metadata = GeffMetadata.read(reference_store)
+    custom_metadata.extra = {"downstream": {"hello": "world"}}
+
+    output_store = MemoryStore()
+    graph_backend.to_geff(geff_store=output_store, geff_metadata=custom_metadata)
+
+    written_metadata = GeffMetadata.read(output_store)
+    # the caller's own namespace is untouched ...
+    assert written_metadata.extra["downstream"] == {"hello": "world"}
+    # ... and the graph metadata rode along. `shape` is a list, not a tuple, because
+    # the extras are serialized as JSON.
+    assert written_metadata.extra["tracksdata"]["shape"] == [5, 100, 100]
+
+    geff_graph, _ = IndexedRXGraph.from_geff(output_store)
+    assert geff_graph.metadata["shape"] == [5, 100, 100]
+
+    # the metadata object the caller passed in was not modified
+    assert custom_metadata.extra == {"downstream": {"hello": "world"}}
+
+
+def test_geff_custom_metadata_overrides_graph_metadata(graph_backend: BaseGraph) -> None:
+    """On key collisions the caller-supplied `extra["tracksdata"]` wins."""
+
+    _fill_mock_geff_graph(graph_backend)
+    graph_backend.metadata["shape"] = (5, 100, 100)
+
+    reference_store = MemoryStore()
+    graph_backend.to_geff(geff_store=reference_store)
+    custom_metadata = GeffMetadata.read(reference_store)
+    custom_metadata.extra = {"tracksdata": {"shape": [1, 2, 3], "extra_key": "value"}}
+
+    output_store = MemoryStore()
+    graph_backend.to_geff(geff_store=output_store, geff_metadata=custom_metadata)
+
+    geff_graph, _ = IndexedRXGraph.from_geff(output_store)
+    assert geff_graph.metadata["shape"] == [1, 2, 3]
+    assert geff_graph.metadata["extra_key"] == "value"
 
 
 def test_geff_overwrite(graph_backend: BaseGraph, tmp_path: Path) -> None:
