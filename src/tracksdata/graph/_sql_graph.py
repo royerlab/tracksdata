@@ -403,7 +403,7 @@ class SQLFilter(BaseFilter):
             attr_keys=attr_keys,
         )
 
-        nodes_attrs = self._read_attr_dataframe(query, self._graph.Node)
+        nodes_attrs = self._graph._read_database(query, self._graph.Node)
 
         if attr_keys is not None:
             attr_keys = list(dict.fromkeys(attr_keys))
@@ -413,17 +413,6 @@ class SQLFilter(BaseFilter):
             nodes_attrs = unpack_array_attrs(nodes_attrs)
 
         return nodes_attrs
-
-    def _read_attr_dataframe(self, query: sa.Select, table: type[DeclarativeBase]) -> pl.DataFrame:
-        with Session(self._graph._engine) as session:
-            df = pl.read_database(
-                self._graph._raw_query(query),
-                connection=session.connection(),
-                schema_overrides=self._graph._polars_schema_override(table),
-            )
-
-        df = unpickle_bytes_columns(df, self._graph._pickled_column_dtypes(table))
-        return self._graph._cast_columns(table, df)
 
     def _query_from_attr_keys(
         self,
@@ -469,7 +458,7 @@ class SQLFilter(BaseFilter):
             ],
         )
 
-        edges_df = self._read_attr_dataframe(query, self._graph.Edge)
+        edges_df = self._graph._read_database(query, self._graph.Edge)
 
         if unpack:
             edges_df = unpack_array_attrs(edges_df)
@@ -514,8 +503,8 @@ class SQLFilter(BaseFilter):
             ],
         )
 
-        nodes_df = self._read_attr_dataframe(node_query, self._graph.Node)
-        edges_df = self._read_attr_dataframe(edge_query, self._graph.Edge)
+        nodes_df = self._graph._read_database(node_query, self._graph.Node)
+        edges_df = self._graph._read_database(edge_query, self._graph.Edge)
 
         node_map_to_root = {}
         node_map_from_root = {}
@@ -862,29 +851,46 @@ class SQLGraph(BaseGraph):
         schemas = self._attr_schemas_for_table(table_class)
         table_cols = table_class.__table__.columns
 
+        flat_key_to_dtype: list[tuple[str, pl.DataType]] = []
+        # flatten structs into their leaf columns
         for key, schema in schemas.items():
             if isinstance(schema.dtype, pl.Struct):
-                # Emit one entry per leaf physical column.
-                for flat_col, leaf_dtype in flatten_struct_dtype(key, schema.dtype):
-                    if flat_col in table_cols and self._is_pickled_sql_type(table_cols[flat_col].type) == pickled:
-                        dtypes[flat_col] = leaf_dtype
-            elif key in table_cols and self._is_pickled_sql_type(table_cols[key].type) == pickled:
-                dtypes[key] = schema.dtype
+                flat_key_to_dtype.extend(
+                    (flat_col, leaf_dtype) for flat_col, leaf_dtype in flatten_struct_dtype(key, schema.dtype)
+                )
+            else:
+                flat_key_to_dtype.append((key, schema.dtype))
+
+        for key, dtype in flat_key_to_dtype:
+            if key in table_cols and self._is_pickled_sql_type(table_cols[key].type) == pickled:
+                dtypes[key] = dtype
 
         return dtypes
 
-    def _polars_schema_override(self, table_class: type[DeclarativeBase]) -> SchemaDict:
-        """Return polars dtype overrides for the natively stored columns in *table_class*.
+    def _read_database(
+        self,
+        query: sa.Select,
+        table_class: type[DeclarativeBase],
+        connection: sa.Connection | None = None,
+    ) -> pl.DataFrame:
+        """Read a SQL query and restore the declared Polars attribute dtypes.
 
-        Pickled columns are excluded here: the raw query returns their bytes, so
-        their dtype can only be applied once the blobs have been unpickled, which
-        ``unpickle_bytes_columns`` does with ``_pickled_column_dtypes``.
+        Native SQL columns receive schema overrides during the database read.
+        Pickled columns are unpickled before their declared dtypes are restored,
+        and flat struct columns are reconstructed into logical struct columns.
+        A temporary session supplies the connection when one is not provided.
         """
-        return self._declared_column_dtypes(table_class, pickled=False)
+        if connection is None:
+            with Session(self._engine) as session:
+                return self._read_database(query, table_class, session.connection())
 
-    def _pickled_column_dtypes(self, table_class: type[DeclarativeBase]) -> SchemaDict:
-        """Return the declared polars dtype of the pickled columns in *table_class*."""
-        return self._declared_column_dtypes(table_class, pickled=True)
+        df = pl.read_database(
+            self._raw_query(query),
+            connection=connection,
+            schema_overrides=self._declared_column_dtypes(table_class, pickled=False),
+        )
+        df = unpickle_bytes_columns(df, self._declared_column_dtypes(table_class, pickled=True))
+        return self._cast_columns(table_class, df)
 
     @staticmethod
     def _build_struct_expr(key: str, dtype: pl.Struct) -> pl.Expr:
@@ -1364,11 +1370,7 @@ class SQLGraph(BaseGraph):
             query = session.query(getattr(self.Edge, node_key), *node_columns)
             query = query.join(self.Edge, getattr(self.Edge, neighbor_key) == self.Node.node_id)
             if filter_node_ids is None or len(filter_node_ids) == 0:
-                node_df = pl.read_database(
-                    query.statement,
-                    connection=session.connection(),
-                    schema_overrides=self._polars_schema_override(self.Node),
-                )
+                node_df = self._read_database(query.statement, self.Node, session.connection())
             else:
                 node_df = self._chunked_sa_read(
                     session,
@@ -1376,8 +1378,6 @@ class SQLGraph(BaseGraph):
                     filter_node_ids,
                     self.Node,
                 )
-            node_df = unpickle_bytes_columns(node_df, self._pickled_column_dtypes(self.Node))
-            node_df = self._cast_columns(self.Node, node_df)
 
         if single_node:
             if not return_attrs:
@@ -1564,13 +1564,7 @@ class SQLGraph(BaseGraph):
                     *self._physical_cols_for_query(attr_keys, self.Node),
                 )
 
-            nodes_df = pl.read_database(
-                self._raw_query(query),
-                connection=session.connection(),
-                schema_overrides=self._polars_schema_override(self.Node),
-            )
-            nodes_df = unpickle_bytes_columns(nodes_df, self._pickled_column_dtypes(self.Node))
-            nodes_df = self._cast_columns(self.Node, nodes_df)
+            nodes_df = self._read_database(query, self.Node, session.connection())
 
         # Select using logical keys (struct columns are now reconstructed).
         if attr_keys is not None:
@@ -1610,13 +1604,7 @@ class SQLGraph(BaseGraph):
                     *self._physical_cols_for_query(attr_keys, self.Edge),
                 )
 
-            edges_df = pl.read_database(
-                self._raw_query(query),
-                connection=session.connection(),
-                schema_overrides=self._polars_schema_override(self.Edge),
-            )
-            edges_df = unpickle_bytes_columns(edges_df, self._pickled_column_dtypes(self.Edge))
-            edges_df = self._cast_columns(self.Edge, edges_df)
+            edges_df = self._read_database(query, self.Edge, session.connection())
 
         if unpack:
             edges_df = unpack_array_attrs(edges_df)
@@ -2151,12 +2139,7 @@ class SQLGraph(BaseGraph):
         chunks = []
         for i in range(0, len(data), chunk_size):
             query = query_filter_op(data[i : i + chunk_size])
-            data_df = pl.read_database(
-                query.statement,
-                connection=session.connection(),
-                schema_overrides=self._polars_schema_override(table_class),
-            )
-            chunks.append(data_df)
+            chunks.append(self._read_database(query.statement, table_class, session.connection()))
         return pl.concat(chunks)
 
     def _create_id_scratch_table(self, ids: Sequence[int]) -> sa.Table:
