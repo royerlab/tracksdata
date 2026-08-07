@@ -1868,6 +1868,14 @@ class BaseGraph(abc.ABC):
             It automatically generates the metadata with:
             - axes: time (t) and spatial axes ((z), y, x)
             - tracklet node property: tracklet_id
+            The graph metadata (`graph.metadata`) is always written to
+            `geff_metadata.extra["tracksdata"]`, including when the metadata is provided
+            by the caller. On key collisions the caller's value wins, so an explicit
+            `extra["tracksdata"]` entry still overrides the graph's metadata.
+            The caller's object is not modified.
+            `shape` is the canonical key for the shape of the dense segmentation, it is
+            read back by `GraphArrayView` and `to_ctc`. Use
+            `tracksdata.io.read_graph_metadata` to read it back without building a graph.
         overwrite : bool
             Whether to overwrite the geff data directory if it exists.
         zarr_format : Literal[2, 3]
@@ -1882,6 +1890,10 @@ class BaseGraph(abc.ABC):
         edge_attrs = self.edge_attrs().drop(DEFAULT_ATTR_KEYS.EDGE_ID)
         edge_ids = edge_attrs.select(DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET).to_numpy()
         edge_attrs = edge_attrs.drop(DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET)
+
+        td_metadata = self.metadata.copy()
+        td_metadata.update(self._private_metadata_for_copy())
+        td_metadata.pop("geff", None)  # avoid geff being written multiple times
 
         if geff_metadata is None:
             axes = [Axis(name=DEFAULT_ATTR_KEYS.T, type="time")]
@@ -1917,10 +1929,6 @@ class BaseGraph(abc.ABC):
                 for k, v in edge_attrs.to_dict().items()
             }
 
-            td_metadata = self.metadata.copy()
-            td_metadata.update(self._private_metadata_for_copy())
-            td_metadata.pop("geff", None)  # avoid geff being written multiple times
-
             geff_metadata = geff.GeffMetadata(
                 directed=True,
                 axes=axes,
@@ -1931,6 +1939,15 @@ class BaseGraph(abc.ABC):
                     "tracksdata": td_metadata,
                 },
             )
+        else:
+            # copy so the caller's metadata object is left untouched
+            geff_metadata = geff_metadata.model_copy(deep=True)
+            extra = dict(geff_metadata.extra)
+            # caller-provided entries win, so they can still override the graph's metadata
+            merged = {**td_metadata, **extra.get("tracksdata", {})}
+            merged.pop("geff", None)  # avoid geff being written multiple times
+            extra["tracksdata"] = merged
+            geff_metadata.extra = extra
 
         node_dict = {
             k: {"values": column_to_numpy(v), "missing": None}

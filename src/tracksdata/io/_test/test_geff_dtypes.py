@@ -8,7 +8,7 @@ import zarr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph import IndexedRXGraph, RustWorkXGraph
 from tracksdata.io import convert_geff_prop_dtype, geff_prop_dtype
-from tracksdata.io._geff_dtypes import _overwrite_array, _set_prop_metadata_dtype
+from tracksdata.io._geff import _overwrite_array, _set_prop_metadata_dtype
 from tracksdata.nodes._mask import Mask
 
 MASK_KEY = DEFAULT_ATTR_KEYS.MASK
