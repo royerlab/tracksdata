@@ -59,13 +59,21 @@ def _data_numpy_to_native(data: dict[str, Any]) -> None:
     """
     Convert numpy scalars to native Python scalars in place.
 
+    Database drivers do not know about numpy scalar types. ``sqlite3``, for example,
+    falls back to the buffer protocol and stores ``np.int64(7)`` as its raw
+    little-endian byte buffer (a BLOB), silently corrupting a column declared as
+    ``BIGINT``. Numpy floats and strings happen to survive because they subclass
+    their Python counterparts, which makes the corruption look selective.
+
     Parameters
     ----------
     data : dict[str, Any]
         The data to convert. Modified in place.
     """
     for k, v in data.items():
-        if np.isscalar(v) and hasattr(v, "item"):
+        # `np.generic` is the base class of every numpy scalar, and excludes
+        # (0-dim) arrays, which must be passed through untouched.
+        if isinstance(v, np.generic):
             data[k] = v.item()
 
 
@@ -972,6 +980,11 @@ class SQLGraph(BaseGraph):
         write path (``bulk_add_nodes``, ``bulk_add_edges``, ``update_node_attrs``,
         ``update_edge_attrs``) since the single-node/edge wrappers in
         :class:`BaseGraph` now delegate to the bulk variants.
+
+        Numpy scalars are converted to their native Python counterparts here --
+        including the ones nested inside a struct value -- so that every write path
+        hands the driver values it can map onto the column's declared dtype,
+        see :func:`_data_numpy_to_native`.
         """
         result: dict[str, Any] = {}
         for key, value in attrs.items():
@@ -980,6 +993,7 @@ class SQLGraph(BaseGraph):
                 result.update(flatten_struct_value(key, value, schema.dtype))
             else:
                 result[key] = value
+        _data_numpy_to_native(result)
         return result
 
     def bulk_add_nodes(
@@ -1030,7 +1044,12 @@ class SQLGraph(BaseGraph):
         node_ids = []
         insert_rows = []
         for i, node in enumerate(nodes):
-            time = node["t"]
+            # numpy times must be converted before the id arithmetic below, otherwise
+            # `time * node_id_time_multiplier` silently overflows for narrow dtypes
+            # (e.g. np.int32) and the resulting id is a numpy scalar itself.
+            time = node[DEFAULT_ATTR_KEYS.T]
+            if isinstance(time, np.generic):
+                time = time.item()
 
             if indices is None:
                 default_node_id = (time * self.node_id_time_multiplier) - 1
@@ -1038,7 +1057,7 @@ class SQLGraph(BaseGraph):
                 # Update max_id tracking only for auto-generated IDs
                 self._max_id_per_time[time] = node_id
             else:
-                node_id = indices[i]
+                node_id = int(indices[i])
 
             node_ids.append(node_id)
             insert_rows.append({**node, DEFAULT_ATTR_KEYS.NODE_ID: node_id})
@@ -1163,9 +1182,6 @@ class SQLGraph(BaseGraph):
             return None
 
         edge_schemas = self._edge_attr_schemas()
-        for edge in edges:
-            _data_numpy_to_native(edge)
-
         edges = [self._flatten_attrs_for_write(edge, edge_schemas) for edge in edges]
 
         if return_ids:
@@ -1200,8 +1216,8 @@ class SQLGraph(BaseGraph):
             The ID of the added overlap.
         """
         overlap = self.Overlap(
-            source_id=source_id,
-            target_id=target_id,
+            source_id=int(source_id),
+            target_id=int(target_id),
         )
         with Session(self._engine) as session:
             session.add(overlap)
@@ -1228,7 +1244,7 @@ class SQLGraph(BaseGraph):
         if hasattr(overlaps, "tolist"):
             overlaps = overlaps.tolist()
 
-        overlaps = [{"source_id": source_id, "target_id": target_id} for source_id, target_id in overlaps]
+        overlaps = [{"source_id": int(source_id), "target_id": int(target_id)} for source_id, target_id in overlaps]
         self._chunked_sa_write(Session.bulk_insert_mappings, overlaps, self.Overlap)
 
     def overlaps(
@@ -2034,8 +2050,6 @@ class SQLGraph(BaseGraph):
                 ids = ids.tolist()
 
         # Handle array values with bulk_update_mappings
-        attrs = attrs.copy()
-        _data_numpy_to_native(attrs)
         schemas = self._attr_schemas_for_table(table_class)
         attrs = self._flatten_attrs_for_write(attrs, schemas)
 

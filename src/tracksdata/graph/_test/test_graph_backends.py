@@ -110,6 +110,101 @@ def test_add_edge(graph_backend: BaseGraph) -> None:
     assert df["weight"].to_list() == [0.5, 0.1]
 
 
+def test_add_node_and_edge_with_numpy_scalars(graph_backend: BaseGraph) -> None:
+    """Numpy scalars must be stored with the column's declared dtype, not as raw byte buffers.
+
+    Indexing any value out of a numpy array yields a numpy scalar, so this is the
+    norm for importers (geff/CSV/...) feeding values into the graph.
+    """
+    graph_backend.add_node_attr_key("val", dtype=pl.Int64, default_value=-1)
+    graph_backend.add_node_attr_key("pos", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_node_attr_key("flag", dtype=pl.Boolean, default_value=False)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Int64, default_value=0)
+
+    node_1 = graph_backend.add_node(
+        {"t": np.int64(0), "val": np.int64(7), "pos": np.float32(1.5), "flag": np.bool_(True)}
+    )
+    node_2, node_3 = graph_backend.bulk_add_nodes(
+        [
+            {"t": np.int32(1), "val": np.int32(8), "pos": np.float64(2.5), "flag": np.bool_(False)},
+            {"t": 2, "val": 9, "pos": 3.5, "flag": True},
+        ]
+    )
+
+    nodes_df = graph_backend.node_attrs(attr_keys=["t", "val", "pos", "flag"]).sort("t")
+    assert nodes_df.schema["val"] == pl.Int64
+    assert nodes_df["t"].to_list() == [0, 1, 2]
+    assert nodes_df["val"].to_list() == [7, 8, 9]
+    assert nodes_df["pos"].to_list() == [1.5, 2.5, 3.5]
+    assert nodes_df["flag"].to_list() == [True, False, True]
+
+    graph_backend.add_edge(np.int64(node_1), np.int64(node_2), {"weight": np.int64(3)})
+    graph_backend.bulk_add_edges(
+        [
+            {
+                DEFAULT_ATTR_KEYS.EDGE_SOURCE: np.int64(node_2),
+                DEFAULT_ATTR_KEYS.EDGE_TARGET: np.int64(node_3),
+                "weight": np.int32(4),
+            }
+        ]
+    )
+
+    edges_df = graph_backend.edge_attrs(
+        attr_keys=[DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET, "weight"]
+    ).sort("weight")
+    assert edges_df["weight"].to_list() == [3, 4]
+    assert edges_df[DEFAULT_ATTR_KEYS.EDGE_SOURCE].to_list() == [node_1, node_2]
+    assert edges_df[DEFAULT_ATTR_KEYS.EDGE_TARGET].to_list() == [node_2, node_3]
+
+    graph_backend.add_overlap(np.int64(node_1), np.int64(node_2))
+    graph_backend.bulk_add_overlaps([[np.int64(node_2), np.int64(node_3)]])
+    assert sorted(graph_backend.overlaps()) == sorted([[node_1, node_2], [node_2, node_3]])
+
+
+def test_sql_node_ids_from_narrow_numpy_time() -> None:
+    """A narrow numpy `t` must not overflow the `t * node_id_time_multiplier` id arithmetic."""
+    graph = SQLGraph(
+        drivername="sqlite",
+        database=":memory:",
+        engine_kwargs={"connect_args": {"check_same_thread": False}},
+    )
+    # np.int32(3) * 1_000_000_000 wraps around to a negative number in int32 arithmetic
+    node_ids = graph.bulk_add_nodes([{"t": np.int32(3)}, {"t": np.int32(3)}])
+
+    assert node_ids == [3 * graph.node_id_time_multiplier, 3 * graph.node_id_time_multiplier + 1]
+    assert all(isinstance(node_id, int) for node_id in node_ids)
+    assert graph.node_ids() == node_ids
+
+
+def test_add_node_with_numpy_scalars_in_struct(graph_backend: BaseGraph) -> None:
+    """Numpy scalars nested inside a struct attribute must also honor the declared dtype."""
+    graph_backend.add_node_attr_key("m", dtype=pl.Struct({"a": pl.Int64, "b": pl.Float64}))
+
+    graph_backend.add_node({"t": 0, "m": {"a": np.int64(3), "b": np.float64(0.25)}})
+    graph_backend.bulk_add_nodes([{"t": 1, "m": {"a": np.int32(4), "b": np.float32(0.5)}}])
+
+    nodes_df = graph_backend.node_attrs(attr_keys=["t", "m"]).sort("t")
+    assert nodes_df["m"].to_list() == [{"a": 3, "b": 0.25}, {"a": 4, "b": 0.5}]
+
+
+def test_update_attrs_with_numpy_scalars(graph_backend: BaseGraph) -> None:
+    """The update path must coerce numpy scalars just like the insert path."""
+    graph_backend.add_node_attr_key("val", dtype=pl.Int64, default_value=-1)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Int64, default_value=0)
+
+    node_1 = graph_backend.add_node({"t": 0, "val": 0})
+    node_2 = graph_backend.add_node({"t": 1, "val": 0})
+    edge_id = graph_backend.add_edge(node_1, node_2, {"weight": 0})
+
+    graph_backend.update_node_attrs(attrs={"val": np.int64(5)}, node_ids=[node_1])
+    graph_backend.update_node_attrs(attrs={"val": [np.int32(6)]}, node_ids=[node_2])
+    graph_backend.update_edge_attrs(attrs={"weight": np.int64(7)}, edge_ids=[edge_id])
+
+    nodes_df = graph_backend.node_attrs(attr_keys=["t", "val"]).sort("t")
+    assert nodes_df["val"].to_list() == [5, 6]
+    assert graph_backend.edge_attrs(attr_keys=["weight"])["weight"].to_list() == [7]
+
+
 def test_remove_edge_by_id(graph_backend: BaseGraph) -> None:
     """Test removing an edge by ID across backends using unified API."""
     # Setup
