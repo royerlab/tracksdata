@@ -204,7 +204,7 @@ class BaseGraph(abc.ABC):
         valid_keys = self.node_attr_keys(return_ids=True) if mode == "node" else self.edge_attr_keys(return_ids=True)
 
         valid = set(valid_keys)
-        missing = [key for key in dict.fromkeys(attr_keys) if key not in valid]
+        missing = sorted(set(attr_keys) - valid)  # sorted for consistent erorr message
         if missing:
             raise KeyError(
                 f"{mode} attribute key(s) {missing} not found. Available {mode} attribute keys: {sorted(valid)}"
