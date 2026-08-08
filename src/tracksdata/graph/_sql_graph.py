@@ -6,7 +6,7 @@ import weakref
 from collections.abc import Callable, Sequence
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 import cloudpickle
 import numpy as np
@@ -18,7 +18,13 @@ from sqlalchemy.orm import DeclarativeBase, Session, aliased, load_only
 from sqlalchemy.orm.query import Query
 from sqlalchemy.sql.type_api import TypeEngine
 
-from tracksdata.attrs import AttrComparison, AttrFilter, Filter, split_attr_comps
+from tracksdata.attrs import (
+    AttrComparison,
+    AttrFilter,
+    Filter,
+    attr_comps_to_strs,
+    split_attr_comps,
+)
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.graph.filters._base_filter import BaseFilter
@@ -250,6 +256,9 @@ class SQLFilter(BaseFilter):
         super().__init__()
         self._graph = graph
         self._node_attr_comps, self._edge_attr_comps = split_attr_comps(attr_filters)
+        # validate eagerly so a typo'd key points at the `filter()` call, not at the collect
+        graph._validate_attr_keys(attr_comps_to_strs(self._node_attr_comps), "node")
+        graph._validate_attr_keys(attr_comps_to_strs(self._edge_attr_comps), "edge")
         self._include_targets = include_targets
         self._include_sources = include_sources
         self._id_set: _SQLIDSet | None = None
@@ -442,6 +451,8 @@ class SQLFilter(BaseFilter):
     ) -> sa.Select:
         if attr_keys is not None:
             attr_keys = list(dict.fromkeys(attr_keys))
+
+            self._graph._validate_attr_keys(attr_keys, self._graph._mode_for_table(table))
 
             if extra_columns is not None:
                 attr_keys.extend(extra_columns)
@@ -1660,8 +1671,17 @@ class SQLGraph(BaseGraph):
         logical_keys: Sequence[str],
         table_class: type[DeclarativeBase],
     ) -> list[Any]:
-        """Like :meth:`_physical_column_names`, but returning SQLAlchemy column objects."""
+        """Like :meth:`_physical_column_names`, but returning SQLAlchemy column objects.
+
+        Validates the keys first so an unknown one raises `KeyError` instead of the
+        `AttributeError` that ``getattr(table_class, ...)`` would leak from SQLAlchemy.
+        """
+        self._validate_attr_keys(logical_keys, self._mode_for_table(table_class))
         return [getattr(table_class, name) for name in self._physical_column_names(logical_keys, table_class)]
+
+    def _mode_for_table(self, table_class: type[DeclarativeBase]) -> Literal["node", "edge"]:
+        """Whether ``table_class`` is the node or the edge table."""
+        return "node" if table_class is self.Node else "edge"
 
     def node_attr_keys(self, return_ids: bool = False) -> list[str]:
         """

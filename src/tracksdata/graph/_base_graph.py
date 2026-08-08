@@ -163,6 +163,53 @@ class BaseGraph(abc.ABC):
                 f"{mode} attribute keys not found in attrs: '{missing_keys}'\nRequested keys: '{reference_keys}'"
             )
 
+    def _validate_attr_keys(
+        self,
+        attr_keys: Sequence[str] | str | None,
+        mode: Literal["node", "edge"],
+    ) -> None:
+        """
+        Validate that attribute keys being *read* exist on this graph.
+
+        Read-path counterpart of `_validate_attributes`. Raises `KeyError`, not `ValueError`,
+        because asking for a key that isn't there is a lookup miss (mirroring `dict[missing]`),
+        whereas `_validate_attributes` guards a *write* against a declared schema, which is a
+        bad-argument situation.
+
+        Without a central guard each backend leaks whatever its storage layer raises for an
+        unknown column -- `AttributeError` from SQLAlchemy's `getattr`, `KeyError` from a dict
+        lookup, or polars' `ColumnNotFoundError` (which is not a `KeyError` subclass) -- so the
+        same call raised three different types depending on the backend.
+
+        Parameters
+        ----------
+        attr_keys : Sequence[str] | str | None
+            The attribute keys to validate. `None` means "all keys" and is always valid.
+        mode : Literal["node", "edge"]
+            Whether to validate against node or edge attribute keys.
+
+        Raises
+        ------
+        KeyError
+            If any key is not a declared attribute key of this graph.
+        """
+        if attr_keys is None:
+            return
+
+        if isinstance(attr_keys, str):
+            attr_keys = [attr_keys]
+
+        # ``return_ids=True``: the id columns (node_id / edge_id / source_id / target_id) are
+        # legitimately requestable even though they are not user-declared attributes.
+        valid_keys = self.node_attr_keys(return_ids=True) if mode == "node" else self.edge_attr_keys(return_ids=True)
+
+        valid = set(valid_keys)
+        missing = sorted(set(attr_keys) - valid)  # sorted for consistent erorr message
+        if missing:
+            raise KeyError(
+                f"{mode} attribute key(s) {missing} not found. Available {mode} attribute keys: {sorted(valid)}"
+            )
+
     def add_node(
         self,
         attrs: dict[str, Any],

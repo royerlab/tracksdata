@@ -56,6 +56,122 @@ def test_edge_validation(graph_backend: BaseGraph) -> None:
         graph_backend.add_edge(0, 1, {"weight": 0.5})
 
 
+def _one_edge_graph(graph: BaseGraph) -> dict[str, int]:
+    """Declare one node attr and one edge attr, then build a 2-node / 1-edge graph."""
+    graph.add_node_attr_key("area", dtype=pl.Float64, default_value=0.0)
+    graph.add_edge_attr_key("w", dtype=pl.Float64, default_value=0.0)
+    a = graph.add_node({"t": 0, "area": 1.0})
+    b = graph.add_node({"t": 1, "area": 2.0})
+    e = graph.add_edge(a, b, {"w": 1.0})
+    return {"a": a, "b": b, "e": e}
+
+
+# Every public read path that accepts an attribute key. Each must report an unknown key the
+# same way on every backend; before this was centralized they raised three different types
+# (AttributeError from SQLAlchemy's getattr, KeyError from a dict lookup, and polars'
+# ColumnNotFoundError, which is not even a KeyError subclass).
+_MISSING_ATTR_ACCESSORS: dict[str, Callable[[BaseGraph, dict[str, int]], Any]] = {
+    "node_attrs": lambda g, i: g.node_attrs(attr_keys=["nope"]),
+    "edge_attrs": lambda g, i: g.edge_attrs(attr_keys=["nope"]),
+    "nodes[id][key]": lambda g, i: g.nodes[i["a"]]["nope"],
+    "edges[id][key]": lambda g, i: g.edges[i["e"]]["nope"],
+    "filter(NodeAttr)": lambda g, i: g.filter(NodeAttr("nope") == 1).node_ids(),
+    "filter(EdgeAttr)": lambda g, i: g.filter(EdgeAttr("nope") == 1).edge_ids(),
+    "successors": lambda g, i: g.successors(i["a"], attr_keys=["nope"], return_attrs=True),
+    "predecessors": lambda g, i: g.predecessors(i["b"], attr_keys=["nope"], return_attrs=True),
+    "filter().node_attrs": lambda g, i: g.filter(node_ids=[i["a"]]).node_attrs(attr_keys=["nope"]),
+    "filter().edge_attrs": lambda g, i: g.filter(node_ids=[i["a"], i["b"]]).edge_attrs(attr_keys=["nope"]),
+}
+
+
+@pytest.mark.parametrize(
+    "accessor",
+    list(_MISSING_ATTR_ACCESSORS.values()),
+    ids=list(_MISSING_ATTR_ACCESSORS.keys()),
+)
+def test_missing_attr_key_raises_key_error(
+    graph_backend: BaseGraph,
+    accessor: Callable[[BaseGraph, dict[str, int]], Any],
+) -> None:
+    """Reading an undeclared attribute key raises KeyError on every backend."""
+    ids = _one_edge_graph(graph_backend)
+
+    with pytest.raises(KeyError):
+        accessor(graph_backend, ids)
+
+
+def test_missing_attr_key_error_message(graph_backend: BaseGraph) -> None:
+    """The error names the unknown key and lists the valid ones.
+
+    Diagnosability is the point of the guard, not just the exception type.
+    """
+    _one_edge_graph(graph_backend)
+
+    with pytest.raises(KeyError) as exc_info:
+        graph_backend.node_attrs(attr_keys=["nope"])
+
+    message = str(exc_info.value)
+    assert "nope" in message
+    assert "area" in message, f"error should list the available keys, got: {message}"
+
+    with pytest.raises(KeyError) as exc_info:
+        graph_backend.edge_attrs(attr_keys=["nope"])
+
+    message = str(exc_info.value)
+    assert "nope" in message
+    assert "w" in message, f"error should list the available keys, got: {message}"
+
+
+def test_filter_missing_attr_key_raises_eagerly(graph_backend: BaseGraph) -> None:
+    """filter() validates at construction, not at collect time.
+
+    Without this the traceback points at the collect call rather than at the caller's typo.
+    """
+    _one_edge_graph(graph_backend)
+
+    with pytest.raises(KeyError):
+        graph_backend.filter(NodeAttr("nope") == 1)
+
+    with pytest.raises(KeyError):
+        graph_backend.filter(EdgeAttr("nope") == 1)
+
+
+def test_missing_attr_key_among_valid_ones_raises(graph_backend: BaseGraph) -> None:
+    """One bad key in an otherwise valid list still raises."""
+    _one_edge_graph(graph_backend)
+
+    with pytest.raises(KeyError):
+        graph_backend.node_attrs(attr_keys=["area", "nope"])
+
+
+def test_valid_attr_keys_are_not_rejected(graph_backend: BaseGraph) -> None:
+    """The guard must not reject legitimate keys, including the id columns."""
+    ids = _one_edge_graph(graph_backend)
+
+    assert graph_backend.node_attrs(attr_keys=["area"])["area"].to_list() == [1.0, 2.0]
+    assert graph_backend.node_attrs(attr_keys="area")["area"].to_list() == [1.0, 2.0]
+    assert graph_backend.edge_attrs(attr_keys=["w"])["w"].to_list() == [1.0]
+
+    # id columns are not user-declared attributes but are legitimately requestable
+    node_df = graph_backend.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, "area"])
+    assert DEFAULT_ATTR_KEYS.NODE_ID in node_df.columns
+
+    edge_df = graph_backend.edge_attrs(
+        attr_keys=[DEFAULT_ATTR_KEYS.EDGE_ID, DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET, "w"]
+    )
+    assert DEFAULT_ATTR_KEYS.EDGE_ID in edge_df.columns
+
+    # attr_keys=None means "everything" and must stay valid
+    assert not graph_backend.node_attrs().is_empty()
+    assert not graph_backend.edge_attrs().is_empty()
+
+    # single-item accessors and filters with valid keys keep working
+    assert graph_backend.nodes[ids["a"]]["area"] == 1.0
+    assert graph_backend.edges[ids["e"]]["w"] == 1.0
+    assert graph_backend.filter(NodeAttr("area") == 1.0).node_ids() == [ids["a"]]
+    assert graph_backend.filter(EdgeAttr("w") == 1.0).edge_ids() == [ids["e"]]
+
+
 def test_add_node(graph_backend: BaseGraph) -> None:
     """Test adding nodes with various attributes."""
 
@@ -1205,14 +1321,10 @@ def test_sucessors_predecessors_edge_cases(graph_backend: BaseGraph) -> None:
     assert isinstance(predecessors_dict, dict)
     assert len(predecessors_dict) == 0
 
-    # Test with non-existent attribute keys (should work but return limited columns)
-    # This depends on implementation - some might raise errors, others might ignore
-    try:
-        successors_df = graph_backend.successors(node0, attr_keys=["nonexistent"], return_attrs=True)
-        assert isinstance(successors_df, pl.DataFrame)
-    except (KeyError, AttributeError):
-        # This is also acceptable behavior
-        pass
+    # A non-existent attribute key is a lookup miss on every backend.
+    # See test_missing_attr_key_raises_key_error for the full accessor matrix.
+    with pytest.raises(KeyError):
+        graph_backend.successors(node0, attr_keys=["nonexistent"], return_attrs=True)
 
 
 def test_match_method(graph_backend: BaseGraph) -> None:
