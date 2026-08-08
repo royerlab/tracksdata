@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from functools import partial
 from typing import Any
 
@@ -6,7 +6,12 @@ import numpy as np
 import polars as pl
 from numpy.typing import NDArray
 from polars.datatypes import numpy_char_code_to_dtype
-from skimage.measure._regionprops import RegionProperties, regionprops
+from skimage.measure._regionprops import (
+    PROPS,
+    RegionProperties,
+    _require_intensity_image,
+    regionprops,
+)
 from typing_extensions import override
 
 from tracksdata.constants import DEFAULT_ATTR_KEYS
@@ -37,6 +42,21 @@ class RegionPropsNodes(BaseNodesOperator):
         Physical spacing between pixels. If provided, affects distance-based
         measurements. Should be (row_spacing, col_spacing) for 2D or
         (depth_spacing, row_spacing, col_spacing) for 3D.
+    separate_arrays : bool, optional
+        If True, array-like properties (e.g. ``inertia_tensor`` or multi-channel
+        ``intensity_mean``) are flattened into multiple scalar attributes instead
+        of being stored as a single array attribute. The new attributes are named
+        ``<prop>_<index>`` (e.g. ``intensity_mean_0``, ``intensity_mean_1``) using
+        the same convention as ``node_attrs(unpack=True)``. This makes individual
+        components filterable. Defaults to False.
+    channel_names : Sequence[str] | None, optional
+        Names of the channels of a multi-channel `intensity_image`, whose channels
+        are expected on its last axis. When provided, intensity-dependent properties
+        (e.g. ``intensity_mean``, ``centroid_weighted``) are split along the channel
+        axis into one attribute per channel, named ``<prop>_<channel_name>``
+        (e.g. ``intensity_mean_dapi``) instead of a single array attribute.
+        Custom callables in `extra_properties` are never split, since their output
+        layout is unknown. Defaults to None (no splitting).
 
     Attributes
     ----------
@@ -44,6 +64,10 @@ class RegionPropsNodes(BaseNodesOperator):
         List of additional properties to compute.
     _spacing : tuple[float, float] | None
         Physical spacing between pixels.
+    _separate_arrays : bool
+        Whether array-like properties are flattened into scalar attributes.
+    _channel_names : list[str] | None
+        Names used to split intensity properties along the channel axis.
 
     Examples
     --------
@@ -86,12 +110,26 @@ class RegionPropsNodes(BaseNodesOperator):
     labels_series = np.random.randint(0, 10, (10, 100, 100))
     node_op.add_nodes(graph, labels=labels_series)
     ```
+
+    Name the channels of a multi-channel intensity image:
+
+    ```python
+    node_op = RegionPropsNodes(
+        extra_properties=["intensity_mean"],
+        channel_names=["dapi", "gfp"],
+    )
+    # intensity_image has shape (t, y, x, 2)
+    node_op.add_nodes(graph, labels=labels, intensity_image=intensity)
+    # nodes have `intensity_mean_dapi` and `intensity_mean_gfp` attributes
+    ```
     """
 
     def __init__(
         self,
         extra_properties: list[str | Callable[[RegionProperties], Any]] | None = None,
         spacing: tuple[float, float] | None = None,
+        separate_arrays: bool = False,
+        channel_names: Sequence[str] | None = None,
     ):
         super().__init__()
         self._extra_properties = extra_properties or []
@@ -102,6 +140,54 @@ class RegionPropsNodes(BaseNodesOperator):
         if "bbox" in self._extra_properties:
             raise ValueError("`bbox` is not supported as an extra property. It's already included by default.")
         self._spacing = spacing
+        self._separate_arrays = separate_arrays
+        self._channel_names = self._validate_channel_names(channel_names)
+
+    @staticmethod
+    def _validate_channel_names(channel_names: Sequence[str] | None) -> list[str] | None:
+        """
+        Validate and normalize the `channel_names` argument.
+
+        Parameters
+        ----------
+        channel_names : Sequence[str] | None
+            The channel names provided by the user.
+
+        Returns
+        -------
+        list[str] | None
+            The channel names as a list, or None when not provided.
+
+        Raises
+        ------
+        ValueError
+            If the names are empty, not strings, or not unique.
+        """
+        if channel_names is None:
+            return None
+
+        channel_names = list(channel_names)
+        if len(channel_names) == 0:
+            raise ValueError("`channel_names` must not be empty, use `None` for single-channel intensity images.")
+
+        non_str = [name for name in channel_names if not isinstance(name, str)]
+        if non_str:
+            raise ValueError(f"`channel_names` must be strings, got {non_str}.")
+
+        if len(set(channel_names)) != len(channel_names):
+            raise ValueError(f"`channel_names` must be unique, got {channel_names}.")
+
+        return channel_names
+
+    @staticmethod
+    def _is_intensity_prop(prop: str) -> bool:
+        """
+        Whether a regionprops property name is computed from the intensity image.
+
+        Such properties gain a trailing channel axis for multi-channel intensity
+        images, hence they are the ones split by `channel_names`.
+        """
+        return PROPS.get(prop, prop) in _require_intensity_image
 
     def _axis_names(self, labels: NDArray[np.integer]) -> list[str]:
         """
@@ -123,6 +209,61 @@ class RegionPropsNodes(BaseNodesOperator):
             return [DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X]
         else:
             raise ValueError(f"`labels` must be 't + 2D' or 't + 3D', got '{labels.ndim}' dimensions.")
+
+    def _attr_items(self, key: str, value: Any, split_channels: bool = False) -> list[tuple[str, Any]]:
+        """
+        Normalize a single property value into one or more node attribute items.
+
+        Tuple/list/array-like numeric values are converted to numpy arrays so they
+        are stored consistently as fixed-shape array attributes. When
+        ``separate_arrays`` is enabled, such values are instead flattened into
+        scalar attributes named ``<key>_<index>`` (row-major), matching the
+        ``node_attrs(unpack=True)`` naming convention.
+
+        When ``split_channels`` is set, the last axis is first split into one item
+        per channel, named ``<key>_<channel_name>``; the remainder of each channel's
+        value is then normalized as above.
+
+        Parameters
+        ----------
+        key : str
+            The base attribute name.
+        value : Any
+            The property value returned by regionprops or a custom callable.
+        split_channels : bool
+            Whether the last axis of `value` is a channel axis to be split using
+            `channel_names`.
+
+        Returns
+        -------
+        list[tuple[str, Any]]
+            The (name, value) pairs to add to the node attributes.
+
+        Raises
+        ------
+        ValueError
+            If the channel axis length does not match the number of channel names.
+        """
+        if isinstance(value, np.ndarray | tuple | list):
+            arr = np.asarray(value)
+            if arr.dtype.kind in "biufc" and arr.ndim >= 1:
+                if split_channels:
+                    if arr.shape[-1] != len(self._channel_names):
+                        raise ValueError(
+                            f"Property '{key}' has {arr.shape[-1]} channels, "
+                            f"but {len(self._channel_names)} `channel_names` were provided: {self._channel_names}."
+                        )
+                    items = []
+                    for i, name in enumerate(self._channel_names):
+                        channel_value = arr[..., i]
+                        # 0-dim arrays are stored as scalars, not as shape-() array attributes
+                        items.extend(self._attr_items(f"{key}_{name}", channel_value[()]))
+                    return items
+                if self._separate_arrays:
+                    return [("_".join([key, *map(str, idx)]), arr[idx]) for idx in np.ndindex(arr.shape)]
+                return [(key, arr)]
+
+        return [(key, value)]
 
     def _init_node_attrs(self, graph: BaseGraph, node_attrs: dict[str, Any]) -> None:
         """
@@ -150,6 +291,9 @@ class RegionPropsNodes(BaseNodesOperator):
 
         Returns only the keys for extra_properties. The centroid coordinates
         (x, y, z) and mask are always included but not listed here.
+        When `channel_names` is set, intensity-dependent properties are listed
+        once per channel. Note that `separate_arrays` further splits array-valued
+        properties into per-index keys that are not listed here.
 
         Returns
         -------
@@ -164,7 +308,15 @@ class RegionPropsNodes(BaseNodesOperator):
         print(keys)  # ['area', 'perimeter']
         ```
         """
-        return [prop.__name__ if callable(prop) else prop for prop in self._extra_properties]
+        keys = []
+        for prop in self._extra_properties:
+            if callable(prop):
+                keys.append(prop.__name__)
+            elif self._channel_names is not None and self._is_intensity_prop(prop):
+                keys.extend(f"{prop}_{name}" for name in self._channel_names)
+            else:
+                keys.append(prop)
+        return keys
 
     @override
     def add_nodes(
@@ -200,7 +352,14 @@ class RegionPropsNodes(BaseNodesOperator):
         intensity_image : NDArray | None, optional
             Intensity image(s) corresponding to the labels. Used for computing
             intensity-based properties. Must have the same shape as labels
-            (excluding the label values).
+            (excluding the label values), plus a trailing channel axis when
+            `channel_names` is used.
+
+        Raises
+        ------
+        ValueError
+            If `channel_names` was provided but `intensity_image` is missing or
+            does not have a matching trailing channel axis.
 
         Examples
         --------
@@ -229,6 +388,16 @@ class RegionPropsNodes(BaseNodesOperator):
         node_op.add_nodes(graph, labels=labels, t=0, intensity_image=fluorescence_image)
         ```
         """
+        if self._channel_names is not None:
+            if intensity_image is None:
+                raise ValueError("`channel_names` was provided but `intensity_image` is None.")
+            if intensity_image.ndim != labels.ndim + 1 or intensity_image.shape[-1] != len(self._channel_names):
+                raise ValueError(
+                    f"`intensity_image` must have shape '{(*labels.shape, len(self._channel_names))}' to match "
+                    f"`labels` plus the {len(self._channel_names)} channels of "
+                    f"`channel_names` {self._channel_names}, got '{intensity_image.shape}'."
+                )
+
         if "shape" not in graph.metadata:
             graph.metadata.update(shape=labels.shape)
 
@@ -302,9 +471,11 @@ class RegionPropsNodes(BaseNodesOperator):
 
             for prop in self._extra_properties:
                 if callable(prop):
-                    attrs[prop.__name__] = prop(obj)
+                    key, value, split_channels = prop.__name__, prop(obj), False
                 else:
-                    attrs[prop] = getattr(obj, prop)
+                    key, value = prop, getattr(obj, prop)
+                    split_channels = self._channel_names is not None and self._is_intensity_prop(prop)
+                attrs.update(self._attr_items(key, value, split_channels=split_channels))
 
             attrs[DEFAULT_ATTR_KEYS.MASK] = Mask(obj.image, obj.bbox)
             attrs[DEFAULT_ATTR_KEYS.BBOX] = np.asarray(obj.bbox, dtype=int)
