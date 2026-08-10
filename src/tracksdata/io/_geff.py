@@ -1,16 +1,24 @@
-"""Utilities for inspecting and converting the dtype of properties in geff files.
+"""Utilities for inspecting and repairing geff datasets without loading the graph.
 
-The motivating case is segmentation masks: they are binary, but geff files
-written by older versions of tracksdata stored the mask ``data`` buffer as
-``uint64`` (see https://github.com/royerlab/tracksdata/pull/318). That is 8x
-larger than a boolean buffer both on disk and, more importantly, when read into
-memory, which can cause out-of-memory errors when loading large datasets. New
-files store masks as ``bool`` at write time, so :func:`convert_geff_prop_dtype`
-provides a one-time fix for legacy files.
+:func:`read_graph_metadata` reads the tracksdata graph metadata of a geff dataset.
+`BaseGraph.to_geff` writes the graph metadata (`graph.metadata`) into the geff
+metadata extras and `BaseGraph.from_geff` hoists it back onto the graph, but callers
+that need a value *before* they have a graph object -- for example the ``shape`` of
+the dense segmentation, which is required to construct a `GraphArrayView` -- can use
+neither. This closes that gap so downstream libraries do not have to know where
+tracksdata stores the extras.
 
-The helpers are not mask-specific: they read and rewrite the payload dtype of
-any geff property (node or edge, fixed- or variable-length). The caller names
-the property to act on.
+:func:`geff_prop_dtype` and :func:`convert_geff_prop_dtype` inspect and convert the
+on-disk dtype of a property. The motivating case is segmentation masks: they are
+binary, but geff files written by older versions of tracksdata stored the mask
+``data`` buffer as ``uint64`` (see
+https://github.com/royerlab/tracksdata/pull/318). That is 8x larger than a boolean
+buffer both on disk and, more importantly, when read into memory, which can cause
+out-of-memory errors when loading large datasets. New files store masks as ``bool``
+at write time, so :func:`convert_geff_prop_dtype` provides a one-time fix for legacy
+files. The helpers are not mask-specific: they read and rewrite the payload dtype of
+any geff property (node or edge, fixed- or variable-length). The caller names the
+property to act on.
 """
 
 from __future__ import annotations
@@ -18,14 +26,54 @@ from __future__ import annotations
 import os
 import shutil
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import zarr
+from geff_spec import GeffMetadata
 from zarr.storage import StoreLike
 
+from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.utils._logging import LOG
 
-__all__ = ["convert_geff_prop_dtype", "geff_prop_dtype"]
+__all__ = ["convert_geff_prop_dtype", "geff_prop_dtype", "read_graph_metadata"]
+
+_EXTRA_KEY = "tracksdata"
+
+
+def read_graph_metadata(source: StoreLike | GeffMetadata) -> dict[str, Any]:
+    """
+    Read the tracksdata graph metadata of a geff dataset without loading the graph.
+
+    Returns the same metadata that `graph.metadata` would hold after
+    `BaseGraph.from_geff`, minus the `geff` key. Note that the values went through a
+    JSON round-trip, so tuples come back as lists.
+
+    Parameters
+    ----------
+    source : StoreLike | GeffMetadata
+        The store or path of the geff dataset, or an already parsed `GeffMetadata`.
+
+    Returns
+    -------
+    dict[str, Any]
+        The graph metadata, empty if the dataset was not written by tracksdata.
+
+    Examples
+    --------
+    ```python
+    graph.metadata["shape"] = (5, 100, 100)
+    graph.to_geff("tracks.geff")
+
+    shape = read_graph_metadata("tracks.geff")["shape"]  # [5, 100, 100]
+    ```
+    """
+    if not isinstance(source, GeffMetadata):
+        source = GeffMetadata.read(source)
+
+    metadata = source.extra.get(_EXTRA_KEY, {})
+
+    return {k: v for k, v in metadata.items() if not BaseGraph._is_private_metadata_key(k)}
 
 
 def geff_prop_dtype(

@@ -8,7 +8,13 @@ import numpy as np
 import polars as pl
 import rustworkx as rx
 
-from tracksdata.attrs import AttrComparison, AttrFilter, Filter, split_attr_comps
+from tracksdata.attrs import (
+    AttrComparison,
+    AttrFilter,
+    Filter,
+    attr_comps_to_strs,
+    split_attr_comps,
+)
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.graph._mapped_graph_mixin import MappedGraphMixin
@@ -181,6 +187,9 @@ class RXFilter(BaseFilter):
         self._include_targets = include_targets
         self._include_sources = include_sources
         self._node_attr_comps, self._edge_attr_comps = split_attr_comps(attr_comps)
+        # validate eagerly so a typo'd key points at the `filter()` call, not at the collect
+        graph._validate_attr_keys(attr_comps_to_strs(self._node_attr_comps), "node")
+        graph._validate_attr_keys(attr_comps_to_strs(self._edge_attr_comps), "edge")
 
     @cache_method
     def _current_node_ids(self) -> list[int]:
@@ -330,6 +339,8 @@ class RXFilter(BaseFilter):
         attr_keys: list[str] | None = None,
         unpack: bool = False,
     ) -> pl.DataFrame:
+        self._graph._validate_attr_keys(attr_keys, "edge")
+
         df = self._edge_attrs()
         if df.is_empty():
             return df
@@ -840,6 +851,9 @@ class RustWorkXGraph(BaseGraph):
 
         if isinstance(attr_keys, str):
             attr_keys = [attr_keys]
+
+        self._validate_attr_keys(attr_keys, "node")
+
         valid_schema = None
         neighbors: dict[int, list[int]] | dict[int, pl.DataFrame] = {}
         for node_id in node_ids:
@@ -1168,6 +1182,8 @@ class RustWorkXGraph(BaseGraph):
         if isinstance(attr_keys, str):
             attr_keys = [attr_keys]
 
+        self._validate_attr_keys(attr_keys, "node")
+
         node_attr_schemas = self._node_attr_schemas()
         pl_schema = {k: node_attr_schemas[k].dtype for k in attr_keys}
 
@@ -1236,6 +1252,8 @@ class RustWorkXGraph(BaseGraph):
         """
         if attr_keys is None:
             attr_keys = self.edge_attr_keys()
+
+        self._validate_attr_keys(attr_keys, "edge")
 
         attr_keys = [DEFAULT_ATTR_KEYS.EDGE_ID, *attr_keys]
         attr_keys = list(dict.fromkeys(attr_keys))

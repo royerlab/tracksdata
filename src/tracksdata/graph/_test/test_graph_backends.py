@@ -9,6 +9,7 @@ import polars as pl
 import pytest
 import rustworkx as rx
 import sqlalchemy as sa
+from geff_spec import GeffMetadata
 from zarr.storage import MemoryStore
 
 from tracksdata.attrs import EdgeAttr, NodeAttr
@@ -53,6 +54,122 @@ def test_edge_validation(graph_backend: BaseGraph) -> None:
     """Test edge validation."""
     with pytest.raises((ValueError, KeyError)):
         graph_backend.add_edge(0, 1, {"weight": 0.5})
+
+
+def _one_edge_graph(graph: BaseGraph) -> dict[str, int]:
+    """Declare one node attr and one edge attr, then build a 2-node / 1-edge graph."""
+    graph.add_node_attr_key("area", dtype=pl.Float64, default_value=0.0)
+    graph.add_edge_attr_key("w", dtype=pl.Float64, default_value=0.0)
+    a = graph.add_node({"t": 0, "area": 1.0})
+    b = graph.add_node({"t": 1, "area": 2.0})
+    e = graph.add_edge(a, b, {"w": 1.0})
+    return {"a": a, "b": b, "e": e}
+
+
+# Every public read path that accepts an attribute key. Each must report an unknown key the
+# same way on every backend; before this was centralized they raised three different types
+# (AttributeError from SQLAlchemy's getattr, KeyError from a dict lookup, and polars'
+# ColumnNotFoundError, which is not even a KeyError subclass).
+_MISSING_ATTR_ACCESSORS: dict[str, Callable[[BaseGraph, dict[str, int]], Any]] = {
+    "node_attrs": lambda g, i: g.node_attrs(attr_keys=["nope"]),
+    "edge_attrs": lambda g, i: g.edge_attrs(attr_keys=["nope"]),
+    "nodes[id][key]": lambda g, i: g.nodes[i["a"]]["nope"],
+    "edges[id][key]": lambda g, i: g.edges[i["e"]]["nope"],
+    "filter(NodeAttr)": lambda g, i: g.filter(NodeAttr("nope") == 1).node_ids(),
+    "filter(EdgeAttr)": lambda g, i: g.filter(EdgeAttr("nope") == 1).edge_ids(),
+    "successors": lambda g, i: g.successors(i["a"], attr_keys=["nope"], return_attrs=True),
+    "predecessors": lambda g, i: g.predecessors(i["b"], attr_keys=["nope"], return_attrs=True),
+    "filter().node_attrs": lambda g, i: g.filter(node_ids=[i["a"]]).node_attrs(attr_keys=["nope"]),
+    "filter().edge_attrs": lambda g, i: g.filter(node_ids=[i["a"], i["b"]]).edge_attrs(attr_keys=["nope"]),
+}
+
+
+@pytest.mark.parametrize(
+    "accessor",
+    list(_MISSING_ATTR_ACCESSORS.values()),
+    ids=list(_MISSING_ATTR_ACCESSORS.keys()),
+)
+def test_missing_attr_key_raises_key_error(
+    graph_backend: BaseGraph,
+    accessor: Callable[[BaseGraph, dict[str, int]], Any],
+) -> None:
+    """Reading an undeclared attribute key raises KeyError on every backend."""
+    ids = _one_edge_graph(graph_backend)
+
+    with pytest.raises(KeyError):
+        accessor(graph_backend, ids)
+
+
+def test_missing_attr_key_error_message(graph_backend: BaseGraph) -> None:
+    """The error names the unknown key and lists the valid ones.
+
+    Diagnosability is the point of the guard, not just the exception type.
+    """
+    _one_edge_graph(graph_backend)
+
+    with pytest.raises(KeyError) as exc_info:
+        graph_backend.node_attrs(attr_keys=["nope"])
+
+    message = str(exc_info.value)
+    assert "nope" in message
+    assert "area" in message, f"error should list the available keys, got: {message}"
+
+    with pytest.raises(KeyError) as exc_info:
+        graph_backend.edge_attrs(attr_keys=["nope"])
+
+    message = str(exc_info.value)
+    assert "nope" in message
+    assert "w" in message, f"error should list the available keys, got: {message}"
+
+
+def test_filter_missing_attr_key_raises_eagerly(graph_backend: BaseGraph) -> None:
+    """filter() validates at construction, not at collect time.
+
+    Without this the traceback points at the collect call rather than at the caller's typo.
+    """
+    _one_edge_graph(graph_backend)
+
+    with pytest.raises(KeyError):
+        graph_backend.filter(NodeAttr("nope") == 1)
+
+    with pytest.raises(KeyError):
+        graph_backend.filter(EdgeAttr("nope") == 1)
+
+
+def test_missing_attr_key_among_valid_ones_raises(graph_backend: BaseGraph) -> None:
+    """One bad key in an otherwise valid list still raises."""
+    _one_edge_graph(graph_backend)
+
+    with pytest.raises(KeyError):
+        graph_backend.node_attrs(attr_keys=["area", "nope"])
+
+
+def test_valid_attr_keys_are_not_rejected(graph_backend: BaseGraph) -> None:
+    """The guard must not reject legitimate keys, including the id columns."""
+    ids = _one_edge_graph(graph_backend)
+
+    assert graph_backend.node_attrs(attr_keys=["area"])["area"].to_list() == [1.0, 2.0]
+    assert graph_backend.node_attrs(attr_keys="area")["area"].to_list() == [1.0, 2.0]
+    assert graph_backend.edge_attrs(attr_keys=["w"])["w"].to_list() == [1.0]
+
+    # id columns are not user-declared attributes but are legitimately requestable
+    node_df = graph_backend.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, "area"])
+    assert DEFAULT_ATTR_KEYS.NODE_ID in node_df.columns
+
+    edge_df = graph_backend.edge_attrs(
+        attr_keys=[DEFAULT_ATTR_KEYS.EDGE_ID, DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET, "w"]
+    )
+    assert DEFAULT_ATTR_KEYS.EDGE_ID in edge_df.columns
+
+    # attr_keys=None means "everything" and must stay valid
+    assert not graph_backend.node_attrs().is_empty()
+    assert not graph_backend.edge_attrs().is_empty()
+
+    # single-item accessors and filters with valid keys keep working
+    assert graph_backend.nodes[ids["a"]]["area"] == 1.0
+    assert graph_backend.edges[ids["e"]]["w"] == 1.0
+    assert graph_backend.filter(NodeAttr("area") == 1.0).node_ids() == [ids["a"]]
+    assert graph_backend.filter(EdgeAttr("w") == 1.0).edge_ids() == [ids["e"]]
 
 
 def test_add_node(graph_backend: BaseGraph) -> None:
@@ -107,6 +224,124 @@ def test_add_edge(graph_backend: BaseGraph) -> None:
     df = graph_backend.edge_attrs()
     assert df["new_attribute"].to_list() == [0.0, 1.0]
     assert df["weight"].to_list() == [0.5, 0.1]
+
+
+def test_array_attr_read_honors_declared_dtype(graph_backend: BaseGraph) -> None:
+    """An `Array(Float64)` column must not be truncated to integers when read back.
+
+    The declared dtype has to win over any dtype inferred from the leading rows,
+    otherwise a whole-numbered first row silently truncates the fractional ones.
+    """
+    graph_backend.add_node_attr_key("pos", dtype=pl.Array(pl.Float64, 2))
+    graph_backend.add_node_attr_key("values", dtype=pl.List(pl.Float64))
+
+    graph_backend.bulk_add_nodes(
+        [
+            {"t": 0, "pos": [50, 50], "values": [50, 50]},  # whole numbers
+            {"t": 1, "pos": [1.5, 1.5], "values": [1.5, 1.5]},  # fractional
+        ]
+    )
+
+    nodes_df = graph_backend.node_attrs(attr_keys=["t", "pos", "values"]).sort("t")
+    assert nodes_df.schema["pos"] == pl.Array(pl.Float64, 2)
+    assert nodes_df.schema["values"] == pl.List(pl.Float64)
+    assert nodes_df["pos"].to_list() == [[50.0, 50.0], [1.5, 1.5]]
+    assert nodes_df["values"].to_list() == [[50.0, 50.0], [1.5, 1.5]]
+
+
+def test_add_node_and_edge_with_numpy_scalars(graph_backend: BaseGraph) -> None:
+    """Numpy scalars must be stored with the column's declared dtype, not as raw byte buffers.
+
+    Indexing any value out of a numpy array yields a numpy scalar, so this is the
+    norm for importers (geff/CSV/...) feeding values into the graph.
+    """
+    graph_backend.add_node_attr_key("val", dtype=pl.Int64, default_value=-1)
+    graph_backend.add_node_attr_key("pos", dtype=pl.Float64, default_value=0.0)
+    graph_backend.add_node_attr_key("flag", dtype=pl.Boolean, default_value=False)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Int64, default_value=0)
+
+    node_1 = graph_backend.add_node(
+        {"t": np.int64(0), "val": np.int64(7), "pos": np.float32(1.5), "flag": np.bool_(True)}
+    )
+    node_2, node_3 = graph_backend.bulk_add_nodes(
+        [
+            {"t": np.int32(1), "val": np.int32(8), "pos": np.float64(2.5), "flag": np.bool_(False)},
+            {"t": 2, "val": 9, "pos": 3.5, "flag": True},
+        ]
+    )
+
+    nodes_df = graph_backend.node_attrs(attr_keys=["t", "val", "pos", "flag"]).sort("t")
+    assert nodes_df.schema["val"] == pl.Int64
+    assert nodes_df["t"].to_list() == [0, 1, 2]
+    assert nodes_df["val"].to_list() == [7, 8, 9]
+    assert nodes_df["pos"].to_list() == [1.5, 2.5, 3.5]
+    assert nodes_df["flag"].to_list() == [True, False, True]
+
+    graph_backend.add_edge(np.int64(node_1), np.int64(node_2), {"weight": np.int64(3)})
+    graph_backend.bulk_add_edges(
+        [
+            {
+                DEFAULT_ATTR_KEYS.EDGE_SOURCE: np.int64(node_2),
+                DEFAULT_ATTR_KEYS.EDGE_TARGET: np.int64(node_3),
+                "weight": np.int32(4),
+            }
+        ]
+    )
+
+    edges_df = graph_backend.edge_attrs(
+        attr_keys=[DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET, "weight"]
+    ).sort("weight")
+    assert edges_df["weight"].to_list() == [3, 4]
+    assert edges_df[DEFAULT_ATTR_KEYS.EDGE_SOURCE].to_list() == [node_1, node_2]
+    assert edges_df[DEFAULT_ATTR_KEYS.EDGE_TARGET].to_list() == [node_2, node_3]
+
+    graph_backend.add_overlap(np.int64(node_1), np.int64(node_2))
+    graph_backend.bulk_add_overlaps([[np.int64(node_2), np.int64(node_3)]])
+    assert sorted(graph_backend.overlaps()) == sorted([[node_1, node_2], [node_2, node_3]])
+
+
+def test_sql_node_ids_from_narrow_numpy_time() -> None:
+    """A narrow numpy `t` must not overflow the `t * node_id_time_multiplier` id arithmetic."""
+    graph = SQLGraph(
+        drivername="sqlite",
+        database=":memory:",
+        engine_kwargs={"connect_args": {"check_same_thread": False}},
+    )
+    # np.int32(3) * 1_000_000_000 wraps around to a negative number in int32 arithmetic
+    node_ids = graph.bulk_add_nodes([{"t": np.int32(3)}, {"t": np.int32(3)}])
+
+    assert node_ids == [3 * graph.node_id_time_multiplier, 3 * graph.node_id_time_multiplier + 1]
+    assert all(isinstance(node_id, int) for node_id in node_ids)
+    assert graph.node_ids() == node_ids
+
+
+def test_add_node_with_numpy_scalars_in_struct(graph_backend: BaseGraph) -> None:
+    """Numpy scalars nested inside a struct attribute must also honor the declared dtype."""
+    graph_backend.add_node_attr_key("m", dtype=pl.Struct({"a": pl.Int64, "b": pl.Float64}))
+
+    graph_backend.add_node({"t": 0, "m": {"a": np.int64(3), "b": np.float64(0.25)}})
+    graph_backend.bulk_add_nodes([{"t": 1, "m": {"a": np.int32(4), "b": np.float32(0.5)}}])
+
+    nodes_df = graph_backend.node_attrs(attr_keys=["t", "m"]).sort("t")
+    assert nodes_df["m"].to_list() == [{"a": 3, "b": 0.25}, {"a": 4, "b": 0.5}]
+
+
+def test_update_attrs_with_numpy_scalars(graph_backend: BaseGraph) -> None:
+    """The update path must coerce numpy scalars just like the insert path."""
+    graph_backend.add_node_attr_key("val", dtype=pl.Int64, default_value=-1)
+    graph_backend.add_edge_attr_key("weight", dtype=pl.Int64, default_value=0)
+
+    node_1 = graph_backend.add_node({"t": 0, "val": 0})
+    node_2 = graph_backend.add_node({"t": 1, "val": 0})
+    edge_id = graph_backend.add_edge(node_1, node_2, {"weight": 0})
+
+    graph_backend.update_node_attrs(attrs={"val": np.int64(5)}, node_ids=[node_1])
+    graph_backend.update_node_attrs(attrs={"val": [np.int32(6)]}, node_ids=[node_2])
+    graph_backend.update_edge_attrs(attrs={"weight": np.int64(7)}, edge_ids=[edge_id])
+
+    nodes_df = graph_backend.node_attrs(attr_keys=["t", "val"]).sort("t")
+    assert nodes_df["val"].to_list() == [5, 6]
+    assert graph_backend.edge_attrs(attr_keys=["weight"])["weight"].to_list() == [7]
 
 
 def test_remove_edge_by_id(graph_backend: BaseGraph) -> None:
@@ -1109,14 +1344,10 @@ def test_sucessors_predecessors_edge_cases(graph_backend: BaseGraph) -> None:
     assert isinstance(predecessors_dict, dict)
     assert len(predecessors_dict) == 0
 
-    # Test with non-existent attribute keys (should work but return limited columns)
-    # This depends on implementation - some might raise errors, others might ignore
-    try:
-        successors_df = graph_backend.successors(node0, attr_keys=["nonexistent"], return_attrs=True)
-        assert isinstance(successors_df, pl.DataFrame)
-    except (KeyError, AttributeError):
-        # This is also acceptable behavior
-        pass
+    # A non-existent attribute key is a lookup miss on every backend.
+    # See test_missing_attr_key_raises_key_error for the full accessor matrix.
+    with pytest.raises(KeyError):
+        graph_backend.successors(node0, attr_keys=["nonexistent"], return_attrs=True)
 
 
 def test_match_method(graph_backend: BaseGraph) -> None:
@@ -2859,6 +3090,55 @@ def test_geff_roundtrip(graph_backend: BaseGraph) -> None:
         rx_graph,
         geff_graph.rx_graph,
     )
+
+
+def test_geff_roundtrip_custom_metadata(graph_backend: BaseGraph) -> None:
+    """Graph metadata must survive `to_geff` when the caller supplies its own `GeffMetadata`."""
+
+    _fill_mock_geff_graph(graph_backend)
+    graph_backend.metadata["shape"] = (5, 100, 100)
+
+    # a downstream library supplying its own metadata: same props as the auto-generated
+    # one, but with its own `extra` namespace instead of tracksdata's.
+    reference_store = MemoryStore()
+    graph_backend.to_geff(geff_store=reference_store)
+    custom_metadata = GeffMetadata.read(reference_store)
+    custom_metadata.extra = {"downstream": {"hello": "world"}}
+
+    output_store = MemoryStore()
+    graph_backend.to_geff(geff_store=output_store, geff_metadata=custom_metadata)
+
+    written_metadata = GeffMetadata.read(output_store)
+    # the caller's own namespace is untouched ...
+    assert written_metadata.extra["downstream"] == {"hello": "world"}
+    # ... and the graph metadata rode along. `shape` is a list, not a tuple, because
+    # the extras are serialized as JSON.
+    assert written_metadata.extra["tracksdata"]["shape"] == [5, 100, 100]
+
+    geff_graph, _ = IndexedRXGraph.from_geff(output_store)
+    assert geff_graph.metadata["shape"] == [5, 100, 100]
+
+    # the metadata object the caller passed in was not modified
+    assert custom_metadata.extra == {"downstream": {"hello": "world"}}
+
+
+def test_geff_custom_metadata_overrides_graph_metadata(graph_backend: BaseGraph) -> None:
+    """On key collisions the caller-supplied `extra["tracksdata"]` wins."""
+
+    _fill_mock_geff_graph(graph_backend)
+    graph_backend.metadata["shape"] = (5, 100, 100)
+
+    reference_store = MemoryStore()
+    graph_backend.to_geff(geff_store=reference_store)
+    custom_metadata = GeffMetadata.read(reference_store)
+    custom_metadata.extra = {"tracksdata": {"shape": [1, 2, 3], "extra_key": "value"}}
+
+    output_store = MemoryStore()
+    graph_backend.to_geff(geff_store=output_store, geff_metadata=custom_metadata)
+
+    geff_graph, _ = IndexedRXGraph.from_geff(output_store)
+    assert geff_graph.metadata["shape"] == [1, 2, 3]
+    assert geff_graph.metadata["extra_key"] == "value"
 
 
 def test_geff_overwrite(graph_backend: BaseGraph, tmp_path: Path) -> None:

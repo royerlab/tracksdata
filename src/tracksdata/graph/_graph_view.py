@@ -795,6 +795,11 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
                 if c in df.columns
             ]
             attrs = df.filter(pl.col(DEFAULT_ATTR_KEYS.EDGE_ID) == parent_edge_id).drop(drop_cols).rows(named=True)[0]
+            # A rustworkx-family root shares its payload, EDGE_ID included; other backends
+            # hand back a plain dict, so stamp the root edge id explicitly (as `bulk_add_edges`
+            # does). Otherwise the local edge keeps the -1 placeholder and disagrees with
+            # `_edge_map_to_root`, so reads by edge id find no row.
+            attrs[DEFAULT_ATTR_KEYS.EDGE_ID] = parent_edge_id
 
         local_edge_id = self.rx_graph.add_edge(
             self._map_to_local(source_id),

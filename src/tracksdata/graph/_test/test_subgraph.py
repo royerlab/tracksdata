@@ -1648,6 +1648,23 @@ def test_add_edge_to_view_basic(graph_backend: BaseGraph) -> None:
     assert row["weight"].item() == 0.5
 
 
+def test_add_edge_to_view_keeps_edge_id(graph_backend: BaseGraph) -> None:
+    """A revived edge's local row must carry the root edge id, so reads by id work."""
+    graph_backend.add_edge_attr_key("weight", pl.Float64)
+
+    n0 = graph_backend.add_node({"t": 0})
+    n1 = graph_backend.add_node({"t": 1})
+    root_edge_id = graph_backend.add_edge(n0, n1, {"weight": 1.5})
+
+    view = graph_backend.filter().subgraph()
+    view.remove_edge_from_view(n0, n1)
+    view.add_edge_to_view(n0, n1)
+
+    assert view.edge_id(n0, n1) == root_edge_id
+    assert view.edge_attrs(attr_keys=["weight"])[DEFAULT_ATTR_KEYS.EDGE_ID].to_list() == [root_edge_id]
+    assert view.edges[root_edge_id]["weight"] == 1.5
+
+
 def test_add_edge_to_view_validation(graph_backend: BaseGraph) -> None:
     """Bad inputs raise ValueError; sync=False raises RuntimeError."""
     graph_backend.add_node_attr_key("x", pl.Float64)
