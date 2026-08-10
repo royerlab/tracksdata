@@ -1986,6 +1986,8 @@ class SQLGraph(BaseGraph):
         node_schemas.pop(key, None)
         self.__node_attr_schemas = node_schemas
 
+        self._maintain_views_remove_attr_key(key, "node")
+
     def add_edge_attr_key(
         self,
         key_or_schema: str | AttrSchema,
@@ -2011,6 +2013,8 @@ class SQLGraph(BaseGraph):
         self._drop_attr_columns(self.Edge, key, edge_schemas.get(key))
         edge_schemas.pop(key, None)
         self.__edge_attr_schemas = edge_schemas
+
+        self._maintain_views_remove_attr_key(key, "edge")
 
     def num_edges(self) -> int:
         with Session(self._engine) as session:

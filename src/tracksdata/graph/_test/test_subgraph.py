@@ -2161,3 +2161,83 @@ def test_add_attr_key_on_view_reaches_sibling_view(graph_backend: BaseGraph) -> 
     assert "w" in view_b.edge_attr_keys()
     assert view_b.node_attrs(attr_keys=["foo"])["foo"].to_list() == [-1, -1]
     assert view_b.edge_attrs(attr_keys=["w"])["w"].to_list() == [-1.0]
+
+
+def test_remove_node_attr_key_on_root_reaches_live_view(graph_backend: BaseGraph) -> None:
+    """The remove counterpart of `test_add_node_attr_key_on_root_reaches_live_view`.
+
+    Dropping a key on the root must drop it from the views already derived from
+    it, both from the reported schema and from the view's local attribute store.
+    """
+    root = _root_with_two_connected_nodes(graph_backend)
+    view = root.filter().subgraph()
+
+    root.remove_node_attr_key("bar")
+
+    assert "bar" not in root.node_attr_keys()
+    assert "bar" not in view.node_attr_keys()
+    with pytest.raises(KeyError):
+        view.node_attrs(attr_keys=["bar"])
+    # the keys that remain are untouched
+    assert view.node_attrs(attr_keys=["area"])["area"].to_list() == [1.0, 2.0]
+
+
+def test_remove_edge_attr_key_on_root_reaches_live_view(graph_backend: BaseGraph) -> None:
+    """The edge counterpart of `test_remove_node_attr_key_on_root_reaches_live_view`."""
+    root = _root_with_two_connected_nodes(graph_backend)
+    view = root.filter().subgraph()
+
+    root.remove_edge_attr_key("cost")
+
+    assert "cost" not in root.edge_attr_keys()
+    assert "cost" not in view.edge_attr_keys()
+    with pytest.raises(KeyError):
+        view.edge_attrs(attr_keys=["cost"])
+    assert view.edge_attrs(attr_keys=["weight"])["weight"].to_list() == [1.0]
+
+
+def test_remove_node_attr_key_on_root_updates_pinned_view_keys(graph_backend: BaseGraph) -> None:
+    """A view pinning an explicit key list must not keep reporting a removed key.
+
+    The pinned list is the view's own copy of the schema, so a root removal has
+    to be applied to it -- otherwise the view advertises a column that no longer
+    exists anywhere.
+    """
+    root = _root_with_two_connected_nodes(graph_backend)
+    view = root.filter().subgraph(node_attr_keys=["area", "bar"], edge_attr_keys=["weight", "cost"])
+
+    assert "bar" in view.node_attr_keys()
+    assert "cost" in view.edge_attr_keys()
+
+    root.remove_node_attr_key("bar")
+    root.remove_edge_attr_key("cost")
+
+    assert "bar" not in view.node_attr_keys()
+    assert "cost" not in view.edge_attr_keys()
+    # node_attrs() with no attr_keys uses the pinned list, so a stale entry there
+    # surfaces as a failure to materialize the view at all
+    assert "bar" not in view.node_attrs().columns
+    assert "cost" not in view.edge_attrs().columns
+
+
+def test_remove_attr_key_on_view_reaches_sibling_view(graph_backend: BaseGraph) -> None:
+    """The remove counterpart of `test_add_attr_key_on_view_reaches_sibling_view`.
+
+    Removing through one view propagates up to the root, so it must also reach
+    the root's other views.
+    """
+    root = _root_with_two_connected_nodes(graph_backend)
+    view_a = root.filter().subgraph()
+    view_b = root.filter().subgraph()
+
+    view_a.remove_node_attr_key("bar")
+    view_a.remove_edge_attr_key("cost")
+
+    assert "bar" not in root.node_attr_keys()
+    assert "cost" not in root.edge_attr_keys()
+    assert "bar" not in view_b.node_attr_keys()
+    assert "cost" not in view_b.edge_attr_keys()
+    with pytest.raises(KeyError):
+        view_b.node_attrs(attr_keys=["bar"])
+    with pytest.raises(KeyError):
+        view_b.edge_attrs(attr_keys=["cost"])

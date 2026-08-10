@@ -315,16 +315,9 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         self._root.add_node_attr_key(key_or_schema, dtype, default_value)
 
     def remove_node_attr_key(self, key: str) -> None:
+        # See `add_node_attr_key`: the root drops the key from this view -- and from
+        # its sibling views -- through `_maintain_views_remove_attr_key`.
         self._root.remove_node_attr_key(key)
-        if self._node_attr_keys is not None and key in self._node_attr_keys:
-            self._node_attr_keys.remove(key)
-
-        if not self._is_root_rx_graph:
-            if self.sync:
-                for node_id in self.rx_graph.node_indices():
-                    self.rx_graph[node_id].pop(key, None)
-            else:
-                self._out_of_sync = True
 
     def add_edge_attr_key(
         self,
@@ -375,16 +368,45 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
                 edge_attr[schema.key] = schema.default_value
 
     def remove_edge_attr_key(self, key: str) -> None:
+        # See `remove_node_attr_key`: the root propagates the removal back here.
         self._root.remove_edge_attr_key(key)
-        if self._edge_attr_keys is not None and key in self._edge_attr_keys:
-            self._edge_attr_keys.remove(key)
-        # because attributes are passed by reference, we need don't need if both are rustworkx graphs
-        if not self._is_root_rx_graph:
-            if self.sync:
-                for edge_attr in self.rx_graph.edges():
-                    edge_attr.pop(key, None)
-            else:
-                self._out_of_sync = True
+
+    def _apply_root_remove_attr_key(self, key: str, mode: Literal["node", "edge"]) -> None:
+        """
+        Absorb an attribute key removed from the root graph.
+
+        The mirror of `_apply_root_attr_key`: a view pinning an explicit key list
+        has to forget the key there, or it keeps reporting a column that no longer
+        exists. Beyond that, when the root is a rustworkx graph the view shares the
+        root's attribute dicts, so the column is already gone from every row;
+        otherwise (e.g. a SQLGraph root) the view holds its own copy and has to
+        drop the column itself.
+
+        Parameters
+        ----------
+        key : str
+            The key that was removed from the root.
+        mode : Literal["node", "edge"]
+            Whether the key was removed from the nodes or the edges.
+        """
+        local_keys = self._node_attr_keys if mode == "node" else self._edge_attr_keys
+        if local_keys is not None and key in local_keys:
+            local_keys.remove(key)
+
+        if self._is_root_rx_graph:
+            return
+
+        if not self.sync:
+            self._out_of_sync = True
+            return
+
+        rx_graph = self.rx_graph
+        if mode == "node":
+            for node_id in rx_graph.node_indices():
+                rx_graph[node_id].pop(key, None)
+        else:
+            for _, _, edge_attr in rx_graph.weighted_edge_list():
+                edge_attr.pop(key, None)
 
     def add_node(
         self,

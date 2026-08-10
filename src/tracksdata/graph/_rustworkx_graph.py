@@ -1106,6 +1106,8 @@ class RustWorkXGraph(BaseGraph):
         for node_attr in self.rx_graph.nodes():
             node_attr.pop(key, None)
 
+        self._maintain_views_remove_attr_key(key, "node")
+
     def add_edge_attr_key(
         self,
         key_or_schema: str | AttrSchema,
@@ -1144,6 +1146,8 @@ class RustWorkXGraph(BaseGraph):
         del self.__edge_attr_schemas[key]
         for edge_attr in self.rx_graph.edges():
             edge_attr.pop(key, None)
+
+        self._maintain_views_remove_attr_key(key, "edge")
 
     def _node_attrs_from_node_ids(
         self,

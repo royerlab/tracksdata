@@ -213,6 +213,19 @@ class BaseGraph(abc.ABC):
         for view in self._views:
             view._apply_root_attr_key(schema, mode)
 
+    def _maintain_views_remove_attr_key(self, key: str, mode: Literal["node", "edge"]) -> None:
+        """
+        Bring every registered view up to date after an attribute key is removed.
+
+        The mirror of `_maintain_views_attr_key`, called by concrete
+        ``remove_node_attr_key`` / ``remove_edge_attr_key`` implementations once
+        the key is gone from this graph. Without it a view that keeps its own copy
+        of the schema or of the attributes keeps advertising a column that no
+        longer exists on the root.
+        """
+        for view in self._views:
+            view._apply_root_remove_attr_key(key, mode)
+
     @staticmethod
     def _validate_attributes(
         attrs: dict[str, Any],
