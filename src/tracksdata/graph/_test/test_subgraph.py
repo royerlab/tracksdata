@@ -2062,3 +2062,182 @@ def test_sql_graph_filter_borderline_node_ids(tmp_path, monkeypatch: pytest.Monk
     del filtered, subgraph
     gc.collect()
     assert _scratch_table_count(graph) == 0
+
+
+def _root_with_two_connected_nodes(graph_backend: BaseGraph) -> BaseGraph:
+    """A root graph with two nodes, one edge, and two attribute keys on each."""
+    graph_backend.add_node_attr_key("area", default_value=0.0, dtype=pl.Float64)
+    graph_backend.add_node_attr_key("bar", default_value=0.0, dtype=pl.Float64)
+    graph_backend.add_edge_attr_key("weight", default_value=0.0, dtype=pl.Float64)
+    graph_backend.add_edge_attr_key("cost", default_value=0.0, dtype=pl.Float64)
+    source = graph_backend.add_node({"t": 0, "area": 1.0, "bar": 1.0})
+    target = graph_backend.add_node({"t": 1, "area": 2.0, "bar": 2.0})
+    graph_backend.add_edge(source, target, {"weight": 1.0, "cost": 1.0})
+    return graph_backend
+
+
+def test_update_root_node_key_outside_view_attr_keys(graph_backend: BaseGraph) -> None:
+    """A view tracking a subset of keys tolerates root updates to the keys it excluded.
+
+    A view built with an explicit `node_attr_keys` has no local column for the
+    keys it left out, so the update must not be propagated into it.
+    """
+    root = _root_with_two_connected_nodes(graph_backend)
+    view = root.filter().subgraph(node_attr_keys=["area"])
+
+    assert "bar" not in view.node_attr_keys()
+
+    root.update_node_attrs(attrs={"bar": [9.0]}, node_ids=[root.node_ids()[0]])
+
+    assert root.node_attrs(attr_keys=["bar"])["bar"].to_list() == [9.0, 2.0]
+    assert "bar" not in view.node_attr_keys()
+    # the keys the view does track are still maintained
+    root.update_node_attrs(attrs={"area": [7.0]}, node_ids=[root.node_ids()[0]])
+    assert view.node_attrs(attr_keys=["area"])["area"].to_list() == [7.0, 2.0]
+
+
+def test_update_root_edge_key_outside_view_attr_keys(graph_backend: BaseGraph) -> None:
+    """The edge counterpart of `test_update_root_node_key_outside_view_attr_keys`."""
+    root = _root_with_two_connected_nodes(graph_backend)
+    view = root.filter().subgraph(edge_attr_keys=["weight"])
+
+    assert "cost" not in view.edge_attr_keys()
+
+    root.update_edge_attrs(attrs={"cost": [9.0]}, edge_ids=[root.edge_ids()[0]])
+
+    assert root.edge_attrs(attr_keys=["cost"])["cost"].to_list() == [9.0]
+    assert "cost" not in view.edge_attr_keys()
+    # the keys the view does track are still maintained
+    root.update_edge_attrs(attrs={"weight": [7.0]}, edge_ids=[root.edge_ids()[0]])
+    assert view.edge_attrs(attr_keys=["weight"])["weight"].to_list() == [7.0]
+
+
+def test_add_node_attr_key_on_root_reaches_live_view(graph_backend: BaseGraph) -> None:
+    """A key registered on the root must reach the views already derived from it.
+
+    A rustworkx-rooted view reports the root's keys and shares its attribute
+    dicts, so it picks the key up for free. A SQLGraph-rooted view holds its own
+    copy of both and has to be told.
+    """
+    root = _root_with_two_connected_nodes(graph_backend)
+    view = root.filter().subgraph()
+
+    root.add_node_attr_key("foo", default_value=-1, dtype=pl.Int64)
+
+    assert "foo" in root.node_attr_keys()
+    assert "foo" in view.node_attr_keys()
+    assert view.node_attrs(attr_keys=["foo"])["foo"].to_list() == [-1, -1]
+
+    # the view's local store accepts writes to the new key, on either side
+    root.update_node_attrs(attrs={"foo": [7]}, node_ids=[root.node_ids()[0]])
+    assert view.node_attrs(attr_keys=["foo"])["foo"].to_list() == [7, -1]
+
+
+def test_add_edge_attr_key_on_root_reaches_live_view(graph_backend: BaseGraph) -> None:
+    """The edge counterpart of `test_add_node_attr_key_on_root_reaches_live_view`."""
+    root = _root_with_two_connected_nodes(graph_backend)
+    view = root.filter().subgraph()
+
+    root.add_edge_attr_key("w", default_value=-1.0, dtype=pl.Float64)
+
+    assert "w" in root.edge_attr_keys()
+    assert "w" in view.edge_attr_keys()
+    assert view.edge_attrs(attr_keys=["w"])["w"].to_list() == [-1.0]
+
+    root.update_edge_attrs(attrs={"w": [1.5]}, edge_ids=[root.edge_ids()[0]])
+    assert view.edge_attrs(attr_keys=["w"])["w"].to_list() == [1.5]
+
+
+def test_add_attr_key_on_view_reaches_sibling_view(graph_backend: BaseGraph) -> None:
+    """Registering through one view must reach the other views of the same root."""
+    root = _root_with_two_connected_nodes(graph_backend)
+    view_a = root.filter().subgraph()
+    view_b = root.filter().subgraph()
+
+    view_a.add_node_attr_key("foo", default_value=-1, dtype=pl.Int64)
+    view_a.add_edge_attr_key("w", default_value=-1.0, dtype=pl.Float64)
+
+    assert "foo" in view_b.node_attr_keys()
+    assert "w" in view_b.edge_attr_keys()
+    assert view_b.node_attrs(attr_keys=["foo"])["foo"].to_list() == [-1, -1]
+    assert view_b.edge_attrs(attr_keys=["w"])["w"].to_list() == [-1.0]
+
+
+def test_remove_node_attr_key_on_root_reaches_live_view(graph_backend: BaseGraph) -> None:
+    """The remove counterpart of `test_add_node_attr_key_on_root_reaches_live_view`.
+
+    Dropping a key on the root must drop it from the views already derived from
+    it, both from the reported schema and from the view's local attribute store.
+    """
+    root = _root_with_two_connected_nodes(graph_backend)
+    view = root.filter().subgraph()
+
+    root.remove_node_attr_key("bar")
+
+    assert "bar" not in root.node_attr_keys()
+    assert "bar" not in view.node_attr_keys()
+    with pytest.raises(KeyError):
+        view.node_attrs(attr_keys=["bar"])
+    # the keys that remain are untouched
+    assert view.node_attrs(attr_keys=["area"])["area"].to_list() == [1.0, 2.0]
+
+
+def test_remove_edge_attr_key_on_root_reaches_live_view(graph_backend: BaseGraph) -> None:
+    """The edge counterpart of `test_remove_node_attr_key_on_root_reaches_live_view`."""
+    root = _root_with_two_connected_nodes(graph_backend)
+    view = root.filter().subgraph()
+
+    root.remove_edge_attr_key("cost")
+
+    assert "cost" not in root.edge_attr_keys()
+    assert "cost" not in view.edge_attr_keys()
+    with pytest.raises(KeyError):
+        view.edge_attrs(attr_keys=["cost"])
+    assert view.edge_attrs(attr_keys=["weight"])["weight"].to_list() == [1.0]
+
+
+def test_remove_node_attr_key_on_root_updates_pinned_view_keys(graph_backend: BaseGraph) -> None:
+    """A view pinning an explicit key list must not keep reporting a removed key.
+
+    The pinned list is the view's own copy of the schema, so a root removal has
+    to be applied to it -- otherwise the view advertises a column that no longer
+    exists anywhere.
+    """
+    root = _root_with_two_connected_nodes(graph_backend)
+    view = root.filter().subgraph(node_attr_keys=["area", "bar"], edge_attr_keys=["weight", "cost"])
+
+    assert "bar" in view.node_attr_keys()
+    assert "cost" in view.edge_attr_keys()
+
+    root.remove_node_attr_key("bar")
+    root.remove_edge_attr_key("cost")
+
+    assert "bar" not in view.node_attr_keys()
+    assert "cost" not in view.edge_attr_keys()
+    # node_attrs() with no attr_keys uses the pinned list, so a stale entry there
+    # surfaces as a failure to materialize the view at all
+    assert "bar" not in view.node_attrs().columns
+    assert "cost" not in view.edge_attrs().columns
+
+
+def test_remove_attr_key_on_view_reaches_sibling_view(graph_backend: BaseGraph) -> None:
+    """The remove counterpart of `test_add_attr_key_on_view_reaches_sibling_view`.
+
+    Removing through one view propagates up to the root, so it must also reach
+    the root's other views.
+    """
+    root = _root_with_two_connected_nodes(graph_backend)
+    view_a = root.filter().subgraph()
+    view_b = root.filter().subgraph()
+
+    view_a.remove_node_attr_key("bar")
+    view_a.remove_edge_attr_key("cost")
+
+    assert "bar" not in root.node_attr_keys()
+    assert "cost" not in root.edge_attr_keys()
+    assert "bar" not in view_b.node_attr_keys()
+    assert "cost" not in view_b.edge_attr_keys()
+    with pytest.raises(KeyError):
+        view_b.node_attrs(attr_keys=["bar"])
+    with pytest.raises(KeyError):
+        view_b.edge_attrs(attr_keys=["cost"])

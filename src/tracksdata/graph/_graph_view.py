@@ -1,5 +1,5 @@
 from collections.abc import Callable, Sequence
-from typing import Any, Literal, cast, overload
+from typing import Any, Literal, overload
 
 import bidict
 import numpy as np
@@ -113,6 +113,10 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         self._is_root_rx_graph = isinstance(root, RustWorkXGraph)
         self._sync = sync
         self._out_of_sync = False
+
+        # Register with the root so that writes made directly to the root are
+        # applied to this view. Held weakly, so no explicit teardown is needed.
+        root._views.add(self)
 
         # Existing for API compatibility for the SQLGraph generating GraphView,
         # but RXGraph always uses the root graph's attributes and just filtering them
@@ -305,41 +309,15 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         dtype: pl.DataType | None = None,
         default_value: Any = None,
     ) -> None:
-        # Delegate to root with all parameters (root handles overloading)
+        # Delegate to root with all parameters (root handles overloading). The root
+        # applies the key back to this view -- and to its sibling views -- through
+        # `_maintain_views_attr_key`, so there is nothing to do locally here.
         self._root.add_node_attr_key(key_or_schema, dtype, default_value)
 
-        # Extract key for local tracking
-        if isinstance(key_or_schema, AttrSchema):
-            key = key_or_schema.key
-        else:
-            key = key_or_schema
-
-        if self._node_attr_keys is not None:
-            self._node_attr_keys.append(key)
-
-        # Sync logic
-        if not self._is_root_rx_graph:
-            if self.sync:
-                # Get the schema from root to get the actual default value used
-                schema = self._root._node_attr_schemas()[key]
-                # Apply to local rx_graph
-                rx_graph = self.rx_graph
-                for node_id in rx_graph.node_indices():
-                    rx_graph[node_id][key] = schema.default_value
-            else:
-                self._out_of_sync = True
-
     def remove_node_attr_key(self, key: str) -> None:
+        # See `add_node_attr_key`: the root drops the key from this view -- and from
+        # its sibling views -- through `_maintain_views_remove_attr_key`.
         self._root.remove_node_attr_key(key)
-        if self._node_attr_keys is not None and key in self._node_attr_keys:
-            self._node_attr_keys.remove(key)
-
-        if not self._is_root_rx_graph:
-            if self.sync:
-                for node_id in self.rx_graph.node_indices():
-                    self.rx_graph[node_id].pop(key, None)
-            else:
-                self._out_of_sync = True
 
     def add_edge_attr_key(
         self,
@@ -347,40 +325,88 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         dtype: pl.DataType | None = None,
         default_value: Any = None,
     ) -> None:
-        # Delegate to root with all parameters (root handles overloading)
+        # See `add_node_attr_key`: the root propagates the key back to this view.
         self._root.add_edge_attr_key(key_or_schema, dtype, default_value)
 
-        # Extract key for local tracking
-        if isinstance(key_or_schema, AttrSchema):
-            key = key_or_schema.key
+    def _apply_root_attr_key(self, schema: AttrSchema, mode: Literal["node", "edge"]) -> None:
+        """
+        Absorb a new attribute key registered on the root graph.
+
+        A view that pins an explicit key list has to record the new key there, or
+        it keeps reporting a stale schema. Beyond that, when the root is a
+        rustworkx graph the view shares the root's attribute dicts, so the column
+        already exists on every row; otherwise (e.g. a SQLGraph root) the view
+        holds its own copy and has to grow the column itself, filling existing
+        rows with the schema's default value.
+
+        Parameters
+        ----------
+        schema : AttrSchema
+            The schema of the newly added key, as stored by the root. The default
+            value is read from here rather than from the caller's arguments, since
+            the root may have inferred it.
+        mode : Literal["node", "edge"]
+            Whether the key was added to the nodes or the edges.
+        """
+        local_keys = self._node_attr_keys if mode == "node" else self._edge_attr_keys
+        if local_keys is not None and schema.key not in local_keys:
+            local_keys.append(schema.key)
+
+        if self._is_root_rx_graph:
+            return
+
+        if not self.sync:
+            self._out_of_sync = True
+            return
+
+        rx_graph = self.rx_graph
+        if mode == "node":
+            for node_id in rx_graph.node_indices():
+                rx_graph[node_id][schema.key] = schema.default_value
         else:
-            key = key_or_schema
-
-        if self._edge_attr_keys is not None:
-            self._edge_attr_keys.append(key)
-
-        # Sync logic
-        if not self._is_root_rx_graph:
-            if self.sync:
-                # Get the schema from root to get the actual default value used
-                schema = self._root._edge_attr_schemas()[key]
-                # Apply to local rx_graph
-                for _, _, edge_attr in self.rx_graph.weighted_edge_list():
-                    edge_attr[key] = schema.default_value
-            else:
-                self._out_of_sync = True
+            for _, _, edge_attr in rx_graph.weighted_edge_list():
+                edge_attr[schema.key] = schema.default_value
 
     def remove_edge_attr_key(self, key: str) -> None:
+        # See `remove_node_attr_key`: the root propagates the removal back here.
         self._root.remove_edge_attr_key(key)
-        if self._edge_attr_keys is not None and key in self._edge_attr_keys:
-            self._edge_attr_keys.remove(key)
-        # because attributes are passed by reference, we need don't need if both are rustworkx graphs
-        if not self._is_root_rx_graph:
-            if self.sync:
-                for edge_attr in self.rx_graph.edges():
-                    edge_attr.pop(key, None)
-            else:
-                self._out_of_sync = True
+
+    def _apply_root_remove_attr_key(self, key: str, mode: Literal["node", "edge"]) -> None:
+        """
+        Absorb an attribute key removed from the root graph.
+
+        The mirror of `_apply_root_attr_key`: a view pinning an explicit key list
+        has to forget the key there, or it keeps reporting a column that no longer
+        exists. Beyond that, when the root is a rustworkx graph the view shares the
+        root's attribute dicts, so the column is already gone from every row;
+        otherwise (e.g. a SQLGraph root) the view holds its own copy and has to
+        drop the column itself.
+
+        Parameters
+        ----------
+        key : str
+            The key that was removed from the root.
+        mode : Literal["node", "edge"]
+            Whether the key was removed from the nodes or the edges.
+        """
+        local_keys = self._node_attr_keys if mode == "node" else self._edge_attr_keys
+        if local_keys is not None and key in local_keys:
+            local_keys.remove(key)
+
+        if self._is_root_rx_graph:
+            return
+
+        if not self.sync:
+            self._out_of_sync = True
+            return
+
+        rx_graph = self.rx_graph
+        if mode == "node":
+            for node_id in rx_graph.node_indices():
+                rx_graph[node_id].pop(key, None)
+        else:
+            for _, _, edge_attr in rx_graph.weighted_edge_list():
+                edge_attr.pop(key, None)
 
     def add_node(
         self,
@@ -388,12 +414,11 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         validate_keys: bool = True,
         index: int | None = None,
     ) -> int:
-        with self._root.node_added.blocked():
-            parent_node_id = self._root.add_node(
-                attrs=attrs,
-                validate_keys=validate_keys,
-                index=index,
-            )
+        parent_node_id = self._root.add_node(
+            attrs=attrs,
+            validate_keys=validate_keys,
+            index=index,
+        )
 
         if self.sync:
             # Local primitive: pure rx_graph + _time_to_nodes, no validation, no signal.
@@ -402,14 +427,12 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         else:
             self._out_of_sync = True
 
-        emit_node_added_events(self._root.node_added, [(parent_node_id, attrs)])
         emit_node_added_events(self.node_added, [(parent_node_id, attrs)])
 
         return parent_node_id
 
     def bulk_add_nodes(self, nodes: list[dict[str, Any]], indices: list[int] | None = None) -> list[int]:
-        with self._root.node_added.blocked():
-            parent_node_ids = self._root.bulk_add_nodes(nodes, indices=indices)
+        parent_node_ids = self._root.bulk_add_nodes(nodes, indices=indices)
 
         if self._is_root_rx_graph:
             # The rx root stored these exact dict objects by reference (and does not
@@ -431,7 +454,6 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         else:
             self._out_of_sync = True
 
-        emit_node_added_events(self._root.node_added, zip(parent_node_ids, emitted_nodes, strict=True))
         emit_node_added_events(self.node_added, zip(parent_node_ids, emitted_nodes, strict=True))
 
         return parent_node_ids
@@ -486,9 +508,9 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
             raise ValueError(f"Node {missing[0]} does not exist in the graph.")
 
         view_signal_on = is_signal_on(self.node_removed)
-        root_signal_on = is_signal_on(self._root.node_removed)
         old_attrs_per_node: dict[int, dict[str, Any]] = {}
-        if view_signal_on or root_signal_on:
+        if view_signal_on:
+            # Must be captured before removal, while the attributes still exist.
             # Single batched query instead of one filter+materialize per node.
             # include_key defaults to False, so NODE_ID is excluded from each attrs
             # dict, matching the previous per-node NodeInterface.to_dict() behaviour.
@@ -498,8 +520,7 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
                 .rows_by_key(key=DEFAULT_ATTR_KEYS.NODE_ID, named=True, unique=True)
             )
 
-        with self._root.node_removed.blocked():
-            self._root.bulk_remove_nodes(node_ids)
+        self._root.bulk_remove_nodes(node_ids)
 
         if self.sync:
             local_ids = [self._external_to_local[nid] for nid in node_ids]
@@ -514,8 +535,6 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         else:
             self._out_of_sync = True
 
-        if root_signal_on:
-            emit_node_removed_events(self._root.node_removed, ((nid, old_attrs_per_node[nid]) for nid in node_ids))
         if view_signal_on:
             emit_node_removed_events(self.node_removed, ((nid, old_attrs_per_node[nid]) for nid in node_ids))
 
@@ -967,82 +986,116 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         attrs: dict[str, Any],
         node_ids: Sequence[int] | None = None,
     ) -> None:
+        """
+        Update node attributes through this view.
+
+        Delegates to the root, which applies the change back to this view (and any
+        sibling views) through the normal maintenance path, so there is a single
+        implementation of "absorb a node attribute change".
+        """
         if node_ids is None:
             node_ids = self.node_ids()
         else:
             node_ids = list(node_ids)
 
-        # Capture signal state once so slots connecting mid-call cannot toggle behavior
-        # between the old/new attr captures or between the two emit blocks.
-        view_signal_on = is_signal_on(self.node_updated)
-        root_signal_on = is_signal_on(self._root.node_updated)
-        if view_signal_on or root_signal_on:
-            existing_keys = set(self._root.node_attr_keys(return_ids=True))
-            signal_keys = list(
-                dict.fromkeys(
-                    k
-                    for k in [
-                        DEFAULT_ATTR_KEYS.NODE_ID,
-                        DEFAULT_ATTR_KEYS.T,
-                        DEFAULT_ATTR_KEYS.Z,
-                        DEFAULT_ATTR_KEYS.Y,
-                        DEFAULT_ATTR_KEYS.X,
-                        DEFAULT_ATTR_KEYS.BBOX,
-                        *attrs.keys(),
-                    ]
-                    if k in existing_keys
-                )
-            )
-            old_attrs_by_id = (
-                self._root.filter(node_ids=node_ids)
-                .node_attrs(attr_keys=signal_keys)
-                .rows_by_key(key=DEFAULT_ATTR_KEYS.NODE_ID, named=True, unique=True, include_key=True)
-            )
+        self._root.update_node_attrs(node_ids=node_ids, attrs=attrs)
 
-        # Block root signal so it doesn't fire while the view is still in old state;
-        # re-emit at the end after both root and view are consistent.
-        with self._root.node_updated.blocked():
-            self._root.update_node_attrs(
-                node_ids=node_ids,
-                attrs=attrs,
-            )
-        # because attributes are passed by reference, we need don't need if both are rustworkx graphs
-        if not self._is_root_rx_graph:
-            if self.sync:
+    def _needs_root_node_attrs(self) -> tuple[bool, bool]:
+        """
+        Whether this view needs before/after snapshots of a root node update.
+
+        Queried by the root (see `BaseGraph._views_need_node_attrs`) so it can skip
+        building snapshots no view will read.
+
+        Returns
+        -------
+        tuple[bool, bool]
+            ``(needs_old, needs_new)``. Old values are only used to emit
+            ``node_updated``. New values are needed on top of that when this view
+            keeps its own copy of the attributes and has to be written through --
+            which an out-of-sync view does not do either, it only marks itself
+            stale.
+        """
+        listening = is_signal_on(self.node_updated)
+        writes_through = self.sync and not self._is_root_rx_graph
+        return listening, listening or writes_through
+
+    def _apply_root_node_attrs(
+        self,
+        *,
+        node_ids: Sequence[int],
+        old_attrs_by_id: dict[int, dict[str, Any]] | None,
+        new_attrs_by_id: dict[int, dict[str, Any]] | None,
+        changed_keys: set[str],
+    ) -> None:
+        """
+        Absorb a node attribute update made directly on the root graph.
+
+        Brings this view up to date and *then* emits its own ``node_updated``
+        signal for the nodes it contains. Keeping the view consistent with its
+        root is an invariant, so the local update happens whether or not
+        anything is listening — only the emission is conditional.
+
+        Parameters
+        ----------
+        node_ids : Sequence[int]
+            Nodes updated on the root, in root ids.
+        old_attrs_by_id : dict[int, dict[str, Any]] | None
+            Attributes before the update, keyed by root id. ``None`` when no view
+            asked for them, in which case nothing here emits a signal.
+        new_attrs_by_id : dict[int, dict[str, Any]] | None
+            Attributes after the update, keyed by root id. ``None`` when no view
+            asked for them.
+        changed_keys : set[str]
+            Attribute keys written by this update.
+        """
+        listening = is_signal_on(self.node_updated)
+
+        # Bail out before scanning `node_ids`, which is one membership test per
+        # updated node. A view sharing the root's attribute dicts is already
+        # current, so with nothing listening there is no work at all.
+        if self._is_root_rx_graph and not listening:
+            return
+
+        # An out-of-sync view is only marked stale, so it needs no scan either.
+        if not self._is_root_rx_graph and not self.sync:
+            self._out_of_sync = True
+            if not listening:
+                return
+
+        in_view = [node_id for node_id in node_ids if self.has_node(node_id)]
+        if not in_view:
+            return
+
+        # Maintain first. When the root is a rustworkx graph the view shares the
+        # root's attribute dicts, so the values are already current and writing
+        # again would be redundant. Otherwise (e.g. a SQLGraph root) the view
+        # holds its own copy and has to be written through.
+        if not self._is_root_rx_graph and self.sync:
+            # A view may track only a subset of the root's keys; the ones it
+            # left out have no local column to write to, so they are skipped
+            # rather than forwarded (the local store would reject them).
+            local_keys = set(self.node_attr_keys(return_ids=True))
+            local_attrs = {
+                key: [new_attrs_by_id[node_id][key] for node_id in in_view]
+                for key in changed_keys
+                if key in local_keys and all(key in new_attrs_by_id[node_id] for node_id in in_view)
+            }
+            if local_attrs:
                 with self.node_updated.blocked():
-                    super().update_node_attrs(
-                        node_ids=self._map_to_local(node_ids),
-                        attrs=attrs,
+                    RustWorkXGraph.update_node_attrs(
+                        self,
+                        node_ids=self._map_to_local(in_view),
+                        attrs=local_attrs,
                     )
-            else:
-                self._out_of_sync = True
 
-        if view_signal_on or root_signal_on:
-            old_attrs_by_id = cast(dict[int, dict[str, Any]], old_attrs_by_id)  # for mypy
-            # Derive new_attrs by overlaying applied `attrs` onto old_attrs, instead of
-            # re-querying root. Mirrors the broadcasting semantics of
-            # `_root.update_node_attrs`: scalars apply to all nodes, sequences index by
-            # position in `node_ids`.
-            new_attrs_by_id: dict[int, dict[str, Any]] = {}
-            for i, node_id in enumerate(node_ids):
-                new_attrs = dict(old_attrs_by_id[node_id])
-                for k, v in attrs.items():
-                    if k in new_attrs:
-                        new_attrs[k] = v if np.isscalar(v) else v[i]
-                new_attrs_by_id[node_id] = new_attrs
-            changed_keys = set(attrs.keys())
-            if root_signal_on:
-                emit_node_updated_events(
-                    self._root.node_updated,
-                    ((node_id, old_attrs_by_id[node_id], new_attrs_by_id[node_id]) for node_id in node_ids),
-                    changed_keys,
-                )
-            if view_signal_on:
-                emit_node_updated_events(
-                    self.node_updated,
-                    ((node_id, old_attrs_by_id[node_id], new_attrs_by_id[node_id]) for node_id in node_ids),
-                    changed_keys,
-                )
+        # Notify second, now that root and view agree.
+        if listening:
+            emit_node_updated_events(
+                self.node_updated,
+                ((node_id, old_attrs_by_id[node_id], new_attrs_by_id[node_id]) for node_id in in_view),
+                changed_keys,
+            )
 
     def update_edge_attrs(
         self,
@@ -1050,6 +1103,12 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         attrs: dict[str, Any],
         edge_ids: Sequence[int] | None = None,
     ) -> None:
+        """
+        Update edge attributes through this view.
+
+        Delegates to the root, which applies the change back to this view (and any
+        sibling views) through the normal maintenance path.
+        """
         if edge_ids is None:
             edge_ids = self.edge_ids()
 
@@ -1057,15 +1116,55 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
             edge_ids=edge_ids,
             attrs=attrs,
         )
-        # because attributes are passed by reference, we need don't need if both are rustworkx graphs
-        if not self._is_root_rx_graph:
-            if self.sync:
-                super().update_edge_attrs(
-                    edge_ids=[self._edge_map_from_root[eid] for eid in edge_ids],
-                    attrs=attrs,
-                )
-            else:
-                self._out_of_sync = True
+
+    def _apply_root_edge_attrs(
+        self,
+        *,
+        edge_ids: Sequence[int],
+        attrs: dict[str, Any],
+    ) -> None:
+        """
+        Absorb an edge attribute update made directly on the root graph.
+
+        Parameters
+        ----------
+        edge_ids : Sequence[int]
+            Edges updated on the root, in root edge ids.
+        attrs : dict[str, Any]
+            The attributes written, in the same form passed to
+            ``update_edge_attrs``.
+        """
+        # When the root is a rustworkx graph the view shares the root's attribute
+        # dicts, so the values are already current.
+        if self._is_root_rx_graph:
+            return
+
+        # Keep positions, not just ids: per-edge values are positional, so the
+        # in-view subset has to be selected by the same indices.
+        in_view = [(i, edge_id) for i, edge_id in enumerate(edge_ids) if edge_id in self._edge_map_from_root]
+        if not in_view:
+            return
+
+        if not self.sync:
+            self._out_of_sync = True
+            return
+
+        # See `_apply_root_node_attrs`: keys this view does not track have no
+        # local column and are skipped.
+        local_keys = set(self.edge_attr_keys(return_ids=True))
+        positions = [i for i, _ in in_view]
+        local_attrs = {
+            key: value if np.isscalar(value) else [value[i] for i in positions]
+            for key, value in attrs.items()
+            if key in local_keys
+        }
+        if not local_attrs:
+            return
+
+        super().update_edge_attrs(
+            edge_ids=[self._edge_map_from_root[edge_id] for _, edge_id in in_view],
+            attrs=local_attrs,
+        )
 
     def in_degree(self, node_ids: list[int] | int | None = None) -> list[int] | int:
         """

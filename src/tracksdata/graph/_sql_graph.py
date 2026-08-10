@@ -653,6 +653,7 @@ class SQLGraph(BaseGraph):
         engine_kwargs: dict[str, Any] | None = None,
         overwrite: bool = False,
     ):
+        super().__init__()
         self._url = sa.engine.URL.create(
             drivername,
             username=username,
@@ -1971,6 +1972,8 @@ class SQLGraph(BaseGraph):
         node_schemas[schema.key] = schema
         self.__node_attr_schemas = node_schemas
 
+        self._maintain_views_attr_key(schema, "node")
+
     def remove_node_attr_key(self, key: str) -> None:
         if key not in self.node_attr_keys():
             raise ValueError(f"Node attribute key {key} does not exist")
@@ -1982,6 +1985,8 @@ class SQLGraph(BaseGraph):
         self._drop_attr_columns(self.Node, key, node_schemas.get(key))
         node_schemas.pop(key, None)
         self.__node_attr_schemas = node_schemas
+
+        self._maintain_views_remove_attr_key(key, "node")
 
     def add_edge_attr_key(
         self,
@@ -1998,6 +2003,8 @@ class SQLGraph(BaseGraph):
         edge_schemas[schema.key] = schema
         self.__edge_attr_schemas = edge_schemas
 
+        self._maintain_views_attr_key(schema, "edge")
+
     def remove_edge_attr_key(self, key: str) -> None:
         if key not in self.edge_attr_keys():
             raise ValueError(f"Edge attribute key {key} does not exist")
@@ -2006,6 +2013,8 @@ class SQLGraph(BaseGraph):
         self._drop_attr_columns(self.Edge, key, edge_schemas.get(key))
         edge_schemas.pop(key, None)
         self.__edge_attr_schemas = edge_schemas
+
+        self._maintain_views_remove_attr_key(key, "edge")
 
     def num_edges(self) -> int:
         with Session(self._engine) as session:
@@ -2187,7 +2196,16 @@ class SQLGraph(BaseGraph):
             return
 
         attr_keys = self.node_attr_keys()
-        if is_signal_on(self.node_updated):
+        # Views must be maintained even with no listeners, but only some of them
+        # read the before/after snapshots -- see `_views_need_node_attrs`. Each
+        # snapshot is a full query over the updated rows, so skipping one matters.
+        signal_on = is_signal_on(self.node_updated)
+        views_need_old, views_need_new = self._views_need_node_attrs()
+        needs_old = signal_on or views_need_old
+        needs_new = signal_on or views_need_new
+        old_attrs_by_id = None
+        new_attrs_by_id = None
+        if needs_old:
             old_df = self.filter(node_ids=updated_node_ids).node_attrs(
                 attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, *attr_keys]
             )
@@ -2197,17 +2215,31 @@ class SQLGraph(BaseGraph):
 
         self._update_table(self.Node, node_ids, DEFAULT_ATTR_KEYS.NODE_ID, attrs)
 
-        if is_signal_on(self.node_updated):
+        changed_keys = set(attrs.keys())
+        if needs_new:
+            # `needs_old` is exactly "somebody will emit", and an emitted payload has
+            # to carry every attribute. Nobody emitting means the snapshot is only
+            # feeding write-through into views, which reads the changed keys alone,
+            # so the query can skip the rest of the columns.
+            new_attr_keys = attr_keys if needs_old else [k for k in attr_keys if k in changed_keys]
             new_df = self.filter(node_ids=updated_node_ids).node_attrs(
-                attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, *attr_keys]
+                attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, *new_attr_keys]
             )
             new_attrs_by_id = new_df.rows_by_key(
                 key=DEFAULT_ATTR_KEYS.NODE_ID, named=True, unique=True, include_key=True
             )
+        if signal_on:
             emit_node_updated_events(
                 self.node_updated,
                 ((node_id, old_attrs_by_id[node_id], new_attrs_by_id[node_id]) for node_id in updated_node_ids),
-                set(attrs.keys()),
+                changed_keys,
+            )
+        if self._views:
+            self._maintain_views_node_attrs(
+                node_ids=updated_node_ids,
+                old_attrs_by_id=old_attrs_by_id,
+                new_attrs_by_id=new_attrs_by_id,
+                changed_keys=changed_keys,
             )
 
     def update_edge_attrs(
@@ -2217,6 +2249,10 @@ class SQLGraph(BaseGraph):
         edge_ids: Sequence[int] | None = None,
     ) -> None:
         self._update_table(self.Edge, edge_ids, DEFAULT_ATTR_KEYS.EDGE_ID, attrs)
+
+        if self._views:
+            updated_edge_ids = self.edge_ids() if edge_ids is None else list(edge_ids)
+            self._maintain_views_edge_attrs(edge_ids=updated_edge_ids, attrs=attrs)
 
     def assign_tracklet_ids(
         self,
@@ -2485,13 +2521,13 @@ class SQLGraph(BaseGraph):
                 _drop_scratch_table(source_root._engine, selected)
 
     def __getstate__(self) -> dict:
-        data_dict = self.__dict__.copy()
+        data_dict = super().__getstate__()
         for k in ["Base", "Node", "Edge", "Overlap", "Metadata", "_engine"]:
             del data_dict[k]
         return data_dict
 
     def __setstate__(self, state: dict) -> None:
-        self.__dict__.update(state)
+        super().__setstate__(state)
         # recreate deleted objects
         self._engine = sa.create_engine(self._url, **self._engine_kwargs)
         self._define_schema(overwrite=False)

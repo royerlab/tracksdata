@@ -52,12 +52,20 @@ class MappedGraphMixin:
         self._external_to_local = self._local_to_external.inverse
 
     def __getstate__(self) -> dict[str, Any]:
-        data = self.__dict__.copy()
+        # Defer to the next class in the MRO (BaseGraph, in every concrete use)
+        # so its own exclusions are honoured; fall back to __dict__ if this
+        # mixin is ever used without such a base.
+        parent = getattr(super(), "__getstate__", None)
+        data = parent() if parent is not None else self.__dict__.copy()
         del data["_external_to_local"]
         return data
 
     def __setstate__(self, state: dict[str, Any]) -> None:
-        self.__dict__.update(state)
+        parent = getattr(super(), "__setstate__", None)
+        if parent is not None:
+            parent(state)
+        else:
+            self.__dict__.update(state)
         self._external_to_local = self._local_to_external.inverse
 
     @overload
