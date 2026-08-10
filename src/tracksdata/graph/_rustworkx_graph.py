@@ -1322,10 +1322,15 @@ class RustWorkXGraph(BaseGraph):
         else:
             node_ids = list(node_ids)
 
-        # Views must be maintained even with no listeners, so the before/after
-        # snapshots are needed whenever a signal is on *or* a view exists.
-        needs_attrs = is_signal_on(self.node_updated) or bool(self._views)
-        if needs_attrs:
+        # Views must be maintained even with no listeners, but only some of them
+        # read the before/after snapshots -- see `_views_need_node_attrs`.
+        signal_on = is_signal_on(self.node_updated)
+        views_need_old, views_need_new = self._views_need_node_attrs()
+        needs_old = signal_on or views_need_old
+        needs_new = signal_on or views_need_new
+        old_attrs_by_id = None
+        new_attrs_by_id = None
+        if needs_old:
             old_attrs_by_id = {node_id: dict(self._graph[node_id]) for node_id in node_ids}
 
         for key, value in attrs.items():
@@ -1342,22 +1347,22 @@ class RustWorkXGraph(BaseGraph):
             for node_id, v in zip(node_ids, value, strict=False):
                 self._graph[node_id][key] = v
 
-        if needs_attrs:
-            changed_keys = set(attrs.keys())
+        changed_keys = set(attrs.keys())
+        if needs_new:
             new_attrs_by_id = {node_id: dict(self._graph[node_id]) for node_id in node_ids}
-            if is_signal_on(self.node_updated):
-                emit_node_updated_events(
-                    self.node_updated,
-                    ((node_id, old_attrs_by_id[node_id], new_attrs_by_id[node_id]) for node_id in node_ids),
-                    changed_keys,
-                )
-            if self._views:
-                self._maintain_views_node_attrs(
-                    node_ids=node_ids,
-                    old_attrs_by_id=old_attrs_by_id,
-                    new_attrs_by_id=new_attrs_by_id,
-                    changed_keys=changed_keys,
-                )
+        if signal_on:
+            emit_node_updated_events(
+                self.node_updated,
+                ((node_id, old_attrs_by_id[node_id], new_attrs_by_id[node_id]) for node_id in node_ids),
+                changed_keys,
+            )
+        if self._views:
+            self._maintain_views_node_attrs(
+                node_ids=node_ids,
+                old_attrs_by_id=old_attrs_by_id,
+                new_attrs_by_id=new_attrs_by_id,
+                changed_keys=changed_keys,
+            )
 
     def update_edge_attrs(
         self,
@@ -2024,10 +2029,15 @@ class IndexedRXGraph(MappedGraphMixin, RustWorkXGraph):
         external_node_ids = self.node_ids() if node_ids is None else node_ids
         local_node_ids = self._map_to_local(external_node_ids)
 
-        # Views must be maintained even with no listeners, so the before/after
-        # snapshots are needed whenever a signal is on *or* a view exists.
-        needs_attrs = is_signal_on(self.node_updated) or bool(self._views)
-        if needs_attrs:
+        # Views must be maintained even with no listeners, but only some of them
+        # read the before/after snapshots -- see `_views_need_node_attrs`.
+        signal_on = is_signal_on(self.node_updated)
+        views_need_old, views_need_new = self._views_need_node_attrs()
+        needs_old = signal_on or views_need_old
+        needs_new = signal_on or views_need_new
+        old_attrs_by_id = None
+        new_attrs_by_id = None
+        if needs_old:
             old_attrs_by_id = {
                 external_node_id: dict(self._graph[local_node_id])
                 for external_node_id, local_node_id in zip(external_node_ids, local_node_ids, strict=True)
@@ -2044,28 +2054,28 @@ class IndexedRXGraph(MappedGraphMixin, RustWorkXGraph):
         finally:
             self._views = saved_views
 
-        if needs_attrs:
-            changed_keys = set(attrs.keys())
+        changed_keys = set(attrs.keys())
+        if needs_new:
             new_attrs_by_id = {
                 external_node_id: dict(self._graph[local_node_id])
                 for external_node_id, local_node_id in zip(external_node_ids, local_node_ids, strict=True)
             }
-            if is_signal_on(self.node_updated):
-                emit_node_updated_events(
-                    self.node_updated,
-                    (
-                        (external_node_id, old_attrs_by_id[external_node_id], new_attrs_by_id[external_node_id])
-                        for external_node_id, local_node_id in zip(external_node_ids, local_node_ids, strict=True)
-                    ),
-                    changed_keys,
-                )
-            if self._views:
-                self._maintain_views_node_attrs(
-                    node_ids=external_node_ids,
-                    old_attrs_by_id=old_attrs_by_id,
-                    new_attrs_by_id=new_attrs_by_id,
-                    changed_keys=changed_keys,
-                )
+        if signal_on:
+            emit_node_updated_events(
+                self.node_updated,
+                (
+                    (external_node_id, old_attrs_by_id[external_node_id], new_attrs_by_id[external_node_id])
+                    for external_node_id in external_node_ids
+                ),
+                changed_keys,
+            )
+        if self._views:
+            self._maintain_views_node_attrs(
+                node_ids=external_node_ids,
+                old_attrs_by_id=old_attrs_by_id,
+                new_attrs_by_id=new_attrs_by_id,
+                changed_keys=changed_keys,
+            )
 
     def bulk_remove_nodes(self, node_ids: Sequence[int]) -> None:
         """

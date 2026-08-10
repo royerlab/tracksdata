@@ -151,11 +151,36 @@ class BaseGraph(abc.ABC):
         # no live views.
         self._views = WeakSet()
 
+    def _views_need_node_attrs(self) -> tuple[bool, bool]:
+        """
+        Whether any registered view needs before/after snapshots of a node update.
+
+        Building those snapshots is the dominant cost of updating a graph that has
+        views, so it must not be paid for views that cannot use them: a view that
+        shares this graph's attribute dicts (a rustworkx root) and has no listener
+        needs nothing at all.
+
+        Returns
+        -------
+        tuple[bool, bool]
+            ``(needs_old, needs_new)``. Old values are only ever used to emit a
+            view's ``node_updated``; new values are additionally needed by a view
+            that keeps its own copy of the attributes and has to be written through.
+        """
+        needs_old = needs_new = False
+        for view in self._views:
+            view_old, view_new = view._needs_root_node_attrs()
+            needs_old |= view_old
+            needs_new |= view_new
+            if needs_old and needs_new:
+                break
+        return needs_old, needs_new
+
     def _maintain_views_node_attrs(
         self,
         node_ids: Sequence[int],
-        old_attrs_by_id: dict[int, dict[str, Any]],
-        new_attrs_by_id: dict[int, dict[str, Any]],
+        old_attrs_by_id: dict[int, dict[str, Any]] | None,
+        new_attrs_by_id: dict[int, dict[str, Any]] | None,
         changed_keys: set[str],
     ) -> None:
         """

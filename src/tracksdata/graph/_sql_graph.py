@@ -2196,10 +2196,16 @@ class SQLGraph(BaseGraph):
             return
 
         attr_keys = self.node_attr_keys()
-        # Views must be maintained even with no listeners, so the before/after
-        # snapshots are needed whenever a signal is on *or* a view exists.
-        needs_attrs = is_signal_on(self.node_updated) or bool(self._views)
-        if needs_attrs:
+        # Views must be maintained even with no listeners, but only some of them
+        # read the before/after snapshots -- see `_views_need_node_attrs`. Each
+        # snapshot is a full query over the updated rows, so skipping one matters.
+        signal_on = is_signal_on(self.node_updated)
+        views_need_old, views_need_new = self._views_need_node_attrs()
+        needs_old = signal_on or views_need_old
+        needs_new = signal_on or views_need_new
+        old_attrs_by_id = None
+        new_attrs_by_id = None
+        if needs_old:
             old_df = self.filter(node_ids=updated_node_ids).node_attrs(
                 attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, *attr_keys]
             )
@@ -2209,27 +2215,32 @@ class SQLGraph(BaseGraph):
 
         self._update_table(self.Node, node_ids, DEFAULT_ATTR_KEYS.NODE_ID, attrs)
 
-        if needs_attrs:
-            changed_keys = set(attrs.keys())
+        changed_keys = set(attrs.keys())
+        if needs_new:
+            # `needs_old` is exactly "somebody will emit", and an emitted payload has
+            # to carry every attribute. Nobody emitting means the snapshot is only
+            # feeding write-through into views, which reads the changed keys alone,
+            # so the query can skip the rest of the columns.
+            new_attr_keys = attr_keys if needs_old else [k for k in attr_keys if k in changed_keys]
             new_df = self.filter(node_ids=updated_node_ids).node_attrs(
-                attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, *attr_keys]
+                attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, *new_attr_keys]
             )
             new_attrs_by_id = new_df.rows_by_key(
                 key=DEFAULT_ATTR_KEYS.NODE_ID, named=True, unique=True, include_key=True
             )
-            if is_signal_on(self.node_updated):
-                emit_node_updated_events(
-                    self.node_updated,
-                    ((node_id, old_attrs_by_id[node_id], new_attrs_by_id[node_id]) for node_id in updated_node_ids),
-                    changed_keys,
-                )
-            if self._views:
-                self._maintain_views_node_attrs(
-                    node_ids=updated_node_ids,
-                    old_attrs_by_id=old_attrs_by_id,
-                    new_attrs_by_id=new_attrs_by_id,
-                    changed_keys=changed_keys,
-                )
+        if signal_on:
+            emit_node_updated_events(
+                self.node_updated,
+                ((node_id, old_attrs_by_id[node_id], new_attrs_by_id[node_id]) for node_id in updated_node_ids),
+                changed_keys,
+            )
+        if self._views:
+            self._maintain_views_node_attrs(
+                node_ids=updated_node_ids,
+                old_attrs_by_id=old_attrs_by_id,
+                new_attrs_by_id=new_attrs_by_id,
+                changed_keys=changed_keys,
+            )
 
     def update_edge_attrs(
         self,

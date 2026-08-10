@@ -1000,12 +1000,32 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
 
         self._root.update_node_attrs(node_ids=node_ids, attrs=attrs)
 
+    def _needs_root_node_attrs(self) -> tuple[bool, bool]:
+        """
+        Whether this view needs before/after snapshots of a root node update.
+
+        Queried by the root (see `BaseGraph._views_need_node_attrs`) so it can skip
+        building snapshots no view will read.
+
+        Returns
+        -------
+        tuple[bool, bool]
+            ``(needs_old, needs_new)``. Old values are only used to emit
+            ``node_updated``. New values are needed on top of that when this view
+            keeps its own copy of the attributes and has to be written through --
+            which an out-of-sync view does not do either, it only marks itself
+            stale.
+        """
+        listening = is_signal_on(self.node_updated)
+        writes_through = self.sync and not self._is_root_rx_graph
+        return listening, listening or writes_through
+
     def _apply_root_node_attrs(
         self,
         *,
         node_ids: Sequence[int],
-        old_attrs_by_id: dict[int, dict[str, Any]],
-        new_attrs_by_id: dict[int, dict[str, Any]],
+        old_attrs_by_id: dict[int, dict[str, Any]] | None,
+        new_attrs_by_id: dict[int, dict[str, Any]] | None,
         changed_keys: set[str],
     ) -> None:
         """
@@ -1020,13 +1040,29 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         ----------
         node_ids : Sequence[int]
             Nodes updated on the root, in root ids.
-        old_attrs_by_id : dict[int, dict[str, Any]]
-            Attributes before the update, keyed by root id.
-        new_attrs_by_id : dict[int, dict[str, Any]]
-            Attributes after the update, keyed by root id.
+        old_attrs_by_id : dict[int, dict[str, Any]] | None
+            Attributes before the update, keyed by root id. ``None`` when no view
+            asked for them, in which case nothing here emits a signal.
+        new_attrs_by_id : dict[int, dict[str, Any]] | None
+            Attributes after the update, keyed by root id. ``None`` when no view
+            asked for them.
         changed_keys : set[str]
             Attribute keys written by this update.
         """
+        listening = is_signal_on(self.node_updated)
+
+        # Bail out before scanning `node_ids`, which is one membership test per
+        # updated node. A view sharing the root's attribute dicts is already
+        # current, so with nothing listening there is no work at all.
+        if self._is_root_rx_graph and not listening:
+            return
+
+        # An out-of-sync view is only marked stale, so it needs no scan either.
+        if not self._is_root_rx_graph and not self.sync:
+            self._out_of_sync = True
+            if not listening:
+                return
+
         in_view = [node_id for node_id in node_ids if self.has_node(node_id)]
         if not in_view:
             return
@@ -1035,29 +1071,26 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         # root's attribute dicts, so the values are already current and writing
         # again would be redundant. Otherwise (e.g. a SQLGraph root) the view
         # holds its own copy and has to be written through.
-        if not self._is_root_rx_graph:
-            if self.sync:
-                # A view may track only a subset of the root's keys; the ones it
-                # left out have no local column to write to, so they are skipped
-                # rather than forwarded (the local store would reject them).
-                local_keys = set(self.node_attr_keys(return_ids=True))
-                local_attrs = {
-                    key: [new_attrs_by_id[node_id][key] for node_id in in_view]
-                    for key in changed_keys
-                    if key in local_keys and all(key in new_attrs_by_id[node_id] for node_id in in_view)
-                }
-                if local_attrs:
-                    with self.node_updated.blocked():
-                        RustWorkXGraph.update_node_attrs(
-                            self,
-                            node_ids=self._map_to_local(in_view),
-                            attrs=local_attrs,
-                        )
-            else:
-                self._out_of_sync = True
+        if not self._is_root_rx_graph and self.sync:
+            # A view may track only a subset of the root's keys; the ones it
+            # left out have no local column to write to, so they are skipped
+            # rather than forwarded (the local store would reject them).
+            local_keys = set(self.node_attr_keys(return_ids=True))
+            local_attrs = {
+                key: [new_attrs_by_id[node_id][key] for node_id in in_view]
+                for key in changed_keys
+                if key in local_keys and all(key in new_attrs_by_id[node_id] for node_id in in_view)
+            }
+            if local_attrs:
+                with self.node_updated.blocked():
+                    RustWorkXGraph.update_node_attrs(
+                        self,
+                        node_ids=self._map_to_local(in_view),
+                        attrs=local_attrs,
+                    )
 
         # Notify second, now that root and view agree.
-        if is_signal_on(self.node_updated):
+        if listening:
             emit_node_updated_events(
                 self.node_updated,
                 ((node_id, old_attrs_by_id[node_id], new_attrs_by_id[node_id]) for node_id in in_view),
