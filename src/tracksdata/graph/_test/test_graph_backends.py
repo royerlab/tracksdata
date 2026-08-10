@@ -226,6 +226,29 @@ def test_add_edge(graph_backend: BaseGraph) -> None:
     assert df["weight"].to_list() == [0.5, 0.1]
 
 
+def test_array_attr_read_honors_declared_dtype(graph_backend: BaseGraph) -> None:
+    """An `Array(Float64)` column must not be truncated to integers when read back.
+
+    The declared dtype has to win over any dtype inferred from the leading rows,
+    otherwise a whole-numbered first row silently truncates the fractional ones.
+    """
+    graph_backend.add_node_attr_key("pos", dtype=pl.Array(pl.Float64, 2))
+    graph_backend.add_node_attr_key("values", dtype=pl.List(pl.Float64))
+
+    graph_backend.bulk_add_nodes(
+        [
+            {"t": 0, "pos": [50, 50], "values": [50, 50]},  # whole numbers
+            {"t": 1, "pos": [1.5, 1.5], "values": [1.5, 1.5]},  # fractional
+        ]
+    )
+
+    nodes_df = graph_backend.node_attrs(attr_keys=["t", "pos", "values"]).sort("t")
+    assert nodes_df.schema["pos"] == pl.Array(pl.Float64, 2)
+    assert nodes_df.schema["values"] == pl.List(pl.Float64)
+    assert nodes_df["pos"].to_list() == [[50.0, 50.0], [1.5, 1.5]]
+    assert nodes_df["values"].to_list() == [[50.0, 50.0], [1.5, 1.5]]
+
+
 def test_add_node_and_edge_with_numpy_scalars(graph_backend: BaseGraph) -> None:
     """Numpy scalars must be stored with the column's declared dtype, not as raw byte buffers.
 
