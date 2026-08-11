@@ -22,7 +22,8 @@ TracksData focuses on providing a **general** unified data structure and modular
 ### Which graph backend should I use?
 
 - **RustWorkXGraph**: For most applications where data fits in memory
-- **SQLGraph**: For large datasets or when you need persistent storage
+- **SQLGraph**: For large mutable datasets or when you need persistent database storage
+- **ZarrSQLGraph**: For lazy, read-only queries against an existing directed GEFF Zarr store
 - **GraphView**: You shouldn't instantiate this directly, it is used internally by the library when you use `graph.subgraph()`
 
 ### Can TracksData handle cell divisions?
