@@ -61,12 +61,20 @@ class ZarrSQLFilter(SQLFilter):
 
     @cache_method
     def node_ids(self) -> list[int]:
-        query = self._graph._select_columns(self._node_query, self._graph.Node, [DEFAULT_ATTR_KEYS.NODE_ID])
+        query = self._graph._select_columns(
+            self._node_query,
+            self._graph.Node,
+            [DEFAULT_ATTR_KEYS.NODE_ID, _NODE_ROW],
+        ).order_by(_NODE_ROW)
         return self._graph._read_database(query, self._graph.Node)[DEFAULT_ATTR_KEYS.NODE_ID].to_list()
 
     @cache_method
     def edge_ids(self) -> list[int]:
-        query = self._graph._select_columns(self._edge_query, self._graph.Edge, [DEFAULT_ATTR_KEYS.EDGE_ID])
+        query = self._graph._select_columns(
+            self._edge_query,
+            self._graph.Edge,
+            [DEFAULT_ATTR_KEYS.EDGE_ID],
+        ).order_by(DEFAULT_ATTR_KEYS.EDGE_ID)
         return self._graph._read_database(query, self._graph.Edge)[DEFAULT_ATTR_KEYS.EDGE_ID].to_list()
 
     @cache_method
@@ -206,8 +214,8 @@ class ZarrSQLGraph(SQLGraph):
             if source_key in self._geff_metadata.edge_props_metadata:
                 self._geff_metadata.edge_props_metadata[key] = self._geff_metadata.edge_props_metadata.pop(source_key)
 
-        node_ds = xr.Dataset({key: ((_NODE_ROW,), value) for key, value in node_vars.items()})
-        edge_ds = xr.Dataset({key: ((_EDGE_ROW,), value) for key, value in edge_vars.items()})
+        node_ds = xr.Dataset({key: ((_NODE_ROW,), value) for key, value in node_vars.items()}).unify_chunks()
+        edge_ds = xr.Dataset({key: ((_EDGE_ROW,), value) for key, value in edge_vars.items()}).unify_chunks()
         self._context = XarrayContext()
         self._context.from_dataset("node", node_ds, chunks=chunks)
         self._context.from_dataset("edge", edge_ds, chunks=chunks)
@@ -423,9 +431,9 @@ class ZarrSQLGraph(SQLGraph):
         deferred = [key for key in requested if key in self._fixed_arrays[mode] or key in self._varlength_arrays[mode]]
         sql_names = [key for key in requested if hasattr(table, key)]
         row_key = _NODE_ROW if mode == "node" else _EDGE_ROW
-        if deferred and row_key not in sql_names:
+        if row_key not in sql_names:
             sql_names.append(row_key)
-        selected_query = self._select_columns(query, table, sql_names)
+        selected_query = self._select_columns(query, table, sql_names).order_by(row_key)
         df = self._read_database(selected_query, table)
         if deferred:
             rows = df[row_key].to_numpy().astype(np.int64, copy=False)
@@ -556,7 +564,7 @@ class ZarrSQLGraph(SQLGraph):
         return self.edge_attrs(attr_keys=[])[DEFAULT_ATTR_KEYS.EDGE_ID].to_list()
 
     def time_points(self) -> list[int]:
-        query = sa.select(self.Node.t).distinct()
+        query = sa.select(self.Node.t).distinct().order_by(self.Node.t)
         return self._read_database(query, self.Node)[DEFAULT_ATTR_KEYS.T].to_list()
 
     def node_attrs(
@@ -626,7 +634,11 @@ class ZarrSQLGraph(SQLGraph):
         ]
         if deferred:
             columns.append(getattr(self.Node, _NODE_ROW))
-        query = sa.select(*columns).join(self.Edge, getattr(self.Edge, neighbor_key) == self.Node.node_id)
+        query = (
+            sa.select(*columns)
+            .join(self.Edge, getattr(self.Edge, neighbor_key) == self.Node.node_id)
+            .order_by(self.Edge.edge_id)
+        )
         if node_ids is not None:
             query = query.where(getattr(self.Edge, node_key).in_(requested_ids))
         df = self._read_database(query, self.Node)
@@ -693,7 +705,7 @@ class ZarrSQLGraph(SQLGraph):
 
     def dividing_nodes(self) -> list[int]:
         column = self.Edge.source_id
-        query = sa.select(column).group_by(column).having(sa.func.count() == 2)
+        query = sa.select(column).group_by(column).having(sa.func.count() == 2).order_by(column)
         return self._execute(query)[DEFAULT_ATTR_KEYS.EDGE_SOURCE].to_list()
 
     def num_nodes(self) -> int:
@@ -733,7 +745,7 @@ class ZarrSQLGraph(SQLGraph):
         return int(result.item(0, 0))
 
     def edge_list(self) -> list[list[int]]:
-        query = sa.select(self.Edge.source_id, self.Edge.target_id)
+        query = sa.select(self.Edge.source_id, self.Edge.target_id).order_by(self.Edge.edge_id)
         return [list(row) for row in self._execute(query).iter_rows()]
 
     def overlaps(self, node_ids: list[int] | None = None) -> list[list[int]]:

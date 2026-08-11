@@ -90,6 +90,19 @@ def test_scalar_schema_attrs_and_fixed_array(geff_graph: tuple[list[int], Path])
     assert edges["weight"].to_list() == pytest.approx([0.25, 1.25])
 
 
+def test_inconsistent_property_chunks_are_unified(geff_graph: tuple[list[int], Path]) -> None:
+    _, path = geff_graph
+    root = zarr.open_group(path, mode="a")
+    score_group = root["nodes/props/score"]
+    values = np.asarray(score_group["values"][:])
+    del score_group["values"]
+    score_group.create_array("values", data=values, chunks=(1,))
+
+    attrs = ZarrSQLGraph(path).node_attrs(attr_keys=["score"])
+
+    assert attrs["score"].to_list() == pytest.approx([0.5, 1.5, 2.5])
+
+
 def test_missing_masks_restore_nullable_declared_dtype(geff_graph: tuple[list[int], Path]) -> None:
     _, path = geff_graph
     root = zarr.open_group(path, mode="a")
