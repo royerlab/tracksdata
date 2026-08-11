@@ -11,6 +11,7 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
+from asv_runner.benchmarks.mark import SkipNotImplemented
 from geff.core_io import write_arrays
 from geff_spec import Axis, GeffMetadata, PropMetadata
 
@@ -84,6 +85,12 @@ def _write_geff(path: Path, n_nodes: int) -> None:
     )
 
 
+def _require_backend(backend_name: str) -> None:
+    """Skip benchmarks for backends absent from the compared revision."""
+    if backend_name != "SQLGraphMemory" and not hasattr(td.graph, backend_name):
+        raise SkipNotImplemented(f"{backend_name} is unavailable in this revision.")
+
+
 def _load_graph(backend_name: str, path: str) -> td.graph.BaseGraph:
     """Load one backend from the common GEFF fixture."""
     if backend_name == "SQLGraphMemory":
@@ -130,12 +137,14 @@ class GeffLoadBenchmark(_GeffFixture):
     warmup_time = 0
 
     def setup(self, paths: dict[int, str], backend_name: str, n_nodes: int) -> None:
+        _require_backend(backend_name)
         self.path = paths[n_nodes]
         self.graph: td.graph.BaseGraph | None = None
 
     def teardown(self, paths: dict[int, str], backend_name: str, n_nodes: int) -> None:
-        if self.graph is not None:
-            _dispose_graph(self.graph)
+        graph = getattr(self, "graph", None)
+        if graph is not None:
+            _dispose_graph(graph)
 
     def time_from_geff(self, paths: dict[int, str], backend_name: str, n_nodes: int) -> None:
         self.graph = _load_graph(backend_name, self.path)
@@ -145,13 +154,16 @@ class GeffQueryBenchmark(_GeffFixture):
     """Read-query costs after backend construction has completed."""
 
     def setup(self, paths: dict[int, str], backend_name: str, n_nodes: int) -> None:
+        _require_backend(backend_name)
         self.graph = _load_graph(backend_name, paths[n_nodes])
         self.filter_time = N_TIME_POINTS // 2
         seed_count = min(N_SUCCESSOR_SEEDS, max(1, n_nodes - 1))
         self.successor_seeds = np.linspace(0, max(0, n_nodes - 2), seed_count, dtype=np.int64).tolist()
 
     def teardown(self, paths: dict[int, str], backend_name: str, n_nodes: int) -> None:
-        _dispose_graph(self.graph)
+        graph = getattr(self, "graph", None)
+        if graph is not None:
+            _dispose_graph(graph)
 
     def time_node_attrs(self, paths: dict[int, str], backend_name: str, n_nodes: int) -> None:
         self.graph.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.T, "score", "label"])

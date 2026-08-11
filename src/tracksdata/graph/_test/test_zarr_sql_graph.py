@@ -48,6 +48,17 @@ def geff_graph(tmp_path: Path) -> tuple[list[int], Path]:
     return _write_geff(tmp_path / "graph.geff")
 
 
+def _create_zarr_array(group: Any, name: str, data: np.ndarray, *, chunks: tuple[int, ...] | None = None) -> None:
+    """Create an array through the Zarr v2/v3-compatible API."""
+    kwargs: dict[str, Any] = {"data": data}
+    if chunks is not None:
+        kwargs["chunks"] = chunks
+    if hasattr(group, "create_array"):
+        group.create_array(name, **kwargs)
+    else:
+        group.create_dataset(name, shape=data.shape, **kwargs)
+
+
 def test_constructs_lazily_without_geff_read(
     geff_graph: tuple[list[int], Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -118,7 +129,7 @@ def test_inconsistent_property_chunks_are_unified(geff_graph: tuple[list[int], P
     score_group = root["nodes/props/score"]
     values = np.asarray(score_group["values"][:])
     del score_group["values"]
-    score_group.create_array("values", data=values, chunks=(1,))
+    _create_zarr_array(score_group, "values", values, chunks=(1,))
 
     attrs = ZarrSQLGraph(path).node_attrs(attr_keys=["score"])
 
@@ -128,7 +139,8 @@ def test_inconsistent_property_chunks_are_unified(geff_graph: tuple[list[int], P
 def test_nullable_float_remains_sql_filterable(geff_graph: tuple[list[int], Path]) -> None:
     node_ids, path = geff_graph
     root = zarr.open_group(path, mode="a")
-    root["nodes/props/score"].create_array("missing", data=np.asarray([False, True, False]))
+    missing = np.asarray([False, True, False])
+    _create_zarr_array(root["nodes/props/score"], "missing", missing)
 
     graph = ZarrSQLGraph(path)
 
@@ -139,7 +151,8 @@ def test_nullable_float_remains_sql_filterable(geff_graph: tuple[list[int], Path
 def test_missing_masks_restore_nullable_declared_dtype(geff_graph: tuple[list[int], Path]) -> None:
     _, path = geff_graph
     root = zarr.open_group(path, mode="a")
-    root["nodes/props/label"].create_array("missing", data=np.asarray([False, True, False]))
+    missing = np.asarray([False, True, False])
+    _create_zarr_array(root["nodes/props/label"], "missing", missing)
 
     graph = ZarrSQLGraph(path)
     attrs = graph.node_attrs(attr_keys=["label"])
