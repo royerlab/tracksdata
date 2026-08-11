@@ -124,7 +124,7 @@ class _GeffFixture:
 
 
 class GeffLoadBenchmark(_GeffFixture):
-    """Cold ``from_geff`` construction cost for each backend."""
+    """Fresh-object ``from_geff`` construction cost for each backend."""
 
     number = 1
     warmup_time = 0

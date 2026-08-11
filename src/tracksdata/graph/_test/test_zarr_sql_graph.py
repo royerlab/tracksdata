@@ -1,4 +1,6 @@
+import pickle
 from pathlib import Path
+from typing import Any, Literal
 from unittest.mock import MagicMock
 
 import geff
@@ -14,7 +16,7 @@ from tracksdata.nodes._mask import Mask
 from tracksdata.utils._dtypes import AttrSchema
 
 
-def _write_geff(path: Path) -> tuple[list[int], Path]:
+def _write_geff(path: Path, *, zarr_format: Literal[2, 3] = 3) -> tuple[list[int], Path]:
     graph = RustWorkXGraph()
     graph.add_node_attr_key(AttrSchema("score", pl.Float32))
     graph.add_node_attr_key(AttrSchema("label", pl.Int16))
@@ -37,7 +39,7 @@ def _write_geff(path: Path) -> tuple[list[int], Path]:
     graph.add_edge(node_ids[0], node_ids[1], {"weight": np.float32(0.25)})
     graph.add_edge(node_ids[1], node_ids[2], {"weight": np.float32(1.25)})
     graph.metadata.update(dataset="demo", shape=[3, 16, 16])
-    graph.to_geff(path)
+    graph.to_geff(path, zarr_format=zarr_format)
     return node_ids, path
 
 
@@ -51,11 +53,22 @@ def test_constructs_lazily_without_geff_read(
 ) -> None:
     node_ids, path = geff_graph
 
-    def fail_read(*args, **kwargs):
+    def fail_read(*args: object, **kwargs: object) -> None:
         raise AssertionError("geff.read must not be used")
 
     monkeypatch.setattr(geff, "read", fail_read)
+    original_getitem = zarr.Array.__getitem__
+    selections: list[tuple[object, ...]] = []
+
+    def track_array_reads(array: zarr.Array, selection: tuple[object, ...]) -> Any:
+        selections.append(selection)
+        return original_getitem(array, selection)
+
+    monkeypatch.setattr(zarr.Array, "__getitem__", track_array_reads)
     graph = ZarrSQLGraph(path)
+    assert selections
+    assert all(any(isinstance(index, slice) and index.stop == 0 for index in selection) for selection in selections)
+
     sql = MagicMock(wraps=graph._context.sql)
     monkeypatch.setattr(graph._context, "sql", sql)
 
@@ -64,6 +77,15 @@ def test_constructs_lazily_without_geff_read(
     assert graph.num_nodes() == 3
     assert graph.num_edges() == 2
     assert sql.call_count >= 4
+
+
+def test_zarr_v2_and_pickling(tmp_path: Path) -> None:
+    node_ids, path = _write_geff(tmp_path / "graph-v2.geff", zarr_format=2)
+
+    restored = pickle.loads(pickle.dumps(ZarrSQLGraph(path)))
+
+    assert restored.node_ids() == node_ids
+    assert restored.edge_list() == [[node_ids[0], node_ids[1]], [node_ids[1], node_ids[2]]]
 
 
 def test_scalar_schema_attrs_and_fixed_array(geff_graph: tuple[list[int], Path]) -> None:
@@ -77,7 +99,7 @@ def test_scalar_schema_attrs_and_fixed_array(geff_graph: tuple[list[int], Path])
 
     attrs = graph.node_attrs(attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, "score", "label", DEFAULT_ATTR_KEYS.BBOX])
     assert attrs.schema == {
-        DEFAULT_ATTR_KEYS.NODE_ID: pl.Int64,
+        DEFAULT_ATTR_KEYS.NODE_ID: pl.UInt64,
         "score": pl.Float32,
         "label": pl.Int16,
         DEFAULT_ATTR_KEYS.BBOX: pl.Array(pl.Int64, 4),
@@ -103,15 +125,70 @@ def test_inconsistent_property_chunks_are_unified(geff_graph: tuple[list[int], P
     assert attrs["score"].to_list() == pytest.approx([0.5, 1.5, 2.5])
 
 
+def test_nullable_float_remains_sql_filterable(geff_graph: tuple[list[int], Path]) -> None:
+    node_ids, path = geff_graph
+    root = zarr.open_group(path, mode="a")
+    root["nodes/props/score"].create_array("missing", data=np.asarray([False, True, False]))
+
+    graph = ZarrSQLGraph(path)
+
+    assert graph.node_attrs(attr_keys=["score"])["score"].to_list() == [0.5, None, 2.5]
+    assert graph.filter(NodeAttr("score") > 1).node_ids() == [node_ids[2]]
+
+
 def test_missing_masks_restore_nullable_declared_dtype(geff_graph: tuple[list[int], Path]) -> None:
     _, path = geff_graph
     root = zarr.open_group(path, mode="a")
     root["nodes/props/label"].create_array("missing", data=np.asarray([False, True, False]))
 
-    attrs = ZarrSQLGraph(path).node_attrs(attr_keys=["label"])
+    graph = ZarrSQLGraph(path)
+    attrs = graph.node_attrs(attr_keys=["label"])
 
     assert attrs.schema == {"label": pl.Int16}
     assert attrs["label"].to_list() == [10, None, 12]
+    with pytest.raises(NotImplementedError, match="Deferred GEFF properties"):
+        graph.filter(NodeAttr("label") == 10)
+
+
+def test_preserves_full_uint64_node_id_range(geff_graph: tuple[list[int], Path]) -> None:
+    _, path = geff_graph
+    root = zarr.open_group(path, mode="a")
+    node_ids = np.asarray([2**63 + 1, 2**63 + 2, 2**63 + 3], dtype=np.uint64)
+    root["nodes/ids"][:] = node_ids
+    root["edges/ids"][:] = np.asarray([[node_ids[0], node_ids[1]], [node_ids[1], node_ids[2]]])
+
+    graph = ZarrSQLGraph(path)
+    expected_ids = node_ids.tolist()
+
+    assert graph.node_ids() == expected_ids
+    assert graph.edge_list() == [[expected_ids[0], expected_ids[1]], [expected_ids[1], expected_ids[2]]]
+    assert graph.successors(expected_ids[0]) == [expected_ids[1]]
+    assert graph._node_attr_schemas()[DEFAULT_ATTR_KEYS.NODE_ID].dtype == pl.UInt64
+    assert graph._edge_attr_schemas()[DEFAULT_ATTR_KEYS.EDGE_SOURCE].dtype == pl.UInt64
+
+
+def test_rejects_undirected_geff(geff_graph: tuple[list[int], Path]) -> None:
+    _, path = geff_graph
+    root = zarr.open_group(path, mode="a")
+    metadata = dict(root.attrs["geff"])
+    metadata["directed"] = False
+    root.attrs["geff"] = metadata
+
+    with pytest.raises(ValueError, match="only supports directed"):
+        ZarrSQLGraph(path)
+
+
+def test_copy_reopens_the_same_store(geff_graph: tuple[list[int], Path]) -> None:
+    node_ids, path = geff_graph
+    graph = ZarrSQLGraph(path)
+
+    copied = graph.copy()
+
+    assert isinstance(copied, ZarrSQLGraph)
+    assert copied is not graph
+    assert copied.node_ids() == node_ids
+    with pytest.raises(TypeError, match="requires another ZarrSQLGraph"):
+        ZarrSQLGraph.from_other(RustWorkXGraph())
 
 
 def test_node_edge_and_compound_filters_use_xarray_sql(geff_graph: tuple[list[int], Path]) -> None:

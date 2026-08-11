@@ -15,7 +15,6 @@ import xarray as xr
 import zarr
 from geff_spec import GeffMetadata
 from sqlalchemy.orm import DeclarativeBase
-from xarray_sql import XarrayContext
 from zarr.storage import StoreLike
 
 from tracksdata.attrs import Filter, attr_comps_to_strs, split_attr_comps
@@ -164,10 +163,14 @@ class ZarrSQLFilter(SQLFilter):
 class ZarrSQLGraph(SQLGraph):
     """Read-only graph that queries scalar GEFF properties through xarray-sql.
 
-    Construction reads only Zarr/GEFF metadata. Array payloads remain Dask-backed
-    until a query is collected. Fixed-shape and variable-length properties are
-    fetched lazily for only the row positions selected by SQL. Non-scalar properties
-    can be returned but cannot themselves be used as SQL filter predicates.
+    Construction does not materialize Zarr payload arrays. Array payloads remain
+    Dask-backed until a query is collected. Fixed-shape, variable-length, string,
+    and nullable integer/boolean properties are fetched lazily for only the row
+    positions selected by SQL. These deferred properties can be returned but cannot
+    themselves be used as SQL filter predicates.
+
+    Only directed GEFF stores are supported. Use another graph backend to convert
+    an undirected GEFF store before constructing this read-only backend.
     """
 
     def __init__(
@@ -182,6 +185,8 @@ class ZarrSQLGraph(SQLGraph):
         self._geff_store = geff_store
         self._chunks = chunks
         self._geff_metadata = GeffMetadata.read(geff_store)
+        if not self._geff_metadata.directed:
+            raise ValueError("ZarrSQLGraph only supports directed GEFF stores.")
         self._zarr_group = zarr.open_group(geff_store, mode="r")
         self._engine = SimpleNamespace(dialect=sa.engine.default.DefaultDialect())
         self._node_attr_key_map = dict(node_attr_key_map or {})
@@ -216,6 +221,12 @@ class ZarrSQLGraph(SQLGraph):
 
         node_ds = xr.Dataset({key: ((_NODE_ROW,), value) for key, value in node_vars.items()}).unify_chunks()
         edge_ds = xr.Dataset({key: ((_EDGE_ROW,), value) for key, value in edge_vars.items()}).unify_chunks()
+
+        # Import the heavy DataFusion runtime only when this backend is instantiated.
+        # Eager imports can make module-discovery tools initialize its global Rust
+        # logger more than once.
+        from xarray_sql import XarrayContext
+
         self._context = XarrayContext()
         self._context.from_dataset("node", node_ds, chunks=chunks)
         self._context.from_dataset("edge", edge_ds, chunks=chunks)
@@ -227,9 +238,11 @@ class ZarrSQLGraph(SQLGraph):
         self._metadata_data = {"geff": geff_dict, **tracksdata_metadata}
 
     def _prepare_node_table(self) -> tuple[dict[str, da.Array], dict[str, AttrSchema]]:
-        node_ids = da.from_zarr(self._zarr_group["nodes/ids"]).astype(np.int64)
+        node_ids = da.from_zarr(self._zarr_group["nodes/ids"])
         variables = {DEFAULT_ATTR_KEYS.NODE_ID: node_ids}
-        schemas: dict[str, AttrSchema] = {DEFAULT_ATTR_KEYS.NODE_ID: AttrSchema(DEFAULT_ATTR_KEYS.NODE_ID, pl.Int64)}
+        schemas: dict[str, AttrSchema] = {
+            DEFAULT_ATTR_KEYS.NODE_ID: AttrSchema(DEFAULT_ATTR_KEYS.NODE_ID, _polars_dtype(node_ids.dtype))
+        }
         prop_schemas, prop_vars = self._prepare_properties(
             "node", self._geff_metadata.node_props_metadata, self._node_attr_key_map
         )
@@ -240,15 +253,16 @@ class ZarrSQLGraph(SQLGraph):
         return variables, {key: schemas[key] for key in ordered}
 
     def _prepare_edge_table(self) -> tuple[dict[str, da.Array], dict[str, AttrSchema]]:
-        edge_ids = da.from_zarr(self._zarr_group["edges/ids"]).astype(np.int64)
+        edge_ids = da.from_zarr(self._zarr_group["edges/ids"])
+        endpoint_dtype = _polars_dtype(edge_ids.dtype)
         variables = {
             DEFAULT_ATTR_KEYS.EDGE_SOURCE: edge_ids[:, 0],
             DEFAULT_ATTR_KEYS.EDGE_TARGET: edge_ids[:, 1],
         }
         schemas: dict[str, AttrSchema] = {
             DEFAULT_ATTR_KEYS.EDGE_ID: AttrSchema(DEFAULT_ATTR_KEYS.EDGE_ID, pl.Int64),
-            DEFAULT_ATTR_KEYS.EDGE_SOURCE: AttrSchema(DEFAULT_ATTR_KEYS.EDGE_SOURCE, pl.Int64),
-            DEFAULT_ATTR_KEYS.EDGE_TARGET: AttrSchema(DEFAULT_ATTR_KEYS.EDGE_TARGET, pl.Int64),
+            DEFAULT_ATTR_KEYS.EDGE_SOURCE: AttrSchema(DEFAULT_ATTR_KEYS.EDGE_SOURCE, endpoint_dtype),
+            DEFAULT_ATTR_KEYS.EDGE_TARGET: AttrSchema(DEFAULT_ATTR_KEYS.EDGE_TARGET, endpoint_dtype),
         }
         prop_schemas, prop_vars = self._prepare_properties(
             "edge", self._geff_metadata.edge_props_metadata, self._edge_attr_key_map
@@ -371,6 +385,20 @@ class ZarrSQLGraph(SQLGraph):
             **kwargs,
         )
         return graph, graph._geff_metadata
+
+    @classmethod
+    def from_other(cls, other: BaseGraph, **kwargs: Any) -> ZarrSQLGraph:
+        """Reopen the same GEFF store when copying this read-only backend."""
+        if not isinstance(other, ZarrSQLGraph):
+            raise TypeError("ZarrSQLGraph.from_other requires another ZarrSQLGraph backed by a GEFF store.")
+        constructor_kwargs = {
+            "geff_store": other._geff_store,
+            "chunks": other._chunks,
+            "node_attr_key_map": other._node_attr_key_map,
+            "edge_attr_key_map": other._edge_attr_key_map,
+        }
+        constructor_kwargs.update(kwargs)
+        return cls(**constructor_kwargs)
 
     def supports_custom_indices(self) -> bool:
         return False
@@ -548,7 +576,7 @@ class ZarrSQLGraph(SQLGraph):
             if key in self._fixed_arrays[mode] or key in self._varlength_arrays[mode]
         ]
         if unsupported:
-            raise NotImplementedError(f"Non-scalar GEFF properties cannot be used in SQL filters: {unsupported}")
+            raise NotImplementedError(f"Deferred GEFF properties cannot be used in SQL filters: {unsupported}")
         return ZarrSQLFilter(
             *attr_filters,
             graph=self,
