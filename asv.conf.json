@@ -13,7 +13,7 @@
     "3.12"
   ],
   "install_command": [
-    "python -mpip install --force-reinstall .[spatial]"
+    "python -mpip install --force-reinstall . \"rstar-python @ git+https://github.com/JoOkuma/rstar-python.git@1eb622f459b68e78d4d79c21e260eeacdf427401\" spatial-graph"
   ],
   "matrix": {},
   "show_commit_url": "https://github.com/royerlab/tracksdata/commit/",
