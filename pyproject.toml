@@ -60,10 +60,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-spatial = ["spatial-graph"]
+spatial = ["rstar-python>=0.2.0"]
 motile = ["motile"]
 test = [
-  "spatial-graph",
+  "rstar-python>=0.2.0",
   "motile",
   "pytest>=7.0",
   "pytest-cov",
@@ -90,6 +90,10 @@ bench = ["asv"]
 Documentation = "https://github.com/jookuma/tracksdata#readme"
 Issues = "https://github.com/jookuma/tracksdata/issues"
 Source = "https://github.com/jookuma/tracksdata"
+
+[tool.uv.sources]
+# Remove this source override after rstar-python 0.2.0 is released.
+rstar-python = { git = "https://github.com/JoOkuma/rstar-python.git", rev = "1eb622f459b68e78d4d79c21e260eeacdf427401" }
 
 [tool.hatch.metadata]
 allow-direct-references = true

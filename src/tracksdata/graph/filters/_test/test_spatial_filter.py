@@ -159,6 +159,18 @@ def test_spatial_filter_dimensions() -> None:
     assert not result.node_attrs().is_empty()
 
 
+def test_spatial_filter_supports_one_dimension() -> None:
+    """One-dimensional coordinates are padded for rstar's two-dimensional minimum."""
+    graph = RustWorkXGraph()
+    graph.add_node_attr_key("x", dtype=pl.Int64)
+    inside = graph.add_node({"t": 0, "x": 2})
+    graph.add_node({"t": 0, "x": 20})
+
+    spatial_filter = SpatialFilter(graph, attr_keys=["x"])
+
+    assert spatial_filter[0:3,].node_ids() == [inside]
+
+
 def test_spatial_filter_error_handling(sample_graph: RustWorkXGraph) -> None:
     """Test error handling for invalid slice counts."""
     spatial_filter = SpatialFilter(sample_graph)
@@ -281,6 +293,18 @@ def test_bbox_spatial_filter_dimensions() -> None:
     assert not result.node_attrs().is_empty()
 
 
+def test_bbox_spatial_filter_supports_one_dimension() -> None:
+    """One-dimensional boxes are padded for rstar's two-dimensional minimum."""
+    graph = RustWorkXGraph()
+    graph.add_node_attr_key("bbox", dtype=pl.Array(pl.Int64, 2))
+    inside = graph.add_node({"t": 0, "bbox": [1, 3]})
+    graph.add_node({"t": 0, "bbox": [10, 12]})
+
+    spatial_filter = BBoxSpatialFilter(graph, frame_attr_key=None, bbox_attr_key="bbox")
+
+    assert spatial_filter[2:4,].node_ids() == [inside]
+
+
 def test_bbox_spatial_filter_error_handling() -> None:
     """Test error handling for mismatched min/max attribute lengths."""
     graph = RustWorkXGraph()
@@ -366,6 +390,30 @@ def test_spatial_filter_add_update_and_remove_node(graph_backend: BaseGraph) -> 
 
         graph.remove_node(new_node_id)
         assert spatial_filter[2:3, 19:22, 19:22].node_attrs().is_empty()
+
+
+def test_spatial_filter_removes_exact_coincident_node(graph_backend: BaseGraph) -> None:
+    """Removing one coincident point must leave the other node indexed."""
+    graph_backend.add_node_attr_key("x", pl.Int64)
+    first = graph_backend.add_node({"t": 0, "x": 5})
+    second = graph_backend.add_node({"t": 0, "x": 5})
+    spatial_filter = SpatialFilter(graph_backend, attr_keys=["x"])
+
+    graph_backend.remove_node(first)
+
+    assert spatial_filter[5:5,].node_ids() == [second]
+
+
+def test_bbox_spatial_filter_removes_exact_coincident_node(graph_backend: BaseGraph) -> None:
+    """Removing one coincident bbox must leave the other node indexed."""
+    graph_backend.add_node_attr_key("bbox", pl.Array(pl.Int64, 2))
+    first = graph_backend.add_node({"t": 0, "bbox": [2, 4]})
+    second = graph_backend.add_node({"t": 0, "bbox": [2, 4]})
+    spatial_filter = BBoxSpatialFilter(graph_backend, frame_attr_key=None, bbox_attr_key="bbox")
+
+    graph_backend.remove_node(first)
+
+    assert spatial_filter[3:3,].node_ids() == [second]
 
 
 def test_bbox_spatial_filter_updates_node_position(graph_backend: BaseGraph) -> None:
