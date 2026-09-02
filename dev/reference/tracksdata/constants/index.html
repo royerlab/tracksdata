@@ -677,6 +677,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#tracksdata.constants.DefaultMetadataKeys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;DefaultMetadataKeys
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1073,6 +1084,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#tracksdata.constants.DefaultMetadataKeys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;DefaultMetadataKeys
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1120,6 +1142,13 @@
           –
           <div class="doc-md-description">
             <p>This class defines the standard attribute names for nodes and edges in graphs to ensure</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+          <b><code><a class="autorefs autorefs-internal" title="            DefaultMetadataKeys (tracksdata.constants.DefaultMetadataKeys)" href="#tracksdata.constants.DefaultMetadataKeys">DefaultMetadataKeys</a></code></b>
+          –
+          <div class="doc-md-description">
+            <p>This class defines the standard keys for <code>graph.metadata</code>, tracksdata's</p>
           </div>
         </li>
     </ul>
@@ -1277,6 +1306,90 @@ For a 3D image, the bounding box is a tuple of (x_start, y_start, z_start, x_end
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nb">print</span><span class="p">(</span><span class="n">DEFAULT_ATTR_KEYS</span><span class="o">.</span><span class="n">NODE_ID</span><span class="p">)</span>  <span class="c1"># Output: node_id</span>
 </span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="nb">print</span><span class="p">(</span><span class="n">DEFAULT_ATTR_KEYS</span><span class="o">.</span><span class="n">EDGE_WEIGHT</span><span class="p">)</span>  <span class="c1"># Output: weight</span>
 </span></code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="tracksdata.constants.DefaultMetadataKeys" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>            <span class="doc doc-object-name doc-class-name">DefaultMetadataKeys</span>
+
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>This class defines the standard keys for <code>graph.metadata</code>, tracksdata's
+key-value store for graph-level (as opposed to per-node/per-edge) information.</p>
+<p>Using these constants instead of hardcoded strings helps prevent typos.</p>
+
+
+<p><span class="doc-section-title">Attributes:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+          <b><code><span title="tracksdata.constants.DefaultMetadataKeys.SHAPE">SHAPE</span></code></b>
+              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#str">str</a></code>)
+          –
+          <div class="doc-md-description">
+            <p>Default key for the shape of the dense segmentation the graph was built
+from, as <code>(t, (z), y, x)</code>. Read by <code>GraphArrayView</code> and <code>to_ctc</code> when no
+explicit <code>shape</code> is given.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+          <b><code><span title="tracksdata.constants.DefaultMetadataKeys.SCALE">SCALE</span></code></b>
+              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#str">str</a></code>)
+          –
+          <div class="doc-md-description">
+            <p>Default key for the physical voxel size of the dense segmentation, as
+<code>((z), y, x)</code>, i.e. without the time axis.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+          <b><code><span title="tracksdata.constants.DefaultMetadataKeys.```">```</span></code></b>
+          –
+          <div class="doc-md-description">
+            
+          </div>
+        </li>
+    </ul>
 
 
 
