@@ -1,3 +1,4 @@
+import enum
 from collections.abc import Callable, Sequence
 from typing import Any, Literal, overload
 
@@ -19,6 +20,37 @@ from tracksdata.utils._signal import (
     emit_node_updated_events,
     is_signal_on,
 )
+
+
+class ViewMode(enum.Enum):
+    """How a `GraphView` relates to its root graph.
+
+    Every mutating method on a view writes through to the root either way — the
+    difference is whether the view also receives the root's (or a sibling view's)
+    writes, keeping its local copy current.
+
+    Attributes
+    ----------
+    WRITE_THROUGH
+        The view writes to the root, but the root does not push its writes (or a
+        sibling view's) back into this view. This was `GraphView`'s only behavior
+        before root -> view propagation existed. A view in this mode can still
+        drift arbitrarily far from the root; nothing here declares that a problem.
+    LIVE
+        The view writes to the root, and is registered so the root pushes its own
+        writes (and a sibling view's) back into this view, keeping it current.
+        This costs real, unavoidable work on every root write, proportional to the
+        number of `LIVE` views registered on that root.
+
+        Currently only covers attribute changes (`update_node_attrs`,
+        `update_edge_attrs`, attr-key add/remove) and structural changes made
+        through this same view. A structural change (add/remove node/edge) made
+        directly on the root, or through a *sibling* view, is not yet pushed here
+        - support for that is planned but not yet implemented.
+    """
+
+    WRITE_THROUGH = "write_through"
+    LIVE = "live"
 
 
 class GraphView(MappedGraphMixin, RustWorkXGraph):
@@ -88,6 +120,7 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         root: BaseGraph,
         sync: bool = True,
         *,
+        mode: ViewMode = ViewMode.WRITE_THROUGH,
         node_attr_keys: list[str] | None = None,
         edge_attr_keys: list[str] | None = None,
     ) -> None:
@@ -109,14 +142,21 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         )
         self._edge_map_from_root = self._edge_map_to_root.inverse
 
+        if mode == ViewMode.LIVE and not sync:
+            # See the `sync` setter: LIVE stays current via push registration, and
+            # sync=False would make the root skip snapshots this view still needs.
+            raise ValueError("sync=False is not allowed with mode=ViewMode.LIVE.")
+
         self._root = root
         self._is_root_rx_graph = isinstance(root, RustWorkXGraph)
         self._sync = sync
         self._out_of_sync = False
+        self._mode = mode
 
         # Register with the root so that writes made directly to the root are
         # applied to this view. Held weakly, so no explicit teardown is needed.
-        root._views.add(self)
+        if self._mode == ViewMode.LIVE:
+            root._views.add(self)
 
         # Existing for API compatibility for the SQLGraph generating GraphView,
         # but RXGraph always uses the root graph's attributes and just filtering them
@@ -164,6 +204,14 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
 
     @sync.setter
     def sync(self, value: bool) -> None:
+        # `sync`/`_out_of_sync` predate ViewMode and are still read by the shared
+        # local-write methods (_update_local_node_attrs, _needs_node_attrs, ...)
+        # that both WRITE_THROUGH (its own writes) and LIVE (root/sibling pushes)
+        # now call into. Letting `sync` go False on a LIVE view would make the
+        # root skip snapshots that view still needs, silently going stale despite
+        # being "live". Not allowed.
+        if self._mode == ViewMode.LIVE:
+            raise ValueError("sync is not settable on a ViewMode.LIVE view; it always stays current via push.")
         if value and not self._sync:
             raise ValueError("Cannot sync a graph view that is not synced\nRe-create the graph view.")
         self._sync = value
@@ -309,15 +357,26 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         dtype: pl.DataType | None = None,
         default_value: Any = None,
     ) -> None:
-        # Delegate to root with all parameters (root handles overloading). The root
-        # applies the key back to this view -- and to its sibling views -- through
-        # `_maintain_views_attr_key`, so there is nothing to do locally here.
+        """
+        In `ViewMode.LIVE`, delegates to the root, which applies the key back to
+        this view -- and to its sibling views -- through
+        `_maintain_views_attr_key`. `ViewMode.WRITE_THROUGH` is not registered
+        for that push, so it adds the key to this view's own local copy here
+        too, via the same method (`_add_local_attr_key`) -- the two are
+        otherwise identical, just reached from different callers.
+        """
+        # Delegate to root with all parameters (root handles overloading)
         self._root.add_node_attr_key(key_or_schema, dtype, default_value)
 
+        if self._mode == ViewMode.WRITE_THROUGH:
+            key = key_or_schema.key if isinstance(key_or_schema, AttrSchema) else key_or_schema
+            self._add_local_attr_key(self._root._node_attr_schemas()[key], mode="node")
+
     def remove_node_attr_key(self, key: str) -> None:
-        # See `add_node_attr_key`: the root drops the key from this view -- and from
-        # its sibling views -- through `_maintain_views_remove_attr_key`.
+        """See `add_node_attr_key`."""
         self._root.remove_node_attr_key(key)
+        if self._mode == ViewMode.WRITE_THROUGH:
+            self._remove_local_attr_key(key, mode="node")
 
     def add_edge_attr_key(
         self,
@@ -325,12 +384,18 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         dtype: pl.DataType | None = None,
         default_value: Any = None,
     ) -> None:
-        # See `add_node_attr_key`: the root propagates the key back to this view.
+        """See `add_node_attr_key`."""
+        # Delegate to root with all parameters (root handles overloading)
         self._root.add_edge_attr_key(key_or_schema, dtype, default_value)
 
-    def _apply_root_attr_key(self, schema: AttrSchema, mode: Literal["node", "edge"]) -> None:
+        if self._mode == ViewMode.WRITE_THROUGH:
+            key = key_or_schema.key if isinstance(key_or_schema, AttrSchema) else key_or_schema
+            self._add_local_attr_key(self._root._edge_attr_schemas()[key], mode="edge")
+
+    def _add_local_attr_key(self, schema: AttrSchema, mode: Literal["node", "edge"]) -> None:
         """
-        Absorb a new attribute key registered on the root graph.
+        Record a new attribute key locally and grow this view's own copy of the
+        data with it.
 
         A view that pins an explicit key list has to record the new key there, or
         it keeps reporting a stale schema. Beyond that, when the root is a
@@ -368,14 +433,17 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
                 edge_attr[schema.key] = schema.default_value
 
     def remove_edge_attr_key(self, key: str) -> None:
-        # See `remove_node_attr_key`: the root propagates the removal back here.
+        """See `add_node_attr_key`."""
         self._root.remove_edge_attr_key(key)
+        if self._mode == ViewMode.WRITE_THROUGH:
+            self._remove_local_attr_key(key, mode="edge")
 
-    def _apply_root_remove_attr_key(self, key: str, mode: Literal["node", "edge"]) -> None:
+    def _remove_local_attr_key(self, key: str, mode: Literal["node", "edge"]) -> None:
         """
-        Absorb an attribute key removed from the root graph.
+        Forget a removed attribute key locally and drop it from this view's own
+        copy of the data.
 
-        The mirror of `_apply_root_attr_key`: a view pinning an explicit key list
+        The mirror of `_add_local_attr_key`: a view pinning an explicit key list
         has to forget the key there, or it keeps reporting a column that no longer
         exists. Beyond that, when the root is a rustworkx graph the view shares the
         root's attribute dicts, so the column is already gone from every row;
@@ -989,18 +1057,54 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         """
         Update node attributes through this view.
 
-        Delegates to the root, which applies the change back to this view (and any
-        sibling views) through the normal maintenance path, so there is a single
-        implementation of "absorb a node attribute change".
+        Writes to the root either way. `ViewMode.LIVE` then relies on the root's
+        normal maintenance path (`_maintain_views_node_attrs`) to write the
+        change back into this view (and any sibling views) and emit this view's
+        signal -- the same tail end root-initiated updates use.
+        `ViewMode.WRITE_THROUGH` is not registered for that push, so it captures
+        the before/after snapshot itself and calls the same tail end
+        (`_update_local_node_attrs`) directly, rather than duplicating it.
+
+        Root's own `node_updated` fires normally, unblocked, in both modes -- a
+        `WRITE_THROUGH` write no longer forces root and view to agree at
+        signal-emission time (the same relaxation `ViewMode.LIVE` already
+        accepts; see `scratch/graphview-signal-replay-issue.md`).
         """
         if node_ids is None:
             node_ids = self.node_ids()
         else:
             node_ids = list(node_ids)
 
+        if self._mode != ViewMode.WRITE_THROUGH:
+            self._root.update_node_attrs(node_ids=node_ids, attrs=attrs)
+            return
+
+        # Same policy _views_need_node_attrs uses for a root-initiated update: old
+        # values are only needed to emit node_updated, new values are additionally
+        # needed to write the local mirror through for a non-rx root.
+        needs_old, needs_new = self._needs_node_attrs()
+
+        def _snapshot() -> dict[int, dict[str, Any]]:
+            return (
+                self._root.filter(node_ids=node_ids)
+                .node_attrs()
+                .rows_by_key(key=DEFAULT_ATTR_KEYS.NODE_ID, named=True, unique=True, include_key=True)
+            )
+
+        old_attrs_by_id = _snapshot() if needs_old else None
+
         self._root.update_node_attrs(node_ids=node_ids, attrs=attrs)
 
-    def _needs_root_node_attrs(self) -> tuple[bool, bool]:
+        new_attrs_by_id = _snapshot() if needs_new else None
+
+        self._update_local_node_attrs(
+            node_ids=node_ids,
+            old_attrs_by_id=old_attrs_by_id,
+            new_attrs_by_id=new_attrs_by_id,
+            changed_keys=set(attrs.keys()),
+        )
+
+    def _needs_node_attrs(self) -> tuple[bool, bool]:
         """
         Whether this view needs before/after snapshots of a root node update.
 
@@ -1020,7 +1124,7 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         writes_through = self.sync and not self._is_root_rx_graph
         return listening, listening or writes_through
 
-    def _apply_root_node_attrs(
+    def _update_local_node_attrs(
         self,
         *,
         node_ids: Sequence[int],
@@ -1029,12 +1133,13 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         changed_keys: set[str],
     ) -> None:
         """
-        Absorb a node attribute update made directly on the root graph.
+        Write a node attribute update through to this view's own local copy,
+        then emit the view's own ``node_updated`` signal for the nodes it
+        contains.
 
-        Brings this view up to date and *then* emits its own ``node_updated``
-        signal for the nodes it contains. Keeping the view consistent with its
-        root is an invariant, so the local update happens whether or not
-        anything is listening — only the emission is conditional.
+        Keeping the view's local copy consistent with the values now on root is
+        an invariant, so the local write happens whether or not anything is
+        listening — only the emission is conditional.
 
         Parameters
         ----------
@@ -1106,25 +1211,36 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         """
         Update edge attributes through this view.
 
-        Delegates to the root, which applies the change back to this view (and any
-        sibling views) through the normal maintenance path.
+        Writes to the root either way. `ViewMode.LIVE` then relies on the root's
+        normal maintenance path (`_maintain_views_edge_attrs`) to write the
+        change back into this view (and any sibling views).
+        `ViewMode.WRITE_THROUGH` is not registered for that push, so it calls the
+        same method (`_update_local_edge_attrs`) directly -- the two are
+        otherwise identical, just reached from different callers.
         """
         if edge_ids is None:
             edge_ids = self.edge_ids()
+        else:
+            edge_ids = list(edge_ids)
 
         self._root.update_edge_attrs(
             edge_ids=edge_ids,
             attrs=attrs,
         )
 
-    def _apply_root_edge_attrs(
+        if self._mode == ViewMode.WRITE_THROUGH:
+            self._update_local_edge_attrs(edge_ids=edge_ids, attrs=attrs)
+
+    def _update_local_edge_attrs(
         self,
         *,
         edge_ids: Sequence[int],
         attrs: dict[str, Any],
     ) -> None:
         """
-        Absorb an edge attribute update made directly on the root graph.
+        Write an edge attribute update through to this view's own local copy.
+        No-op when the view shares the root's attribute dicts by reference
+        (an rx-rooted view), since the values are already current there.
 
         Parameters
         ----------
@@ -1149,7 +1265,7 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
             self._out_of_sync = True
             return
 
-        # See `_apply_root_node_attrs`: keys this view does not track have no
+        # See `_update_local_node_attrs`: keys this view does not track have no
         # local column and are skipped.
         local_keys = set(self.edge_attr_keys(return_ids=True))
         positions = [i for i, _ in in_view]

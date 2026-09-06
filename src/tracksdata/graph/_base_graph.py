@@ -169,7 +169,7 @@ class BaseGraph(abc.ABC):
         """
         needs_old = needs_new = False
         for view in self._views:
-            view_old, view_new = view._needs_root_node_attrs()
+            view_old, view_new = view._needs_node_attrs()
             needs_old |= view_old
             needs_new |= view_new
             if needs_old and needs_new:
@@ -198,7 +198,7 @@ class BaseGraph(abc.ABC):
         ids, which is what views map from.
         """
         for view in self._views:
-            view._apply_root_node_attrs(
+            view._update_local_node_attrs(
                 node_ids=node_ids,
                 old_attrs_by_id=old_attrs_by_id,
                 new_attrs_by_id=new_attrs_by_id,
@@ -220,7 +220,7 @@ class BaseGraph(abc.ABC):
         `edge_ids` are this graph's own edge ids, which is what views map from.
         """
         for view in self._views:
-            view._apply_root_edge_attrs(edge_ids=edge_ids, attrs=attrs)
+            view._update_local_edge_attrs(edge_ids=edge_ids, attrs=attrs)
 
     def _maintain_views_attr_key(self, schema: AttrSchema, mode: Literal["node", "edge"]) -> None:
         """
@@ -236,7 +236,7 @@ class BaseGraph(abc.ABC):
         once per row of a write.
         """
         for view in self._views:
-            view._apply_root_attr_key(schema, mode)
+            view._add_local_attr_key(schema, mode)
 
     def _maintain_views_remove_attr_key(self, key: str, mode: Literal["node", "edge"]) -> None:
         """
@@ -249,7 +249,7 @@ class BaseGraph(abc.ABC):
         longer exists on the root.
         """
         for view in self._views:
-            view._apply_root_remove_attr_key(key, mode)
+            view._remove_local_attr_key(key, mode)
 
     @staticmethod
     def _validate_attributes(
