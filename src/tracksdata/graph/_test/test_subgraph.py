@@ -12,7 +12,7 @@ import pytest
 
 from tracksdata.attrs import EdgeAttr, NodeAttr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
-from tracksdata.graph import BaseGraph, GraphView, SQLGraph
+from tracksdata.graph import BaseGraph, GraphView, RustWorkXGraph, SQLGraph, ViewMode
 from tracksdata.graph._mapped_graph_mixin import MappedGraphMixin
 from tracksdata.utils._logging import LOG
 
@@ -2076,14 +2076,20 @@ def _root_with_two_connected_nodes(graph_backend: BaseGraph) -> BaseGraph:
     return graph_backend
 
 
-def test_update_root_node_key_outside_view_attr_keys(graph_backend: BaseGraph) -> None:
+@pytest.mark.parametrize("mode", [ViewMode.WRITE_THROUGH, ViewMode.LIVE])
+def test_update_root_node_key_outside_view_attr_keys(graph_backend: BaseGraph, mode: ViewMode) -> None:
     """A view tracking a subset of keys tolerates root updates to the keys it excluded.
 
     A view built with an explicit `node_attr_keys` has no local column for the
-    keys it left out, so the update must not be propagated into it.
+    keys it left out, so the update must not be propagated into it, in either
+    mode. Whether a root update to a key the view *does* track reaches it is
+    where the two modes would normally differ -- except an rx-family root's
+    view shares its attribute dicts by reference regardless of mode, so it
+    stays current either way; only a non-rx (SQL) root actually needs `LIVE`'s
+    push for this.
     """
     root = _root_with_two_connected_nodes(graph_backend)
-    view = root.filter().subgraph(node_attr_keys=["area"])
+    view = root.filter().subgraph(node_attr_keys=["area"], mode=mode)
 
     assert "bar" not in view.node_attr_keys()
 
@@ -2091,15 +2097,20 @@ def test_update_root_node_key_outside_view_attr_keys(graph_backend: BaseGraph) -
 
     assert root.node_attrs(attr_keys=["bar"])["bar"].to_list() == [9.0, 2.0]
     assert "bar" not in view.node_attr_keys()
-    # the keys the view does track are still maintained
+
     root.update_node_attrs(attrs={"area": [7.0]}, node_ids=[root.node_ids()[0]])
-    assert view.node_attrs(attr_keys=["area"])["area"].to_list() == [7.0, 2.0]
+    stays_current = mode == ViewMode.LIVE or isinstance(root, RustWorkXGraph)
+    if stays_current:
+        assert view.node_attrs(attr_keys=["area"])["area"].to_list() == [7.0, 2.0]
+    else:
+        assert view.node_attrs(attr_keys=["area"])["area"].to_list() == [1.0, 2.0]
 
 
-def test_update_root_edge_key_outside_view_attr_keys(graph_backend: BaseGraph) -> None:
+@pytest.mark.parametrize("mode", [ViewMode.WRITE_THROUGH, ViewMode.LIVE])
+def test_update_root_edge_key_outside_view_attr_keys(graph_backend: BaseGraph, mode: ViewMode) -> None:
     """The edge counterpart of `test_update_root_node_key_outside_view_attr_keys`."""
     root = _root_with_two_connected_nodes(graph_backend)
-    view = root.filter().subgraph(edge_attr_keys=["weight"])
+    view = root.filter().subgraph(edge_attr_keys=["weight"], mode=mode)
 
     assert "cost" not in view.edge_attr_keys()
 
@@ -2107,104 +2118,140 @@ def test_update_root_edge_key_outside_view_attr_keys(graph_backend: BaseGraph) -
 
     assert root.edge_attrs(attr_keys=["cost"])["cost"].to_list() == [9.0]
     assert "cost" not in view.edge_attr_keys()
-    # the keys the view does track are still maintained
+
     root.update_edge_attrs(attrs={"weight": [7.0]}, edge_ids=[root.edge_ids()[0]])
-    assert view.edge_attrs(attr_keys=["weight"])["weight"].to_list() == [7.0]
+    stays_current = mode == ViewMode.LIVE or isinstance(root, RustWorkXGraph)
+    if stays_current:
+        assert view.edge_attrs(attr_keys=["weight"])["weight"].to_list() == [7.0]
+    else:
+        assert view.edge_attrs(attr_keys=["weight"])["weight"].to_list() == [1.0]
 
 
-def test_add_node_attr_key_on_root_reaches_live_view(graph_backend: BaseGraph) -> None:
+@pytest.mark.parametrize("mode", [ViewMode.WRITE_THROUGH, ViewMode.LIVE])
+def test_add_node_attr_key_on_root_reaches_live_view(graph_backend: BaseGraph, mode: ViewMode) -> None:
     """A key registered on the root must reach the views already derived from it.
 
     A rustworkx-rooted view reports the root's keys and shares its attribute
-    dicts, so it picks the key up for free. A SQLGraph-rooted view holds its own
-    copy of both and has to be told.
+    dicts, so it picks the key up for free regardless of mode. A SQLGraph-rooted
+    view holds its own copy of both and needs `LIVE`'s push to be told.
     """
     root = _root_with_two_connected_nodes(graph_backend)
-    view = root.filter().subgraph()
+    view = root.filter().subgraph(mode=mode)
 
     root.add_node_attr_key("foo", default_value=-1, dtype=pl.Int64)
 
+    stays_current = mode == ViewMode.LIVE or isinstance(root, RustWorkXGraph)
     assert "foo" in root.node_attr_keys()
-    assert "foo" in view.node_attr_keys()
-    assert view.node_attrs(attr_keys=["foo"])["foo"].to_list() == [-1, -1]
+    assert ("foo" in view.node_attr_keys()) == stays_current
 
-    # the view's local store accepts writes to the new key, on either side
-    root.update_node_attrs(attrs={"foo": [7]}, node_ids=[root.node_ids()[0]])
-    assert view.node_attrs(attr_keys=["foo"])["foo"].to_list() == [7, -1]
+    if stays_current:
+        assert view.node_attrs(attr_keys=["foo"])["foo"].to_list() == [-1, -1]
+        # the view's local store accepts writes to the new key, on either side
+        root.update_node_attrs(attrs={"foo": [7]}, node_ids=[root.node_ids()[0]])
+        assert view.node_attrs(attr_keys=["foo"])["foo"].to_list() == [7, -1]
 
 
-def test_add_edge_attr_key_on_root_reaches_live_view(graph_backend: BaseGraph) -> None:
+@pytest.mark.parametrize("mode", [ViewMode.WRITE_THROUGH, ViewMode.LIVE])
+def test_add_edge_attr_key_on_root_reaches_live_view(graph_backend: BaseGraph, mode: ViewMode) -> None:
     """The edge counterpart of `test_add_node_attr_key_on_root_reaches_live_view`."""
     root = _root_with_two_connected_nodes(graph_backend)
-    view = root.filter().subgraph()
+    view = root.filter().subgraph(mode=mode)
 
     root.add_edge_attr_key("w", default_value=-1.0, dtype=pl.Float64)
 
+    stays_current = mode == ViewMode.LIVE or isinstance(root, RustWorkXGraph)
     assert "w" in root.edge_attr_keys()
-    assert "w" in view.edge_attr_keys()
-    assert view.edge_attrs(attr_keys=["w"])["w"].to_list() == [-1.0]
+    assert ("w" in view.edge_attr_keys()) == stays_current
 
-    root.update_edge_attrs(attrs={"w": [1.5]}, edge_ids=[root.edge_ids()[0]])
-    assert view.edge_attrs(attr_keys=["w"])["w"].to_list() == [1.5]
+    if stays_current:
+        assert view.edge_attrs(attr_keys=["w"])["w"].to_list() == [-1.0]
+        root.update_edge_attrs(attrs={"w": [1.5]}, edge_ids=[root.edge_ids()[0]])
+        assert view.edge_attrs(attr_keys=["w"])["w"].to_list() == [1.5]
 
 
-def test_add_attr_key_on_view_reaches_sibling_view(graph_backend: BaseGraph) -> None:
-    """Registering through one view must reach the other views of the same root."""
+@pytest.mark.parametrize("mode", [ViewMode.WRITE_THROUGH, ViewMode.LIVE])
+def test_add_attr_key_on_view_reaches_sibling_view(graph_backend: BaseGraph, mode: ViewMode) -> None:
+    """Registering through one view must reach the other views of the same root.
+
+    Unlike the root-initiated cases above, `view_a`'s write always reaches
+    root (every mode writes through) -- what varies is whether the *sibling*
+    `view_b` finds out, which needs either shared attribute dicts (an
+    rx-family root) or `view_b` being registered for `LIVE`'s push.
+    """
     root = _root_with_two_connected_nodes(graph_backend)
-    view_a = root.filter().subgraph()
-    view_b = root.filter().subgraph()
+    view_a = root.filter().subgraph(mode=mode)
+    view_b = root.filter().subgraph(mode=mode)
 
     view_a.add_node_attr_key("foo", default_value=-1, dtype=pl.Int64)
     view_a.add_edge_attr_key("w", default_value=-1.0, dtype=pl.Float64)
 
-    assert "foo" in view_b.node_attr_keys()
-    assert "w" in view_b.edge_attr_keys()
-    assert view_b.node_attrs(attr_keys=["foo"])["foo"].to_list() == [-1, -1]
-    assert view_b.edge_attrs(attr_keys=["w"])["w"].to_list() == [-1.0]
+    assert "foo" in root.node_attr_keys()
+    assert "w" in root.edge_attr_keys()
+
+    stays_current = mode == ViewMode.LIVE or isinstance(root, RustWorkXGraph)
+    assert ("foo" in view_b.node_attr_keys()) == stays_current
+    assert ("w" in view_b.edge_attr_keys()) == stays_current
+
+    if stays_current:
+        assert view_b.node_attrs(attr_keys=["foo"])["foo"].to_list() == [-1, -1]
+        assert view_b.edge_attrs(attr_keys=["w"])["w"].to_list() == [-1.0]
 
 
-def test_remove_node_attr_key_on_root_reaches_live_view(graph_backend: BaseGraph) -> None:
+@pytest.mark.parametrize("mode", [ViewMode.WRITE_THROUGH, ViewMode.LIVE])
+def test_remove_node_attr_key_on_root_reaches_live_view(graph_backend: BaseGraph, mode: ViewMode) -> None:
     """The remove counterpart of `test_add_node_attr_key_on_root_reaches_live_view`.
 
     Dropping a key on the root must drop it from the views already derived from
-    it, both from the reported schema and from the view's local attribute store.
+    it. An rx-family view leaves `node_attr_keys` unset (`subgraph()` only pins
+    it when the caller asks), so its schema always delegates straight to root
+    regardless of mode -- but `SQLGraph.subgraph()` always materializes an
+    explicit key list up front even when the caller didn't ask for one, so a
+    SQL-rooted view is *always* effectively pinned and needs `LIVE`'s push for
+    root's removal to reach its schema at all.
     """
     root = _root_with_two_connected_nodes(graph_backend)
-    view = root.filter().subgraph()
+    view = root.filter().subgraph(mode=mode)
 
     root.remove_node_attr_key("bar")
 
+    stays_current = mode == ViewMode.LIVE or isinstance(root, RustWorkXGraph)
     assert "bar" not in root.node_attr_keys()
-    assert "bar" not in view.node_attr_keys()
-    with pytest.raises(KeyError):
-        view.node_attrs(attr_keys=["bar"])
-    # the keys that remain are untouched
-    assert view.node_attrs(attr_keys=["area"])["area"].to_list() == [1.0, 2.0]
+    assert ("bar" not in view.node_attr_keys()) == stays_current
+
+    if stays_current:
+        with pytest.raises(KeyError):
+            view.node_attrs(attr_keys=["bar"])
+        assert view.node_attrs(attr_keys=["area"])["area"].to_list() == [1.0, 2.0]
 
 
-def test_remove_edge_attr_key_on_root_reaches_live_view(graph_backend: BaseGraph) -> None:
+@pytest.mark.parametrize("mode", [ViewMode.WRITE_THROUGH, ViewMode.LIVE])
+def test_remove_edge_attr_key_on_root_reaches_live_view(graph_backend: BaseGraph, mode: ViewMode) -> None:
     """The edge counterpart of `test_remove_node_attr_key_on_root_reaches_live_view`."""
     root = _root_with_two_connected_nodes(graph_backend)
-    view = root.filter().subgraph()
+    view = root.filter().subgraph(mode=mode)
 
     root.remove_edge_attr_key("cost")
 
+    stays_current = mode == ViewMode.LIVE or isinstance(root, RustWorkXGraph)
     assert "cost" not in root.edge_attr_keys()
-    assert "cost" not in view.edge_attr_keys()
-    with pytest.raises(KeyError):
-        view.edge_attrs(attr_keys=["cost"])
-    assert view.edge_attrs(attr_keys=["weight"])["weight"].to_list() == [1.0]
+    assert ("cost" not in view.edge_attr_keys()) == stays_current
+
+    if stays_current:
+        with pytest.raises(KeyError):
+            view.edge_attrs(attr_keys=["cost"])
+        assert view.edge_attrs(attr_keys=["weight"])["weight"].to_list() == [1.0]
 
 
-def test_remove_node_attr_key_on_root_updates_pinned_view_keys(graph_backend: BaseGraph) -> None:
+@pytest.mark.parametrize("mode", [ViewMode.WRITE_THROUGH, ViewMode.LIVE])
+def test_remove_node_attr_key_on_root_updates_pinned_view_keys(graph_backend: BaseGraph, mode: ViewMode) -> None:
     """A view pinning an explicit key list must not keep reporting a removed key.
 
-    The pinned list is the view's own copy of the schema, so a root removal has
-    to be applied to it -- otherwise the view advertises a column that no longer
-    exists anywhere.
+    The pinned list is the view's own local state (not shared with root even
+    for an rx-family root), so a root removal only reaches it in `LIVE` mode --
+    otherwise the view advertises a column that no longer exists anywhere.
     """
     root = _root_with_two_connected_nodes(graph_backend)
-    view = root.filter().subgraph(node_attr_keys=["area", "bar"], edge_attr_keys=["weight", "cost"])
+    view = root.filter().subgraph(node_attr_keys=["area", "bar"], edge_attr_keys=["weight", "cost"], mode=mode)
 
     assert "bar" in view.node_attr_keys()
     assert "cost" in view.edge_attr_keys()
@@ -2212,32 +2259,44 @@ def test_remove_node_attr_key_on_root_updates_pinned_view_keys(graph_backend: Ba
     root.remove_node_attr_key("bar")
     root.remove_edge_attr_key("cost")
 
-    assert "bar" not in view.node_attr_keys()
-    assert "cost" not in view.edge_attr_keys()
-    # node_attrs() with no attr_keys uses the pinned list, so a stale entry there
-    # surfaces as a failure to materialize the view at all
-    assert "bar" not in view.node_attrs().columns
-    assert "cost" not in view.edge_attrs().columns
+    if mode == ViewMode.LIVE:
+        assert "bar" not in view.node_attr_keys()
+        assert "cost" not in view.edge_attr_keys()
+        # node_attrs() with no attr_keys uses the pinned list, so a stale entry
+        # there surfaces as a failure to materialize the view at all
+        assert "bar" not in view.node_attrs().columns
+        assert "cost" not in view.edge_attrs().columns
+    else:
+        # WRITE_THROUGH is not registered for root's push, so the pinned list
+        # (this view's own local state) still advertises the removed key
+        assert "bar" in view.node_attr_keys()
+        assert "cost" in view.edge_attr_keys()
 
 
-def test_remove_attr_key_on_view_reaches_sibling_view(graph_backend: BaseGraph) -> None:
+@pytest.mark.parametrize("mode", [ViewMode.WRITE_THROUGH, ViewMode.LIVE])
+def test_remove_attr_key_on_view_reaches_sibling_view(graph_backend: BaseGraph, mode: ViewMode) -> None:
     """The remove counterpart of `test_add_attr_key_on_view_reaches_sibling_view`.
 
-    Removing through one view propagates up to the root, so it must also reach
-    the root's other views.
+    Removing through one view always propagates up to the root (every mode
+    writes through); whether the *sibling* view finds out follows the same
+    rx-delegates/SQL-always-pinned rule as
+    `test_remove_node_attr_key_on_root_reaches_live_view`.
     """
     root = _root_with_two_connected_nodes(graph_backend)
-    view_a = root.filter().subgraph()
-    view_b = root.filter().subgraph()
+    view_a = root.filter().subgraph(mode=mode)
+    view_b = root.filter().subgraph(mode=mode)
 
     view_a.remove_node_attr_key("bar")
     view_a.remove_edge_attr_key("cost")
 
+    stays_current = mode == ViewMode.LIVE or isinstance(root, RustWorkXGraph)
     assert "bar" not in root.node_attr_keys()
     assert "cost" not in root.edge_attr_keys()
-    assert "bar" not in view_b.node_attr_keys()
-    assert "cost" not in view_b.edge_attr_keys()
-    with pytest.raises(KeyError):
-        view_b.node_attrs(attr_keys=["bar"])
-    with pytest.raises(KeyError):
-        view_b.edge_attrs(attr_keys=["cost"])
+    assert ("bar" not in view_b.node_attr_keys()) == stays_current
+    assert ("cost" not in view_b.edge_attr_keys()) == stays_current
+
+    if stays_current:
+        with pytest.raises(KeyError):
+            view_b.node_attrs(attr_keys=["bar"])
+        with pytest.raises(KeyError):
+            view_b.edge_attrs(attr_keys=["cost"])

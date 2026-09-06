@@ -31,7 +31,7 @@ from tracksdata.utils._signal import (
 )
 
 if TYPE_CHECKING:
-    from tracksdata.graph._graph_view import GraphView
+    from tracksdata.graph._graph_view import GraphView, ViewMode
 
 
 def _pop_time_eq(
@@ -366,8 +366,10 @@ class RXFilter(BaseFilter):
         self,
         node_attr_keys: Sequence[str] | None = None,
         edge_attr_keys: Sequence[str] | None = None,
+        *,
+        mode: "ViewMode | None" = None,
     ) -> "GraphView":
-        from tracksdata.graph._graph_view import GraphView
+        from tracksdata.graph._graph_view import GraphView, ViewMode
 
         node_ids = self.node_ids()
 
@@ -382,6 +384,7 @@ class RXFilter(BaseFilter):
             rx_graph,
             node_map_to_root=dict(node_map.items()),
             root=self._graph,
+            mode=mode if mode is not None else ViewMode.WRITE_THROUGH,
             node_attr_keys=node_attr_keys,
             edge_attr_keys=edge_attr_keys,
         )

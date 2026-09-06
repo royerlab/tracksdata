@@ -23,7 +23,7 @@ import pytest
 
 from tracksdata.attrs import NodeAttr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
-from tracksdata.graph import BaseGraph, RustWorkXGraph, SQLGraph
+from tracksdata.graph import BaseGraph, RustWorkXGraph, SQLGraph, ViewMode
 from tracksdata.graph._rustworkx_graph import IndexedRXGraph
 
 
@@ -38,7 +38,7 @@ def test_node_signals_fire_after_the_emitting_graph_is_updated(graph_backend: Ba
     graph_backend.add_node_attr_key("x", pl.Float64)
     graph_backend.add_node({"t": 0, "x": 0.0})
 
-    view = graph_backend.filter().subgraph()
+    view = graph_backend.filter().subgraph(mode=ViewMode.LIVE)
     observations: list = []
 
     def make_slot(graph: BaseGraph, source: str, signal: str):
@@ -81,7 +81,7 @@ def test_update_node_attrs_signal_reflects_the_emitting_graph(graph_backend: Bas
     graph_backend.add_node_attr_key("x", pl.Float64)
     node_id = graph_backend.add_node({"t": 0, "x": 0.0})
 
-    view = graph_backend.filter().subgraph()
+    view = graph_backend.filter().subgraph(mode=ViewMode.LIVE)
     observations: list = []
 
     def attr_value(graph: BaseGraph, nid: int) -> float:
@@ -167,7 +167,7 @@ def test_sql_update_avoids_post_update_readback(
     graph = SQLGraph("sqlite", ":memory:")
     graph.add_node_attr_key("x", pl.Float64)
     node_id = graph.add_node({"t": 0, "x": 0.0})
-    view = graph.filter().subgraph()
+    view = graph.filter().subgraph(mode=ViewMode.LIVE)
     reads = _count_sql_reads(monkeypatch, graph)
 
     target = view if update_through_view else graph
@@ -185,7 +185,7 @@ def test_sql_update_listener_uses_only_pre_update_read(
     graph.add_node_attr_key("x", pl.Float64)
     graph.add_node_attr_key("label", pl.String)
     node_id = graph.add_node({"t": 0, "x": 0.0, "label": "unchanged"})
-    view = graph.filter().subgraph()
+    view = graph.filter().subgraph(mode=ViewMode.LIVE)
     view_calls = _record_updates(view)
     reads = _count_sql_reads(monkeypatch, graph)
 
@@ -211,7 +211,7 @@ def test_sql_update_derives_nested_struct_payload() -> None:
     )
     graph.add_node_attr_key("measurement", dtype)
     node_id = graph.add_node({"t": 0, "measurement": {"count": 1, "details": {"score": 1.0, "label": "old"}}})
-    view = graph.filter().subgraph()
+    view = graph.filter().subgraph(mode=ViewMode.LIVE)
     view_calls = _record_updates(view)
 
     graph.update_node_attrs(
@@ -234,7 +234,7 @@ def test_root_update_is_visible_in_view(graph_backend: BaseGraph) -> None:
     graph_backend.add_node_attr_key("x", pl.Float64)
     node_id = graph_backend.add_node({"t": 0, "x": 0.0})
 
-    view = graph_backend.filter().subgraph()
+    view = graph_backend.filter().subgraph(mode=ViewMode.LIVE)
 
     graph_backend.update_node_attrs(attrs={"x": 7.0}, node_ids=[node_id])
 
@@ -247,7 +247,7 @@ def test_root_update_emits_view_signal(graph_backend: BaseGraph) -> None:
     graph_backend.add_node_attr_key("x", pl.Float64)
     node_id = graph_backend.add_node({"t": 0, "x": 0.0})
 
-    view = graph_backend.filter().subgraph()
+    view = graph_backend.filter().subgraph(mode=ViewMode.LIVE)
     view_calls = _record_updates(view)
 
     graph_backend.update_node_attrs(attrs={"x": 3.5}, node_ids=[node_id])
@@ -269,7 +269,7 @@ def test_root_update_reports_view_node_ids(graph_backend: BaseGraph) -> None:
     graph_backend.add_node_attr_key("x", pl.Float64)
     node_ids = [graph_backend.add_node({"t": t, "x": 0.0}) for t in range(3)]
 
-    view = graph_backend.filter().subgraph()
+    view = graph_backend.filter().subgraph(mode=ViewMode.LIVE)
     view_calls = _record_updates(view)
 
     graph_backend.update_node_attrs(attrs={"x": 1.0}, node_ids=[node_ids[1]])
@@ -288,7 +288,7 @@ def test_root_update_outside_view_does_not_emit(graph_backend: BaseGraph) -> Non
     inside = graph_backend.add_node({"t": 0, "x": 0.0})
     outside = graph_backend.add_node({"t": 5, "x": 0.0})
 
-    view = graph_backend.filter(node_ids=[inside]).subgraph()
+    view = graph_backend.filter(node_ids=[inside]).subgraph(mode=ViewMode.LIVE)
     assert not view.has_node(outside)
 
     view_calls = _record_updates(view)
@@ -304,7 +304,7 @@ def test_root_update_mixed_batch_filters_to_view_nodes(graph_backend: BaseGraph)
     inside = graph_backend.add_node({"t": 0, "x": 0.0})
     outside = graph_backend.add_node({"t": 5, "x": 0.0})
 
-    view = graph_backend.filter(node_ids=[inside]).subgraph()
+    view = graph_backend.filter(node_ids=[inside]).subgraph(mode=ViewMode.LIVE)
     view_calls = _record_updates(view)
 
     graph_backend.update_node_attrs(attrs={"x": 4.0}, node_ids=[inside, outside])
@@ -323,7 +323,7 @@ def test_root_update_sequence_values_map_per_node(graph_backend: BaseGraph) -> N
     first = graph_backend.add_node({"t": 0, "x": 0.0})
     second = graph_backend.add_node({"t": 1, "x": 0.0})
 
-    view = graph_backend.filter().subgraph()
+    view = graph_backend.filter().subgraph(mode=ViewMode.LIVE)
     view_calls = _record_updates(view)
 
     graph_backend.update_node_attrs(attrs={"x": [11.0, 22.0]}, node_ids=[first, second])
@@ -342,9 +342,9 @@ def test_root_update_notifies_multiple_sibling_views(graph_backend: BaseGraph) -
     shared = graph_backend.add_node({"t": 0, "x": 0.0})
     other = graph_backend.add_node({"t": 5, "x": 0.0})
 
-    view_a = graph_backend.filter().subgraph()
-    view_b = graph_backend.filter(node_ids=[shared]).subgraph()
-    view_c = graph_backend.filter(node_ids=[other]).subgraph()
+    view_a = graph_backend.filter().subgraph(mode=ViewMode.LIVE)
+    view_b = graph_backend.filter(node_ids=[shared]).subgraph(mode=ViewMode.LIVE)
+    view_c = graph_backend.filter(node_ids=[other]).subgraph(mode=ViewMode.LIVE)
 
     calls_a = _record_updates(view_a)
     calls_b = _record_updates(view_b)
@@ -366,7 +366,7 @@ def test_view_write_emits_exactly_once_on_each_graph(graph_backend: BaseGraph) -
     graph_backend.add_node_attr_key("x", pl.Float64)
     node_id = graph_backend.add_node({"t": 0, "x": 0.0})
 
-    view = graph_backend.filter().subgraph()
+    view = graph_backend.filter().subgraph(mode=ViewMode.LIVE)
     root_calls = _record_updates(graph_backend)
     view_calls = _record_updates(view)
 
@@ -382,7 +382,7 @@ def test_view_is_reregistered_after_writing_through_it(graph_backend: BaseGraph)
     graph_backend.add_node_attr_key("x", pl.Float64)
     node_id = graph_backend.add_node({"t": 0, "x": 0.0})
 
-    view = graph_backend.filter().subgraph()
+    view = graph_backend.filter().subgraph(mode=ViewMode.LIVE)
 
     # write through the view first, which temporarily unregisters it
     view.update_node_attrs(attrs={"x": 1.0}, node_ids=[node_id])
@@ -400,7 +400,7 @@ def test_root_update_with_no_view_listener_is_harmless(graph_backend: BaseGraph)
     graph_backend.add_node_attr_key("x", pl.Float64)
     node_id = graph_backend.add_node({"t": 0, "x": 0.0})
 
-    view = graph_backend.filter().subgraph()
+    view = graph_backend.filter().subgraph(mode=ViewMode.LIVE)
 
     graph_backend.update_node_attrs(attrs={"x": 5.0}, node_ids=[node_id])
 
@@ -412,8 +412,8 @@ def test_nested_view_receives_root_updates(graph_backend: BaseGraph) -> None:
     graph_backend.add_node_attr_key("x", pl.Float64)
     node_id = graph_backend.add_node({"t": 0, "x": 0.0})
 
-    outer = graph_backend.filter().subgraph()
-    inner = outer.filter().subgraph()
+    outer = graph_backend.filter().subgraph(mode=ViewMode.LIVE)
+    inner = outer.filter().subgraph(mode=ViewMode.LIVE)
 
     outer_calls = _record_updates(outer)
     inner_calls = _record_updates(inner)
@@ -434,7 +434,7 @@ def test_unreferenced_view_is_released(graph_backend: BaseGraph) -> None:
     graph_backend.add_node_attr_key("x", pl.Float64)
     node_id = graph_backend.add_node({"t": 0, "x": 0.0})
 
-    view = graph_backend.filter().subgraph()
+    view = graph_backend.filter().subgraph(mode=ViewMode.LIVE)
     assert len(graph_backend._views) == 1
 
     del view
@@ -452,7 +452,7 @@ def test_referenced_view_is_kept_registered(graph_backend: BaseGraph) -> None:
     graph_backend.add_node_attr_key("x", pl.Float64)
     node_id = graph_backend.add_node({"t": 0, "x": 0.0})
 
-    view = graph_backend.filter().subgraph()
+    view = graph_backend.filter().subgraph(mode=ViewMode.LIVE)
     gc.collect()
 
     assert len(graph_backend._views) == 1, "referenced view was dropped"
@@ -467,7 +467,7 @@ def test_view_registry_survives_pickling(graph_class: type[BaseGraph]) -> None:
     graph = graph_class()
     graph.add_node_attr_key("x", pl.Float64)
     node_id = graph.add_node({"t": 0, "x": 0.0})
-    view = graph.filter().subgraph()
+    view = graph.filter().subgraph(mode=ViewMode.LIVE)
 
     restored_root = pickle.loads(pickle.dumps(graph))
     assert restored_root.has_node(node_id)
@@ -505,7 +505,7 @@ def test_root_edge_update_is_visible_in_view(graph_backend: BaseGraph) -> None:
     """An edge attribute written on the root must be readable through the view."""
     edge_id, _ = _graph_with_edge(graph_backend)
 
-    view = graph_backend.filter().subgraph()
+    view = graph_backend.filter().subgraph(mode=ViewMode.LIVE)
 
     graph_backend.update_edge_attrs(attrs={"w": 9.0}, edge_ids=[edge_id])
 
@@ -517,7 +517,7 @@ def test_root_edge_update_all_edges_is_visible_in_view(graph_backend: BaseGraph)
     """`edge_ids=None` means all edges, and must reach the view too."""
     edge_id, other_id = _graph_with_edge(graph_backend)
 
-    view = graph_backend.filter().subgraph()
+    view = graph_backend.filter().subgraph(mode=ViewMode.LIVE)
 
     graph_backend.update_edge_attrs(attrs={"w": 4.0})
 
@@ -529,7 +529,7 @@ def test_root_edge_update_per_edge_values_reach_view(graph_backend: BaseGraph) -
     """Per-edge sequence values must land on the matching edges in the view."""
     edge_id, other_id = _graph_with_edge(graph_backend)
 
-    view = graph_backend.filter().subgraph()
+    view = graph_backend.filter().subgraph(mode=ViewMode.LIVE)
 
     graph_backend.update_edge_attrs(attrs={"w": [11.0, 22.0]}, edge_ids=[edge_id, other_id])
 
@@ -541,7 +541,7 @@ def test_view_edge_write_is_applied_once(graph_backend: BaseGraph) -> None:
     """Writing an edge through the view must reach both graphs exactly once."""
     edge_id, _ = _graph_with_edge(graph_backend)
 
-    view = graph_backend.filter().subgraph()
+    view = graph_backend.filter().subgraph(mode=ViewMode.LIVE)
 
     view.update_edge_attrs(attrs={"w": 3.0}, edge_ids=[edge_id])
 
@@ -553,8 +553,8 @@ def test_root_edge_update_notifies_multiple_views(graph_backend: BaseGraph) -> N
     """Every registered view holding the edge must see the new value."""
     edge_id, _ = _graph_with_edge(graph_backend)
 
-    view_a = graph_backend.filter().subgraph()
-    view_b = graph_backend.filter().subgraph()
+    view_a = graph_backend.filter().subgraph(mode=ViewMode.LIVE)
+    view_b = graph_backend.filter().subgraph(mode=ViewMode.LIVE)
 
     graph_backend.update_edge_attrs(attrs={"w": 6.0}, edge_ids=[edge_id])
 
@@ -574,7 +574,7 @@ def test_root_edge_update_partial_overlap_keeps_positions(graph_backend: BaseGra
     inside = graph_backend.add_edge(nodes[0], nodes[1], {"w": 0.0})
     outside = graph_backend.add_edge(nodes[2], nodes[3], {"w": 0.0})
 
-    view = graph_backend.filter(NodeAttr("t") <= 1).subgraph()
+    view = graph_backend.filter(NodeAttr("t") <= 1).subgraph(mode=ViewMode.LIVE)
     assert view.edge_ids() == [inside]
 
     graph_backend.update_edge_attrs(attrs={"w": [11.0, 22.0]}, edge_ids=[inside, outside])

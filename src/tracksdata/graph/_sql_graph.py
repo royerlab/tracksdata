@@ -51,7 +51,7 @@ from tracksdata.utils._signal import (
 )
 
 if TYPE_CHECKING:
-    from tracksdata.graph._graph_view import GraphView
+    from tracksdata.graph._graph_view import GraphView, ViewMode
 
 
 T = TypeVar("T")
@@ -522,8 +522,10 @@ class SQLFilter(BaseFilter):
         self,
         node_attr_keys: Sequence[str] | None = None,
         edge_attr_keys: Sequence[str] | None = None,
+        *,
+        mode: "ViewMode | None" = None,
     ) -> "GraphView":
-        from tracksdata.graph._graph_view import GraphView
+        from tracksdata.graph._graph_view import GraphView, ViewMode
 
         # Give the node_attr_keys as a list, since otherwise the SQL results return the
         # Ensure the time key is in the node attributes
@@ -577,6 +579,7 @@ class SQLFilter(BaseFilter):
             rx_graph=rx_graph,
             node_map_to_root=node_map_to_root,
             root=self._graph,
+            mode=mode if mode is not None else ViewMode.WRITE_THROUGH,
             node_attr_keys=node_attr_keys,
             edge_attr_keys=edge_attr_keys,
         )
