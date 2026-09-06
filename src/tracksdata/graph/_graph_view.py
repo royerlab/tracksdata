@@ -22,6 +22,40 @@ from tracksdata.utils._signal import (
 )
 
 
+def _broadcast_updated_attrs(
+    attrs: dict[str, Any],
+    node_ids: Sequence[int],
+    schemas: dict[str, AttrSchema],
+    old_attrs_by_id: dict[int, dict[str, Any]] | None,
+) -> dict[int, dict[str, Any]]:
+    """Broadcast an applied `update_node_attrs` payload by node, without reading it back.
+
+    `attrs` uses the same broadcasting rules as `update_node_attrs` itself: a
+    scalar applies to every node in `node_ids`, a sequence is indexed by
+    position -- except a struct-typed key, whose value is a single dict meant to
+    apply to every node, not a per-node sequence to zip over. Since the write
+    already succeeded with this exact payload, that is also what "new" means for
+    every changed key -- no need to ask the root for it again.
+
+    When `old_attrs_by_id` is available (a listener needs the full row), the
+    written keys are overlaid onto it. Otherwise (write-through only, nothing
+    listening) the result holds just the written keys, which is all a local
+    write-through needs.
+    """
+    result: dict[int, dict[str, Any]] = {
+        node_id: dict(old_attrs_by_id[node_id]) if old_attrs_by_id is not None else {} for node_id in node_ids
+    }
+    for key, value in attrs.items():
+        is_struct_value = key in schemas and isinstance(schemas[key].dtype, pl.Struct) and isinstance(value, dict)
+        if np.isscalar(value) or is_struct_value:
+            for node_id in node_ids:
+                result[node_id][key] = value
+        else:
+            for node_id, v in zip(node_ids, value, strict=True):
+                result[node_id][key] = v
+    return result
+
+
 class ViewMode(enum.Enum):
     """How a `GraphView` relates to its root graph.
 
@@ -1080,22 +1114,33 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
             return
 
         # Same policy _views_need_node_attrs uses for a root-initiated update: old
-        # values are only needed to emit node_updated, new values are additionally
-        # needed to write the local mirror through for a non-rx root.
+        # values are only needed to emit node_updated. New values are additionally
+        # needed to write the local mirror through for a non-rx root, but that
+        # case never needs a query -- see the comment below.
         needs_old, needs_new = self._needs_node_attrs()
 
-        def _snapshot() -> dict[int, dict[str, Any]]:
-            return (
-                self._root.filter(node_ids=node_ids)
-                .node_attrs()
-                .rows_by_key(key=DEFAULT_ATTR_KEYS.NODE_ID, named=True, unique=True, include_key=True)
-            )
-
-        old_attrs_by_id = _snapshot() if needs_old else None
+        old_attrs_by_id = (
+            self._root.filter(node_ids=node_ids)
+            .node_attrs()
+            .rows_by_key(key=DEFAULT_ATTR_KEYS.NODE_ID, named=True, unique=True, include_key=True)
+            if needs_old
+            else None
+        )
 
         self._root.update_node_attrs(node_ids=node_ids, attrs=attrs)
 
-        new_attrs_by_id = _snapshot() if needs_new else None
+        new_attrs_by_id = None
+        if needs_new:
+            # The write already succeeded with this exact payload, so the new
+            # values are `attrs` itself, broadcast over `node_ids` -- overlaid onto
+            # `old_attrs_by_id` when available (listener case, needs the full row),
+            # or computed from `attrs` alone otherwise (write-through-only case,
+            # needs only the written keys). Either way this never re-queries root:
+            # that used to cost a second full, unrestricted `node_attrs()` call per
+            # write on every SQL-rooted WRITE_THROUGH view, listener or not.
+            new_attrs_by_id = _broadcast_updated_attrs(
+                attrs, node_ids, self._root._node_attr_schemas(), old_attrs_by_id
+            )
 
         self._update_local_node_attrs(
             node_ids=node_ids,
