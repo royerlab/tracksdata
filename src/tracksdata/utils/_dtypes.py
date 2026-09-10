@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import io
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -429,12 +430,28 @@ def flatten_struct_dtype(
     return results
 
 
+def _iter_struct_value_leaves(
+    value: dict | None,
+    dtype: pl.Struct,
+    path: tuple[str, ...] = (),
+) -> Iterator[tuple[tuple[str, ...], Any]]:
+    """Yield schema paths and values for every leaf in a logical struct."""
+    value = value or {}
+    for field_name, field_dtype in dtype.to_schema().items():
+        field_path = (*path, field_name)
+        field_value = value.get(field_name)
+        if isinstance(field_dtype, pl.Struct):
+            yield from _iter_struct_value_leaves(field_value, field_dtype, field_path)
+        else:
+            yield field_path, field_value
+
+
 def flatten_struct_value(
     key: str,
     value: dict | None,
     dtype: pl.Struct,
     sep: str = STRUCT_FIELD_SEP,
-) -> dict:
+) -> dict[str, Any]:
     """Flatten a struct dict value into ``{flat_col: scalar}`` pairs.
 
     Parameters
@@ -448,15 +465,35 @@ def flatten_struct_value(
     sep : str
         Separator.  Defaults to ``STRUCT_FIELD_SEP``.
     """
-    result: dict = {}
-    value = value or {}
-    for field_name, field_dtype in dtype.to_schema().items():
-        flat_key = f"{key}{sep}{field_name}"
-        field_val = value.get(field_name)
-        if isinstance(field_dtype, pl.Struct):
-            result.update(flatten_struct_value(flat_key, field_val, field_dtype, sep))
-        else:
-            result[flat_key] = field_val
+    return {sep.join((key, *path)): field_value for path, field_value in _iter_struct_value_leaves(value, dtype)}
+
+
+def normalize_struct_value(value: dict | None, dtype: pl.Struct) -> dict[str, Any]:
+    """Return a complete logical struct with native Python scalar leaves.
+
+    Like :func:`flatten_struct_value`, this follows the dtype rather than only
+    the keys present in ``value``. Missing fields therefore become ``None``,
+    matching the physical value written to SQL, while the nested logical shape
+    needed by graph attributes and signal payloads is retained.
+
+    Parameters
+    ----------
+    value : dict | None
+        Logical struct value to normalize.
+    dtype : pl.Struct
+        Struct dtype describing its fields.
+
+    Returns
+    -------
+    dict[str, Any]
+        Complete nested struct containing no NumPy scalar leaves.
+    """
+    result: dict[str, Any] = {}
+    for path, field_value in _iter_struct_value_leaves(value, dtype):
+        current = result
+        for field_name in path[:-1]:
+            current = current.setdefault(field_name, {})
+        current[path[-1]] = field_value.item() if isinstance(field_value, np.generic) else field_value
     return result
 
 
