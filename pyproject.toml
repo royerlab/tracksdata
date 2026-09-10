@@ -62,8 +62,10 @@ dependencies = [
 
 [project.optional-dependencies]
 motile = ["motile"]
+plot = ["matplotlib"]
 test = [
   "motile",
+  "matplotlib",
   "pytest>=7.0",
   "pytest-cov",
   "pytest-html",
