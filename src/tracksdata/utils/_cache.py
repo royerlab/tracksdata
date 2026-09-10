@@ -1,3 +1,4 @@
+import enum
 import functools
 from collections.abc import Callable
 from typing import Any, TypeVar
@@ -6,7 +7,12 @@ from tracksdata.utils._logging import LOG
 
 
 def _make_hashable(obj: Any) -> Any:
-    if isinstance(obj, tuple | list):
+    if isinstance(obj, enum.Enum):
+        # Enum members have a `__dict__` (via `_value_`/`_name_`), which would
+        # otherwise route them into the dict-decomposition branch below instead
+        # of being used directly - they are already hashable by identity/value.
+        return obj
+    elif isinstance(obj, tuple | list):
         return tuple(_make_hashable(o) for o in obj)
     elif isinstance(obj, dict):
         return tuple(sorted((_make_hashable(k), _make_hashable(v)) for k, v in obj.items()))
