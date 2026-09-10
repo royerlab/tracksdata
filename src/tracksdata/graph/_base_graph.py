@@ -26,6 +26,7 @@ from tracksdata.utils._dtypes import (
 )
 from tracksdata.utils._logging import LOG
 from tracksdata.utils._multiprocessing import multiprocessing_apply
+from tracksdata.utils._numpy_native import is_int_like, to_native
 
 if TYPE_CHECKING:
     import motile
@@ -2403,9 +2404,9 @@ class NodesAccessor:
         NodeInterface
             Interface for accessing the node's attributes.
         """
-        if not isinstance(node_id, int):
+        if not is_int_like(node_id):
             raise ValueError(f"node_id must be an integer, found '{node_id}' of type {type(node_id)}")
-        return NodeInterface(self._graph, node_id)
+        return NodeInterface(self._graph, to_native(node_id))
 
 
 class EdgesAccessor:
@@ -2435,9 +2436,9 @@ class EdgesAccessor:
         EdgeInterface
             Interface for accessing the edge's attributes.
         """
-        if not isinstance(edge_id, int):
+        if not is_int_like(edge_id):
             raise ValueError(f"edge_id must be an integer, found '{edge_id}' of type {type(edge_id)}")
-        return EdgeInterface(self._graph, edge_id)
+        return EdgeInterface(self._graph, to_native(edge_id))
 
 
 class NodeInterface:

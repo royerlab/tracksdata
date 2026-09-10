@@ -14,6 +14,7 @@ from tracksdata.graph._mapped_graph_mixin import MappedGraphMixin
 from tracksdata.graph._rustworkx_graph import IndexedRXGraph, RustWorkXGraph, RXFilter
 from tracksdata.graph.filters._indexed_filter import IndexRXFilter
 from tracksdata.utils._dtypes import AttrSchema
+from tracksdata.utils._numpy_native import is_int_like, to_native, to_native_list
 from tracksdata.utils._signal import (
     emit_node_added_events,
     emit_node_removed_events,
@@ -598,10 +599,7 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         ValueError
             If any node_id does not exist in the graph.
         """
-        if hasattr(node_ids, "tolist"):
-            node_ids = node_ids.tolist()
-        else:
-            node_ids = list(node_ids)
+        node_ids = to_native_list(node_ids)
         if len(node_ids) == 0:
             return
 
@@ -822,10 +820,7 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         ValueError
             If any edge_id does not exist in the root graph.
         """
-        if hasattr(edge_ids, "tolist"):
-            edge_ids = edge_ids.tolist()
-        else:
-            edge_ids = list(edge_ids)
+        edge_ids = to_native_list(edge_ids)
         if len(edge_ids) == 0:
             return
 
@@ -986,8 +981,8 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         single_node = False
         if node_ids is None:
             node_ids = self.node_ids()
-        elif isinstance(node_ids, int):
-            node_ids = [node_ids]
+        elif is_int_like(node_ids):
+            node_ids = [to_native(node_ids)]
             single_node = True
 
         local_node_ids = self._map_to_local(node_ids)
@@ -1334,8 +1329,8 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         if node_ids is None:
             node_ids = self.node_ids()
         rx_graph = self.rx_graph
-        if isinstance(node_ids, int):
-            return rx_graph.in_degree(self._map_to_local(node_ids))
+        if is_int_like(node_ids):
+            return rx_graph.in_degree(self._map_to_local(to_native(node_ids)))
         return [rx_graph.in_degree(self._map_to_local(node_id)) for node_id in node_ids]
 
     def out_degree(self, node_ids: list[int] | int | None = None) -> list[int] | int:
@@ -1345,8 +1340,8 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         if node_ids is None:
             node_ids = self.node_ids()
         rx_graph = self.rx_graph
-        if isinstance(node_ids, int):
-            return rx_graph.out_degree(self._map_to_local(node_ids))
+        if is_int_like(node_ids):
+            return rx_graph.out_degree(self._map_to_local(to_native(node_ids)))
         return [rx_graph.out_degree(self._map_to_local(node_id)) for node_id in node_ids]
 
     def dividing_nodes(self) -> list[int]:
