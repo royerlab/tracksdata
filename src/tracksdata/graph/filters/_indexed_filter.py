@@ -54,6 +54,7 @@ class IndexRXFilter(RXFilter):
         edge_attr_keys: Sequence[str] | str | None = None,
         *,
         mode: "ViewMode | None" = None,
+        root_fallback: bool = False,
     ) -> "GraphView":
         from tracksdata.graph._graph_view import GraphView, ViewMode
 
@@ -77,6 +78,7 @@ class IndexRXFilter(RXFilter):
             mode=mode if mode is not None else ViewMode.WRITE_THROUGH,
             node_attr_keys=node_attr_keys,
             edge_attr_keys=edge_attr_keys,
+            root_fallback=root_fallback,
         )
 
         return graph_view
