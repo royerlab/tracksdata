@@ -829,3 +829,162 @@ def test_mask_sub_matches_canvas_subtraction_3d(seed: int) -> None:
     result.paint_buffer(painted, True)
 
     np.testing.assert_array_equal(painted, _subtract_via_canvas(mask1, mask2, canvas_shape))
+
+
+def _downscaled_shape(shape: tuple[int, ...], factors: tuple[int, ...]) -> tuple[int, ...]:
+    return tuple(-(-s // f) for s, f in zip(shape, factors, strict=True))
+
+
+def test_paint_buffer_downscale_none_and_one_are_identical() -> None:
+    """`downscale` of None, 1 and all-ones must all take the full-resolution fast path."""
+    mask = Mask(np.ones((3, 3), dtype=bool), [1, 1, 4, 4])
+
+    buffers = [np.zeros((10, 10), dtype=np.uint32) for _ in range(3)]
+    mask.paint_buffer(buffers[0], value=5)
+    mask.paint_buffer(buffers[1], value=5, downscale=1)
+    mask.paint_buffer(buffers[2], value=5, downscale=(1, 1))
+
+    assert np.array_equal(buffers[0], buffers[1])
+    assert np.array_equal(buffers[0], buffers[2])
+
+
+def test_paint_buffer_downscale_matches_strided_reference() -> None:
+    """Objects wider than the factor must match a global-grid strided subsample."""
+    dense = np.zeros((40, 40), dtype=np.uint32)
+    dense[5:15, 6:16] = 7
+    dense[21:33, 23:35] = 9
+
+    factors = (4, 4)
+    buffer = np.zeros(_downscaled_shape(dense.shape, factors), dtype=np.uint32)
+    for value, slicing in ((7, (slice(5, 15), slice(6, 16))), (9, (slice(21, 33), slice(23, 35)))):
+        bbox = [slicing[0].start, slicing[1].start, slicing[0].stop, slicing[1].stop]
+        Mask(dense[slicing] == value, bbox).paint_buffer(buffer, value, downscale=factors)
+
+    np.testing.assert_array_equal(buffer, dense[:: factors[0], :: factors[1]])
+
+
+def test_paint_buffer_downscale_anisotropic() -> None:
+    """Per-axis factors must be applied independently."""
+    dense = np.zeros((8, 40, 40), dtype=np.uint32)
+    dense[2:6, 8:20, 8:20] = 4
+
+    factors = (1, 4, 4)
+    buffer = np.zeros(_downscaled_shape(dense.shape, factors), dtype=np.uint32)
+    Mask(dense[2:6, 8:20, 8:20] == 4, [2, 8, 8, 6, 20, 20]).paint_buffer(buffer, 4, downscale=factors)
+
+    assert buffer.shape == (8, 10, 10)
+    np.testing.assert_array_equal(buffer, dense[:: factors[0], :: factors[1], :: factors[2]])
+
+
+def test_paint_buffer_downscale_sampled_extent() -> None:
+    """The painted extent must span [ceil(start / f), ceil(stop / f))."""
+    buffer = np.zeros((4,), dtype=np.uint32)
+    Mask(np.ones((7,), dtype=bool), [2, 9]).paint_buffer(buffer, 3, downscale=4)
+
+    # start=2, stop=9, f=4 -> output voxels 1 and 2 sample coordinates 4 and 8
+    np.testing.assert_array_equal(buffer, [0, 3, 3, 0])
+
+
+def test_paint_buffer_downscale_global_anchoring() -> None:
+    """
+    Sampling is anchored to the output grid, not to each mask's bounding box.
+
+    The mask below is only set at the voxels the output grid samples, so an
+    implementation that starts sampling at the bounding box reads the wrong voxels and
+    finds nothing. The bbox start must not be a multiple of the factor for this to bite.
+    """
+    # bbox [2, 10) with f=4 samples full-resolution 4 and 8, i.e. mask offsets 2 and 6
+    mask = np.zeros((8,), dtype=bool)
+    mask[[2, 6]] = True
+
+    buffer = np.zeros((4,), dtype=np.uint32)
+    Mask(mask, [2, 10]).paint_buffer(buffer, 1, downscale=4)
+
+    # anchored to the bbox instead, offsets 0 and 4 are read, both False
+    np.testing.assert_array_equal(buffer, [0, 1, 1, 0])
+
+
+def test_paint_buffer_downscale_phase_selects_correct_voxels() -> None:
+    """Only the globally sampled voxels are read, not merely *some* voxel per output."""
+    # inverse of the test above: the sampled offsets are the only False ones
+    mask = np.ones((8,), dtype=bool)
+    mask[[2, 6]] = False
+
+    buffer = np.zeros((4,), dtype=np.uint32)
+    Mask(mask, [2, 10]).paint_buffer(buffer, 1, downscale=4)
+
+    # nothing sampled, so only the fallback voxel at (2 + 10) // 2 // 4 == 1 is painted
+    np.testing.assert_array_equal(buffer, [0, 1, 0, 0])
+
+
+def test_paint_buffer_downscale_fallback_keeps_small_object() -> None:
+    """An object falling between samples must survive as a single voxel."""
+    buffer = np.zeros((4, 4), dtype=np.uint32)
+    Mask(np.ones((1, 1), dtype=bool), [7, 9, 8, 10]).paint_buffer(buffer, 11, downscale=4)
+
+    # plain striding samples coordinates 4 and 8 on each axis, missing (7, 9) entirely
+    np.testing.assert_array_equal(np.argwhere(buffer), [[1, 2]])
+
+
+def test_paint_buffer_downscale_fallback_all_false_mask() -> None:
+    """An all-False mask still marks its location, consistently with the fallback."""
+    buffer = np.zeros((4, 4), dtype=np.uint32)
+    Mask(np.zeros((2, 2), dtype=bool), [4, 4, 6, 6]).paint_buffer(buffer, 3, downscale=4)
+
+    np.testing.assert_array_equal(np.argwhere(buffer), [[1, 1]])
+
+
+def test_paint_buffer_downscale_fallback_out_of_bounds() -> None:
+    """A fallback voxel outside the buffer must be dropped, not wrapped."""
+    buffer = np.zeros((4, 4), dtype=np.uint32)
+    Mask(np.ones((1, 1), dtype=bool), [40, 40, 41, 41]).paint_buffer(buffer, 3, downscale=4)
+
+    assert not buffer.any()
+
+
+def test_paint_buffer_downscale_negative_offset() -> None:
+    """Negative coordinates must floor away from the buffer, never onto index 0."""
+    buffer = np.zeros((4, 4), dtype=np.uint32)
+    mask = Mask(np.ones((2, 2), dtype=bool), [0, 0, 2, 2])
+
+    mask.paint_buffer(buffer, 6, offset=np.int64(-3), downscale=4)
+
+    assert not buffer.any()
+
+
+def test_paint_buffer_downscale_clips_positive_overflow() -> None:
+    """A bbox extending past the buffer must be clipped to the buffer."""
+    buffer = np.zeros((4, 4), dtype=np.uint32)
+    Mask(np.ones((8, 8), dtype=bool), [12, 12, 20, 20]).paint_buffer(buffer, 6, downscale=4)
+
+    np.testing.assert_array_equal(np.argwhere(buffer), [[3, 3]])
+
+
+def test_paint_buffer_downscale_numpy_scalar_offset() -> None:
+    """A numpy scalar offset must behave like a Python int."""
+    expected = np.zeros((10, 10), dtype=np.uint32)
+    actual = np.zeros((10, 10), dtype=np.uint32)
+    mask = Mask(np.ones((2, 2), dtype=bool), [1, 1, 3, 3])
+
+    mask.paint_buffer(expected, 5, offset=2)
+    mask.paint_buffer(actual, 5, offset=np.int64(2))
+
+    np.testing.assert_array_equal(actual, expected)
+
+
+@pytest.mark.parametrize("downscale", [0, -1, 1.5, (2, 2, 2)])
+def test_paint_buffer_downscale_invalid(downscale: int | float | tuple[int, ...]) -> None:
+    """Invalid factors must be rejected rather than silently mangling coordinates."""
+    mask = Mask(np.ones((2, 2), dtype=bool), [0, 0, 2, 2])
+
+    with pytest.raises(ValueError, match="downscale"):
+        mask.paint_buffer(np.zeros((4, 4), dtype=np.uint32), 1, downscale=downscale)
+
+
+@pytest.mark.parametrize("offset", [1.5, np.float64(1.5), [1.5, 2.5]])
+def test_paint_buffer_downscale_non_integer_offset(offset: float | list[float]) -> None:
+    """A non-integer offset must be rejected rather than silently truncated."""
+    mask = Mask(np.ones((2, 2), dtype=bool), [0, 0, 2, 2])
+
+    with pytest.raises(ValueError, match="offset"):
+        mask.paint_buffer(np.zeros((6, 6), dtype=np.uint32), 5, offset=offset, downscale=2)

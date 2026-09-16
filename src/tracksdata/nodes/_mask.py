@@ -37,6 +37,20 @@ def _nd_sphere(
     raise ValueError(f"Spherical is only implemented for 2D and 3D, got ndim={ndim}")
 
 
+def _as_axis_vector(value: ArrayLike | int, ndim: int, name: str) -> NDArray[np.int64]:
+    """Normalize a scalar or per-axis integer sequence to an int64 vector of length `ndim`."""
+    if not np.issubdtype(np.asarray(value).dtype, np.integer):
+        raise ValueError(f"`{name}` must be integer, got {value!r}")
+
+    if isinstance(value, int | np.integer):
+        return np.full(ndim, value, dtype=np.int64)
+
+    vector = np.asarray(value, dtype=np.int64).reshape(-1)
+    if len(vector) != ndim:
+        raise ValueError(f"`{name}` must have length {ndim}, got {len(vector)}")
+    return vector
+
+
 class Mask:
     """
     Object used to store an individual segmentation mask of a single instance (object)
@@ -154,7 +168,7 @@ class Mask:
         tuple[NDArray[np.integer], ...]
             The indices of the pixels that are part of the object.
         """
-        if isinstance(offset, int):
+        if isinstance(offset, int | np.integer):
             offset = np.full(self._mask.ndim, offset)
 
         indices = list(np.nonzero(self._mask))
@@ -169,6 +183,7 @@ class Mask:
         buffer: np.ndarray,
         value: int | float,
         offset: NDArray[np.integer] | int = 0,
+        downscale: NDArray[np.integer] | int | None = None,
     ) -> None:
         """
         Paint object into a buffer.
@@ -181,14 +196,36 @@ class Mask:
             The value to paint the object.
         offset : NDArray[np.integer] | int, optional
             The offset to add to the indices, should be used with bounding box information.
+        downscale : NDArray[np.integer] | int | None, optional
+            Per-axis integer downscaling factors. When given, `buffer` is assumed to be a
+            downscaled volume and the object is painted by nearest-neighbor sampling:
+            output voxel `o` takes the value of full-resolution coordinate `o * downscale`.
+
+            Sampling is anchored to the global output grid rather than to this mask's
+            bounding box, so neighboring objects always sample the same phase.
+
+            Objects thinner than `downscale` would vanish under plain sampling, so they
+            instead get a single voxel painted at their bounding box center. They stay
+            visible and selectable, but their rendered shape and size are meaningless.
+            The exception is an object whose bounding box reaches past `buffer` and whose
+            center therefore falls outside it: such an object is dropped even though it
+            overlaps a sampled voxel's footprint.
+
+            Never interpolates: averaging label values would invent values that belong to
+            no object. When several full-resolution voxels map to one output voxel the last
+            write wins, so an output voxel covered by more than one object is unspecified.
         """
+        if downscale is not None and not np.all(np.asarray(downscale) == 1):
+            self._paint_buffer_downscaled(buffer, value, offset, downscale)
+            return
+
         ndim = self._mask.ndim
         bbox = self._bbox
         shape = buffer.shape
 
-        if isinstance(offset, int):
-            starts = [int(bbox[i]) + offset for i in range(ndim)]
-            stops = [int(bbox[i + ndim]) + offset for i in range(ndim)]
+        if isinstance(offset, int | np.integer):
+            starts = [int(bbox[i]) + int(offset) for i in range(ndim)]
+            stops = [int(bbox[i + ndim]) + int(offset) for i in range(ndim)]
         else:
             starts = [int(bbox[i]) + int(offset[i]) for i in range(ndim)]
             stops = [int(bbox[i + ndim]) + int(offset[i]) for i in range(ndim)]
@@ -210,6 +247,58 @@ class Mask:
         )
         window = tuple(slice(clipped_start[i], clipped_stop[i]) for i in range(ndim))
         buffer[window][self._mask[mask_slicing]] = value
+
+    def _paint_buffer_downscaled(
+        self,
+        buffer: np.ndarray,
+        value: int | float,
+        offset: NDArray[np.integer] | int,
+        downscale: NDArray[np.integer] | int,
+    ) -> None:
+        """
+        Paint object into a downscaled buffer by nearest-neighbor sampling.
+
+        See `paint_buffer` for the sampling convention and its consequences.
+        """
+        ndim = self._mask.ndim
+        factors = _as_axis_vector(downscale, ndim, "downscale")
+        if np.any(factors < 1):
+            raise ValueError(f"`downscale` factors must be >= 1, got {factors.tolist()}")
+
+        offset = _as_axis_vector(offset, ndim, "offset")
+        starts = self._bbox[:ndim] + offset
+        stops = self._bbox[ndim:] + offset
+
+        # output voxel `o` samples full-resolution coordinate `o * f`, anchored to the
+        # global grid, so `o` ranges over [ceil(start / f), ceil(stop / f)).
+        out_starts = -(-starts // factors)
+        out_stops = -(-stops // factors)
+
+        # clip to the buffer, trimming the sampled window instead of filtering afterwards
+        shape = np.asarray(buffer.shape, dtype=np.int64)
+        clipped_starts = np.maximum(out_starts, 0)
+        clipped_stops = np.minimum(out_stops, shape)
+        counts = clipped_stops - clipped_starts
+
+        if np.all(counts > 0):
+            # first sampled row lies `out_start * f - start` voxels into the mask
+            local = clipped_starts * factors - starts
+            sampled = self._mask[
+                tuple(
+                    slice(int(lo), int(lo) + int(n) * int(f), int(f))
+                    for lo, n, f in zip(local, counts, factors, strict=True)
+                )
+            ]
+            if sampled.any():
+                indices = np.nonzero(sampled)
+                buffer[tuple(idx + start for idx, start in zip(indices, clipped_starts, strict=True))] = value
+                return
+
+        # object fell between samples: keep it visible as a single voxel so that it stays
+        # selectable. `//` floors towards -inf, so out-of-bounds stays out of bounds.
+        center = (starts + stops) // 2 // factors
+        if np.all(center >= 0) and np.all(center < shape):
+            buffer[tuple(int(c) for c in center)] = value
 
     def iou(self, other: "Mask") -> float:
         """

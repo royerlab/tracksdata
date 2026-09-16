@@ -8,7 +8,7 @@ from pytest import fixture
 
 from tracksdata.array import GraphArrayView
 from tracksdata.array._graph_array import chain_indices
-from tracksdata.constants import DEFAULT_ATTR_KEYS
+from tracksdata.constants import DEFAULT_ATTR_KEYS, DEFAULT_METADATA_KEYS
 from tracksdata.graph import BaseGraph
 from tracksdata.nodes import RegionPropsNodes
 from tracksdata.nodes._mask import Mask
@@ -749,3 +749,398 @@ def test_graph_array_view_no_invalidation_when_mask_unchanged(graph_backend: Bas
         assert n_regions == 0
 
     np.testing.assert_array_equal(array_view._cache._store[0].ready, np.ones((2, 2), dtype=bool))
+
+
+@fixture(
+    params=[
+        ((10, 100, 100), 2),
+        ((10, 100, 100), 3),
+        ((10, 100, 100, 100), 4),
+        ((10, 100, 100, 100), (1, 4, 4)),
+    ]
+)
+def downscaled_graph_from_image(request, graph_backend) -> tuple[GraphArrayView, np.ndarray, tuple[int, ...]]:
+    """
+    A graph rendered at a reduced resolution, alongside its dense reference.
+
+    Objects are wide enough on every axis to survive sampling and far enough apart that
+    no output voxel is claimed by two of them, so exact comparisons are well defined.
+    """
+    shape, downscale = request.param
+    label = np.zeros(shape, dtype=np.uint8)
+    for i in range(shape[0]):
+        label[i, 8:24, 8:24] = i + 1
+
+    RegionPropsNodes(extra_properties=["label"]).add_nodes(graph_backend, labels=label)
+    array_view = GraphArrayView(graph=graph_backend, shape=shape, attr_key="label", downscale=downscale)
+    return array_view, label, array_view.downscale
+
+
+def _strided_reference(label: np.ndarray, factors: tuple[int, ...]) -> np.ndarray:
+    """Global-grid strided subsample, i.e. output voxel `o` takes coordinate `o * f`."""
+    return label[(slice(None), *(slice(None, None, f) for f in factors))]
+
+
+def test_downscale_shape(downscaled_graph_from_image) -> None:
+    """The spatial shape must be the ceiling of the full-resolution shape."""
+    array_view, label, factors = downscaled_graph_from_image
+
+    assert array_view.full_shape == label.shape
+    assert array_view.shape == _strided_reference(label, factors).shape
+    assert array_view.ndim == label.ndim
+
+
+@pytest.mark.parametrize(
+    ("shape", "downscale", "expected"),
+    [
+        ((10, 100, 100), 4, (10, 25, 25)),
+        ((10, 100, 100), 3, (10, 34, 34)),  # ceil, not 33
+        ((10, 100, 100, 100), (1, 3, 7), (10, 100, 34, 15)),
+    ],
+)
+def test_downscale_shape_non_divisible(
+    graph_backend: BaseGraph,
+    shape: tuple[int, ...],
+    downscale: int | tuple[int, ...],
+    expected: tuple[int, ...],
+) -> None:
+    """A non-divisible shape must round up, so trailing voxels are never dropped."""
+    graph_backend.add_node_attr_key("label", dtype=pl.Int64)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 6))
+    array_view = GraphArrayView(graph=graph_backend, shape=shape, attr_key="label", downscale=downscale)
+
+    assert array_view.shape == expected
+
+
+def test_downscale_matches_strided_reference(downscaled_graph_from_image) -> None:
+    """Rendering must match a global-grid strided subsample of the dense labels."""
+    array_view, label, factors = downscaled_graph_from_image
+    expected = _strided_reference(label, factors)
+
+    for t in range(array_view.shape[0]):
+        np.testing.assert_array_equal(array_view[t], expected[t])
+    np.testing.assert_array_equal(array_view, expected)
+
+
+def test_downscale_slicing(downscaled_graph_from_image) -> None:
+    """Slicing happens in downscaled coordinates and needs no special handling."""
+    array_view, label, factors = downscaled_graph_from_image
+    expected = _strided_reference(label, factors)
+
+    np.testing.assert_array_equal(array_view[2], expected[2])
+    np.testing.assert_array_equal(array_view[:3], expected[:3])
+    np.testing.assert_array_equal(array_view[[1, 3]], expected[[1, 3]])
+    np.testing.assert_array_equal(array_view[:, 4, 2:7], expected[:, 4, 2:7])
+
+
+def test_downscale_one_is_strict_noop(graph_backend: BaseGraph) -> None:
+    """`downscale` of 1 must be indistinguishable from not passing it at all."""
+    shape = (4, 32, 32)
+    label = np.zeros(shape, dtype=np.uint8)
+    for i in range(shape[0]):
+        label[i, 5:12, 6:14] = i + 1
+
+    RegionPropsNodes(extra_properties=["label"]).add_nodes(graph_backend, labels=label)
+    baseline = GraphArrayView(graph=graph_backend, shape=shape, attr_key="label")
+
+    for downscale in (1, (1, 1)):
+        array_view = GraphArrayView(graph=graph_backend, shape=shape, attr_key="label", downscale=downscale)
+        assert array_view.shape == baseline.shape
+        assert array_view.downscale == (1, 1)
+        np.testing.assert_array_equal(np.asarray(array_view), np.asarray(baseline))
+
+
+def test_downscale_small_objects_survive(graph_backend: BaseGraph) -> None:
+    """
+    Objects too small to be sampled must still appear, so they stay selectable.
+
+    This is what distinguishes the rendering from a plain strided subsample.
+    """
+    shape = (1, 64, 64)
+    label = np.zeros(shape, dtype=np.uint8)
+    for i, (y, x) in enumerate([(3, 5), (17, 22), (33, 41), (50, 7)]):
+        label[0, y, x] = i + 1
+
+    RegionPropsNodes(extra_properties=["label"]).add_nodes(graph_backend, labels=label)
+    array_view = GraphArrayView(graph=graph_backend, shape=shape, attr_key="label", downscale=8)
+
+    # none of the objects lies on the sampling grid
+    assert not _strided_reference(label, (8, 8)).any()
+    np.testing.assert_array_equal(np.unique(np.asarray(array_view[0])), [0, 1, 2, 3, 4])
+
+
+def test_downscale_buffer_memory(graph_backend: BaseGraph) -> None:
+    """The cached buffer must shrink by the product of the factors."""
+    shape = (2, 32, 32, 32)
+    label = np.zeros(shape, dtype=np.uint8)
+    label[:, 4:12, 4:12, 4:12] = 1
+
+    RegionPropsNodes(extra_properties=["label"]).add_nodes(graph_backend, labels=label)
+    kwargs = {"graph": graph_backend, "shape": shape, "attr_key": "label"}
+    full_res = GraphArrayView(**kwargs)
+    downscaled = GraphArrayView(**kwargs, downscale=4)
+
+    _ = np.asarray(full_res[0])
+    _ = np.asarray(downscaled[0])
+
+    assert downscaled._cache._store[0].buffer.nbytes * 4**3 == full_res._cache._store[0].buffer.nbytes
+
+
+@pytest.mark.parametrize("offset", [2, (2, 2)])
+def test_downscale_with_offset(graph_backend: BaseGraph, offset: int | tuple[int, int]) -> None:
+    """
+    `offset` is in graph coordinates, so it must be added before dividing.
+
+    The bbox and the offset are both chosen not to be multiples of the factor, otherwise
+    adding the offset after dividing gives the same answer and the test proves nothing.
+    """
+    shape = (1, 16, 16)
+    label = np.zeros(shape, dtype=np.uint8)
+    label[0, 2:10, 2:10] = 1
+
+    RegionPropsNodes(extra_properties=["label"]).add_nodes(graph_backend, labels=label)
+    array_view = GraphArrayView(
+        graph=graph_backend,
+        shape=shape,
+        attr_key="label",
+        offset=offset,
+        downscale=4,
+    )
+
+    # offset first: full-resolution [4, 12) -> output voxels [ceil(4/4), ceil(12/4)) = 1, 2.
+    # divided first: [0, 2) + 2 -> output voxels 2, 3.
+    painted = np.asarray(array_view[0])
+    np.testing.assert_array_equal(np.unique(np.argwhere(painted)), [1, 2])
+
+
+def test_downscale_invalidation_chunk_grid(graph_backend: BaseGraph) -> None:
+    """Invalidation must target chunks in downscaled coordinates."""
+    graph_backend.add_node_attr_key("label", dtype=pl.Int64)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4))
+    array_view = GraphArrayView(
+        graph=graph_backend,
+        shape=(2, 16, 16),
+        attr_key="label",
+        chunk_shape=(4, 4),
+        downscale=2,
+    )
+    assert array_view.shape == (2, 8, 8)
+
+    _ = np.asarray(array_view[0])
+    np.testing.assert_array_equal(array_view._cache._store[0].ready, np.ones((2, 2), dtype=bool))
+
+    # full-resolution bbox [10, 10, 12, 12] -> output [5, 5, 6, 6] -> chunk (1, 1) only
+    graph_backend.add_node(
+        {
+            DEFAULT_ATTR_KEYS.T: 0,
+            DEFAULT_ATTR_KEYS.BBOX: np.array([10, 10, 12, 12]),
+            DEFAULT_ATTR_KEYS.MASK: Mask(np.ones((2, 2), dtype=bool), bbox=np.array([10, 10, 12, 12])),
+            "label": 1,
+        }
+    )
+
+    np.testing.assert_array_equal(
+        array_view._cache._store[0].ready,
+        np.array([[True, True], [True, False]]),
+    )
+
+
+def test_downscale_invalidation_ceil_boundary(graph_backend: BaseGraph) -> None:
+    """
+    The invalidated stop must be ceiled, not floored.
+
+    A floored stop passes every shape and equivalence test and only shows up here, as a
+    stale label left behind by the partially covered trailing voxel.
+    """
+    graph_backend.add_node_attr_key("label", dtype=pl.Int64)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4))
+    array_view = GraphArrayView(
+        graph=graph_backend,
+        shape=(1, 16, 16),
+        attr_key="label",
+        chunk_shape=(4, 4),
+        downscale=2,
+    )
+
+    node_id = graph_backend.add_node(
+        {
+            DEFAULT_ATTR_KEYS.T: 0,
+            DEFAULT_ATTR_KEYS.BBOX: np.array([2, 2, 9, 9]),
+            DEFAULT_ATTR_KEYS.MASK: Mask(np.ones((7, 7), dtype=bool), bbox=np.array([2, 2, 9, 9])),
+            "label": 1,
+        }
+    )
+    rendered = np.asarray(array_view[0])
+    # full-resolution stop 9 -> output stop ceil(9 / 2) = 5, crossing into chunk 1
+    assert rendered[4, 4] == 1
+
+    graph_backend.remove_node(node_id)
+    np.testing.assert_array_equal(np.asarray(array_view[0]), np.zeros((8, 8)))
+
+
+def test_downscale_invalidation_covers_fallback_voxel(graph_backend: BaseGraph) -> None:
+    """
+    A fallback voxel can sit below `ceil(start / f)`, so the start must be floored.
+
+    For a bbox of [2, 3) with a factor of 4 the sampled range is empty while the
+    fallback lands at `2 // 4 == 0`.
+    """
+    graph_backend.add_node_attr_key("label", dtype=pl.Int64)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4))
+    array_view = GraphArrayView(graph=graph_backend, shape=(1, 16, 16), attr_key="label", downscale=4)
+
+    node_id = graph_backend.add_node(
+        {
+            DEFAULT_ATTR_KEYS.T: 0,
+            DEFAULT_ATTR_KEYS.BBOX: np.array([2, 2, 3, 3]),
+            DEFAULT_ATTR_KEYS.MASK: Mask(np.ones((1, 1), dtype=bool), bbox=np.array([2, 2, 3, 3])),
+            "label": 1,
+        }
+    )
+    assert np.asarray(array_view[0])[0, 0] == 1
+
+    graph_backend.remove_node(node_id)
+    assert not np.asarray(array_view[0]).any()
+
+
+def test_downscale_scale_property(graph_backend: BaseGraph) -> None:
+    """`scale` must combine the graph metadata with the factors and stay aligned with `shape`."""
+    graph_backend.add_node_attr_key("label", dtype=pl.Int64)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 6))
+    shape = (2, 16, 16, 16)
+
+    without_metadata = GraphArrayView(graph=graph_backend, shape=shape, attr_key="label", downscale=(1, 2, 2))
+    assert without_metadata.scale == (1.0, 1.0, 2.0, 2.0)
+
+    graph_backend.metadata[DEFAULT_METADATA_KEYS.SCALE] = (2.0, 0.5, 0.5)
+    array_view = GraphArrayView(graph=graph_backend, shape=shape, attr_key="label", downscale=(1, 2, 2))
+    assert array_view.scale == (1.0, 2.0, 1.0, 1.0)
+
+    # indexing away the time axis must drop its entry too
+    assert len(array_view[0].scale) == len(array_view[0].shape)
+    assert array_view[0].scale == (2.0, 1.0, 1.0)
+
+
+@pytest.mark.parametrize("downscale", [0, -1, 1.5, (2, 2, 2)])
+def test_downscale_validation(graph_backend: BaseGraph, downscale: int | float | tuple[int, ...]) -> None:
+    """Invalid factors must be rejected at construction."""
+    graph_backend.add_node_attr_key("label", dtype=pl.Int64)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4))
+
+    with pytest.raises(ValueError, match="downscale"):
+        GraphArrayView(graph=graph_backend, shape=(2, 16, 16), attr_key="label", downscale=downscale)
+
+
+def test_downscale_larger_than_axis(graph_backend: BaseGraph) -> None:
+    """A factor larger than an axis must collapse it to one voxel, keeping the object."""
+    shape = (2, 3, 3)
+    label = np.zeros(shape, dtype=np.uint8)
+    label[:, 1, 1] = 1
+
+    RegionPropsNodes(extra_properties=["label"]).add_nodes(graph_backend, labels=label)
+    array_view = GraphArrayView(graph=graph_backend, shape=shape, attr_key="label", downscale=8)
+
+    assert array_view.shape == (2, 1, 1)
+    np.testing.assert_array_equal(np.asarray(array_view[0]), [[1]])
+
+
+def test_downscale_scale_metadata_length_mismatch(graph_backend: BaseGraph) -> None:
+    """A wrong-length `scale` metadata entry must raise, not broadcast silently."""
+    graph_backend.add_node_attr_key("label", dtype=pl.Int64)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 6))
+    graph_backend.metadata[DEFAULT_METADATA_KEYS.SCALE] = (0.5,)
+
+    array_view = GraphArrayView(graph=graph_backend, shape=(2, 16, 16, 16), attr_key="label", downscale=2)
+
+    with pytest.raises(ValueError, match="expected 3"):
+        _ = array_view.scale
+
+
+def test_downscale_shape_attrs_are_tuples(graph_backend: BaseGraph) -> None:
+    """Shape attributes must not depend on how the backend stores `shape` metadata."""
+    graph_backend.add_node_attr_key("label", dtype=pl.Int64)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4))
+    graph_backend.metadata.update(shape=(4, 16, 16))
+
+    array_view = GraphArrayView(graph=graph_backend, shape=None, attr_key="label", downscale=2)
+
+    assert array_view.full_shape == (4, 16, 16)
+    assert array_view.original_shape == (4, 8, 8)
+
+
+def test_downscale_is_immutable(downscaled_graph_from_image) -> None:
+    """`downscale` must not be mutable: derived views share the underlying array."""
+    array_view, _, factors = downscaled_graph_from_image
+
+    with pytest.raises(ValueError, match="read-only"):
+        array_view._downscale[0] = 99
+
+    assert array_view[0].downscale == factors
+
+
+def test_downscale_invalidation_on_move(graph_backend: BaseGraph) -> None:
+    """Moving a node must clear the coarse voxels it vacated and paint the new ones."""
+    graph_backend.add_node_attr_key("label", dtype=pl.Int64)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4))
+
+    # chunks must be small enough that the old and new regions land in different ones,
+    # otherwise any invalidation clears the whole frame and the test proves nothing
+    array_view = GraphArrayView(
+        graph=graph_backend,
+        shape=(1, 32, 32),
+        attr_key="label",
+        chunk_shape=(2, 2),
+        downscale=4,
+    )
+    node_id = graph_backend.add_node(
+        {
+            DEFAULT_ATTR_KEYS.T: 0,
+            DEFAULT_ATTR_KEYS.BBOX: np.array([4, 4, 12, 12]),
+            DEFAULT_ATTR_KEYS.MASK: Mask(np.ones((8, 8), dtype=bool), bbox=np.array([4, 4, 12, 12])),
+            "label": 1,
+        }
+    )
+    np.testing.assert_array_equal(np.argwhere(np.asarray(array_view[0])), [[1, 1], [1, 2], [2, 1], [2, 2]])
+
+    new_bbox = np.array([20, 20, 28, 28])
+    graph_backend.update_node_attrs(
+        attrs={
+            DEFAULT_ATTR_KEYS.BBOX: [new_bbox],
+            DEFAULT_ATTR_KEYS.MASK: [Mask(np.ones((8, 8), dtype=bool), bbox=new_bbox)],
+        },
+        node_ids=[node_id],
+    )
+
+    # the vacated voxels must be gone, not merely joined by the new ones
+    np.testing.assert_array_equal(np.argwhere(np.asarray(array_view[0])), [[5, 5], [5, 6], [6, 5], [6, 6]])
+
+
+def test_downscale_invalidation_on_attr_change(graph_backend: BaseGraph) -> None:
+    """Changing the displayed attribute must repaint the coarse voxels in place."""
+    graph_backend.add_node_attr_key("label", dtype=pl.Int64)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.MASK, pl.Object)
+    graph_backend.add_node_attr_key(DEFAULT_ATTR_KEYS.BBOX, pl.Array(pl.Int64, 4))
+
+    array_view = GraphArrayView(graph=graph_backend, shape=(1, 32, 32), attr_key="label", downscale=4)
+    bbox = np.array([4, 4, 12, 12])
+    node_id = graph_backend.add_node(
+        {
+            DEFAULT_ATTR_KEYS.T: 0,
+            DEFAULT_ATTR_KEYS.BBOX: bbox,
+            DEFAULT_ATTR_KEYS.MASK: Mask(np.ones((8, 8), dtype=bool), bbox=bbox),
+            "label": 1,
+        }
+    )
+    assert np.asarray(array_view[0])[1, 1] == 1
+
+    graph_backend.update_node_attrs(attrs={"label": [7]}, node_ids=[node_id])
+    assert np.asarray(array_view[0])[1, 1] == 7
