@@ -266,39 +266,49 @@ class Mask:
             raise ValueError(f"`downscale` factors must be >= 1, got {factors.tolist()}")
 
         offset = _as_axis_vector(offset, ndim, "offset")
-        starts = self._bbox[:ndim] + offset
-        stops = self._bbox[ndim:] + offset
+        bbox = self._bbox
+        shape = buffer.shape
 
-        # output voxel `o` samples full-resolution coordinate `o * f`, anchored to the
-        # global grid, so `o` ranges over [ceil(start / f), ceil(stop / f)).
-        out_starts = -(-starts // factors)
-        out_stops = -(-stops // factors)
+        # Plain Python integers throughout, as in the full-resolution path above: these
+        # arrays have one entry per axis, so numpy bookkeeping costs more than the paint.
+        window: list[slice] = []
+        mask_slicing: list[slice] = []
+        sampled_empty = False
 
-        # clip to the buffer, trimming the sampled window instead of filtering afterwards
-        shape = np.asarray(buffer.shape, dtype=np.int64)
-        clipped_starts = np.maximum(out_starts, 0)
-        clipped_stops = np.minimum(out_stops, shape)
-        counts = clipped_stops - clipped_starts
+        for i in range(ndim):
+            factor = int(factors[i])
+            start = int(bbox[i]) + int(offset[i])
+            stop = int(bbox[i + ndim]) + int(offset[i])
 
-        if np.all(counts > 0):
-            # first sampled row lies `out_start * f - start` voxels into the mask
-            local = clipped_starts * factors - starts
-            sampled = self._mask[
-                tuple(
-                    slice(int(lo), int(lo) + int(n) * int(f), int(f))
-                    for lo, n, f in zip(local, counts, factors, strict=True)
-                )
-            ]
+            # Output voxel `o` samples full-resolution coordinate `o * factor`, anchored to
+            # the global grid, so `o` ranges over [ceil(start / f), ceil(stop / f)). Clip to
+            # the buffer by trimming the sampled window rather than filtering afterwards.
+            lo = max(-(-start // factor), 0)
+            hi = min(-(-stop // factor), shape[i])
+            if hi <= lo:
+                sampled_empty = True
+                break
+
+            # the sampling phase, plus whatever the clipping above skipped
+            local = lo * factor - start
+            window.append(slice(lo, hi))
+            mask_slicing.append(slice(local, local + (hi - lo) * factor, factor))
+
+        if not sampled_empty:
+            sampled = self._mask[tuple(mask_slicing)]
             if sampled.any():
-                indices = np.nonzero(sampled)
-                buffer[tuple(idx + start for idx, start in zip(indices, clipped_starts, strict=True))] = value
+                # boolean-mask assignment into a sliced view, as in the fast path above;
+                # `np.nonzero` plus fancy indexing is measurably slower for the same voxels
+                buffer[tuple(window)][sampled] = value
                 return
 
-        # object fell between samples: keep it visible as a single voxel so that it stays
+        # Object fell between samples: keep it visible as a single voxel so that it stays
         # selectable. `//` floors towards -inf, so out-of-bounds stays out of bounds.
-        center = (starts + stops) // 2 // factors
-        if np.all(center >= 0) and np.all(center < shape):
-            buffer[tuple(int(c) for c in center)] = value
+        center = tuple(
+            (int(bbox[i]) + int(bbox[i + ndim]) + 2 * int(offset[i])) // 2 // int(factors[i]) for i in range(ndim)
+        )
+        if all(0 <= c < s for c, s in zip(center, shape, strict=True)):
+            buffer[center] = value
 
     def iou(self, other: "Mask") -> float:
         """

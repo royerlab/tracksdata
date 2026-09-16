@@ -892,12 +892,14 @@ def test_downscale_with_offset(graph_backend: BaseGraph, offset: int | tuple[int
     """
     `offset` is in graph coordinates, so it must be added before dividing.
 
-    The bbox and the offset are both chosen not to be multiples of the factor, otherwise
-    adding the offset after dividing gives the same answer and the test proves nothing.
+    The geometry is chosen so that `ceil((bbox + offset) / f) != ceil(bbox / f)`. Most
+    bboxes do not satisfy this -- with `f=4` and `offset=2`, a bbox of `[2, 10)` samples
+    the same voxels whether the offset is applied before dividing, after dividing, or
+    dropped entirely -- so a carelessly placed object makes this test vacuous.
     """
     shape = (1, 16, 16)
     label = np.zeros(shape, dtype=np.uint8)
-    label[0, 2:10, 2:10] = 1
+    label[0, 3:11, 3:11] = 1
 
     RegionPropsNodes(extra_properties=["label"]).add_nodes(graph_backend, labels=label)
     array_view = GraphArrayView(
@@ -908,10 +910,11 @@ def test_downscale_with_offset(graph_backend: BaseGraph, offset: int | tuple[int
         downscale=4,
     )
 
-    # offset first: full-resolution [4, 12) -> output voxels [ceil(4/4), ceil(12/4)) = 1, 2.
-    # divided first: [0, 2) + 2 -> output voxels 2, 3.
+    # offset first (correct): [5, 13) -> [ceil(5/4), ceil(13/4)) = voxels 2, 3
+    # offset after dividing:   [ceil(3/4) + 2, ceil(11/4) + 2)   = voxel 3 once clipped
+    # offset dropped:          [ceil(3/4), ceil(11/4))           = voxels 1, 2
     painted = np.asarray(array_view[0])
-    np.testing.assert_array_equal(np.unique(np.argwhere(painted)), [1, 2])
+    np.testing.assert_array_equal(np.unique(np.argwhere(painted)), [2, 3])
 
 
 def test_downscale_invalidation_chunk_grid(graph_backend: BaseGraph) -> None:

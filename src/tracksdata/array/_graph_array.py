@@ -247,7 +247,7 @@ class GraphArrayView(BaseReadOnlyArray):
         self._offset_vec = self._offset_as_array(len(self.full_shape) - 1)
         self.original_shape = (
             self.full_shape[0],
-            *(-(-np.asarray(self.full_shape[1:], dtype=np.int64) // self._downscale)).tolist(),
+            *((np.asarray(self.full_shape[1:], dtype=np.int64) + self._downscale - 1) // self._downscale).tolist(),
         )
 
         chunk_shape = chunk_shape or get_options().gav_chunk_shape
@@ -502,7 +502,7 @@ class GraphArrayView(BaseReadOnlyArray):
         # fallback voxel at `center // f`, which can fall *below* `ceil(start / f)`.
         # Flooring the stop would leave the last partially covered voxel stale.
         start = start // self._downscale
-        stop = -(-stop // self._downscale)
+        stop = (stop + self._downscale - 1) // self._downscale
 
         return tuple(slice(int(s), int(e)) for s, e in zip(start, stop, strict=True))
 
