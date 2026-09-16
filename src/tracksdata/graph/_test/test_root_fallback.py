@@ -286,3 +286,68 @@ def test_lean_view_does_not_read_the_excluded_column() -> None:
 
     with pytest.raises(AssertionError, match="excluded blob column"):
         lean.node_attrs(attr_keys=["blob"])
+
+
+# --- a view of a lean view ---------------------------------------------------
+
+
+def test_nested_subgraph_inherits_the_lean_key_set(graph_backend: BaseGraph) -> None:
+    """A child's rx payloads are copied from its parent, so it holds no more
+    than the parent did -- and must not advertise otherwise."""
+    lean, _ = _views(_populate(graph_backend))
+
+    nested = lean.filter(node_ids=lean.node_ids()[:2]).subgraph()
+
+    assert "label" not in nested.node_attr_keys()
+    assert nested.node_attrs(attr_keys=["label"])["label"].to_list() == ["n0", "n2"]
+
+
+def test_nested_subgraph_without_fallback_raises(graph_backend: BaseGraph) -> None:
+    """The silent-defaults case: it must fail loudly, not return schema defaults."""
+    graph = _populate(graph_backend)
+    lean = graph.filter(NodeAttr("solution") == True).subgraph(node_attr_keys=LEAN_KEYS)
+
+    nested = lean.filter(node_ids=lean.node_ids()[:2]).subgraph()
+
+    with pytest.raises(KeyError, match="root_fallback=True"):
+        nested.node_attrs(attr_keys=["label"])
+
+
+def test_nested_subgraph_explicit_key_the_parent_lacks(graph_backend: BaseGraph) -> None:
+    """Naming an excluded key explicitly must not re-claim it locally."""
+    lean, _ = _views(_populate(graph_backend))
+
+    nested = lean.filter(node_ids=lean.node_ids()[:2]).subgraph(node_attr_keys=["label"])
+
+    assert "label" not in nested.node_attr_keys()
+    assert nested.node_attrs(attr_keys=["label"])["label"].to_list() == ["n0", "n2"]
+
+
+def test_nested_subgraph_of_full_view_is_unclamped(graph_backend: BaseGraph) -> None:
+    """A parent holding everything clamps nothing."""
+    graph = _populate(graph_backend)
+    full = graph.filter(NodeAttr("solution") == True).subgraph()
+
+    nested = full.filter(node_ids=full.node_ids()[:2]).subgraph(node_attr_keys=["label"])
+
+    assert "label" in nested.node_attr_keys()
+    assert nested.node_attrs(attr_keys=["label"])["label"].to_list() == ["n0", "n2"]
+
+
+def test_nested_subgraph_key_on_neither_parent_nor_root(graph_backend: BaseGraph) -> None:
+    """A key that exists nowhere raises plainly -- pointing at `root_fallback`
+    would suggest a flag that cannot help."""
+    graph = _populate(graph_backend)
+
+    for fallback in (True, False):
+        lean = graph.filter(NodeAttr("solution") == True).subgraph(
+            node_attr_keys=LEAN_KEYS,
+            root_fallback=fallback,
+        )
+        nested = lean.filter(node_ids=lean.node_ids()[:2]).subgraph()
+
+        with pytest.raises(KeyError) as excinfo:
+            nested.node_attrs(attr_keys=["nowhere"])
+
+        assert "nowhere" in str(excinfo.value)
+        assert "root_fallback" not in str(excinfo.value)

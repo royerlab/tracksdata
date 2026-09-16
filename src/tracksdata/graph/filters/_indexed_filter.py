@@ -16,6 +16,30 @@ if TYPE_CHECKING:
     from tracksdata.graph._graph_view import GraphView, ViewMode
 
 
+def _clamp_to_parent(
+    requested: Sequence[str] | str | None,
+    parent_keys: list[str] | None,
+) -> Sequence[str] | str | None:
+    """
+    Limit the keys a child view claims to hold to the ones its parent held.
+
+    ``parent_keys is None`` means the parent held everything its own root has,
+    so there is nothing to clamp. Otherwise requested keys the parent did not
+    hold are dropped rather than claimed: the child's rx payloads are copied
+    from the parent, so a key the parent lacked has no values here either.
+    Claiming it makes reads return schema defaults instead of raising or
+    falling back to the root.
+    """
+    if parent_keys is None:
+        return requested
+    if requested is None:
+        return parent_keys
+    if isinstance(requested, str):
+        requested = [requested]
+    held = set(parent_keys)
+    return [k for k in requested if k in held]
+
+
 class IndexRXFilter(RXFilter):
     _graph: "GraphView | IndexedRXGraph"
 
@@ -69,7 +93,15 @@ class IndexRXFilter(RXFilter):
 
         root = self._graph
         if hasattr(self._graph, "_root"):
+            # A view of a partial view is flattened onto the shared root, but it
+            # holds only what its parent held -- the rx payloads above were
+            # copied from the parent, not re-read from the root. Both the key
+            # lists and the fallback flag have to be inherited, or the child
+            # advertises the root's columns while holding no values for them.
             root = self._graph._root
+            node_attr_keys = _clamp_to_parent(node_attr_keys, self._graph._node_attr_keys)
+            edge_attr_keys = _clamp_to_parent(edge_attr_keys, self._graph._edge_attr_keys)
+            root_fallback = root_fallback or self._graph._root_fallback
 
         graph_view = GraphView(
             rx_graph,
