@@ -84,8 +84,11 @@ class DownscaleBenchmark:
     number = 1
     timeout = 300
 
-    params = [None, (1, 2, 2), (1, 4, 4), (2, 2, 2), 4]
-    param_names = ["downscale"]
+    # Nested on purpose: asv reads a flat `params` whose first entry is a sequence as a
+    # multi-parameter spec, so the tuple factors below would be split into separate
+    # parameters. Tuples also keep these immutable, as the other benchmarks here do.
+    params = ((None, (1, 2, 2), (1, 4, 4), (2, 2, 2), 4),)
+    param_names = ("downscale",)
 
     def setup(self, downscale) -> None:
         if downscale is not None and not _downscale_supported():
@@ -124,11 +127,11 @@ if __name__ == "__main__":
     print(f"downscale supported on this revision: {_downscale_supported()}\n")
     bench = DownscaleBenchmark()
     base_t = base_mb = None
-    for downscale in DownscaleBenchmark.params:
+    for downscale in DownscaleBenchmark.params[0]:
         try:
             bench.setup(downscale)
         except NotImplementedError as e:
-            print(f"  {str(downscale):>10s}  skipped ({e})")
+            print(f"  {downscale!s:>10s}  skipped ({e})")
             continue
         mbytes = bench.track_buffer_mbytes(downscale)
         labels = bench.track_labels_rendered(downscale)
@@ -139,9 +142,9 @@ if __name__ == "__main__":
         wall = (time.perf_counter() - start) * 1e3 / reps
         if base_t is None:
             base_t, base_mb = wall, mbytes
-            print(f"  {str(downscale):>10s}  {wall:8.1f} ms  {mbytes:8.2f} MB   labels={labels}")
+            print(f"  {downscale!s:>10s}  {wall:8.1f} ms  {mbytes:8.2f} MB   labels={labels}")
         else:
             print(
-                f"  {str(downscale):>10s}  {wall:8.1f} ms  {mbytes:8.2f} MB   "
+                f"  {downscale!s:>10s}  {wall:8.1f} ms  {mbytes:8.2f} MB   "
                 f"labels={labels}  ({base_t / wall:.1f}x faster, {base_mb / mbytes:.0f}x smaller)"
             )
