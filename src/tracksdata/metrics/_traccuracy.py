@@ -26,6 +26,8 @@ def to_traccuracy_graph(
         The graph to convert.
     array_view_kwargs : dict[str, Any] | None
         Additional keyword arguments to pass to the `GraphArrayView` constructor used to create the segmentation.
+        Do not pass `downscale`: metrics need exact segmentation ids, and a downscaled
+        view leaves the value of a voxel covered by several objects unspecified.
     location_keys : list[str] | None
         The keys of the location attributes to use for the segmentation.
         If None, the location keys are inferred from the intersection of the graph node attributes and
