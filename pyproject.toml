@@ -38,6 +38,7 @@ dependencies = [
   "numpy > 2",
   "scikit-image >= 0.24.0",
   "rustworkx >= 0.17.1",
+  "rstar-python>=0.2.0",
   "tqdm",
   "polars >= 1.36.0",
   "sqlalchemy>=2",
@@ -61,10 +62,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-spatial = ["spatial-graph"]
 motile = ["motile"]
 test = [
-  "spatial-graph",
   "motile",
   "pytest>=7.0",
   "pytest-cov",

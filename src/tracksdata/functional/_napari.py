@@ -40,6 +40,7 @@ def to_napari_format(
     mask_key: str | None = None,
     chunk_shape: tuple[int] | None = None,
     buffer_cache_size: int | None = None,
+    allow_frame_skip: bool = False,
 ) -> (
     tuple[
         pl.DataFrame,
@@ -78,6 +79,8 @@ def to_napari_format(
     buffer_cache_size : int, optional
         The maximum number of buffers to keep in the cache for the labels layer.
         If None, the default buffer cache size is used.
+    allow_frame_skip : bool, optional
+        Whether to allow frame skipping when assigning tracklet ids. If True, tracklets can skip
 
     Examples
     --------
@@ -106,7 +109,7 @@ def to_napari_format(
 
     shape = _validate_shape(shape, solution_graph, "to_napari_format")
 
-    tracks_graph = solution_graph.assign_tracklet_ids(output_tracklet_id_key)
+    tracks_graph = solution_graph.assign_tracklet_ids(output_tracklet_id_key, allow_frame_skip=allow_frame_skip)
     dict_graph = {tracks_graph[child]: tracks_graph[parent] for parent, child in tracks_graph.edge_list()}
 
     spatial_cols = [DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X][-len(shape) + 1 :]

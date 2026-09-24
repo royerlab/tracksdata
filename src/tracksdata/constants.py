@@ -72,3 +72,29 @@ class DefaultAttrKeys:
 
 
 DEFAULT_ATTR_KEYS = DefaultAttrKeys()
+
+
+class DefaultMetadataKeys:
+    """
+    This class defines the standard keys for `graph.metadata`, tracksdata's
+    key-value store for graph-level (as opposed to per-node/per-edge) information.
+
+    Using these constants instead of hardcoded strings helps prevent typos.
+
+    Attributes
+    ----------
+    SHAPE : str
+        Default key for the shape of the dense segmentation the graph was built
+        from, as ``(t, (z), y, x)``. Read by `GraphArrayView` and `to_ctc` when no
+        explicit ``shape`` is given.
+    SCALE : str
+        Default key for the physical voxel size of the dense segmentation, as
+        ``((z), y, x)``, i.e. without the time axis.
+    ```
+    """
+
+    SHAPE = "shape"
+    SCALE = "scale"
+
+
+DEFAULT_METADATA_KEYS = DefaultMetadataKeys()

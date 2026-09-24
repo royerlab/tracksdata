@@ -9,7 +9,7 @@ from polars.datatypes import numpy_char_code_to_dtype
 from skimage.measure._regionprops import RegionProperties, regionprops
 from typing_extensions import override
 
-from tracksdata.constants import DEFAULT_ATTR_KEYS
+from tracksdata.constants import DEFAULT_ATTR_KEYS, DEFAULT_METADATA_KEYS
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.nodes._base_nodes import BaseNodesOperator
 from tracksdata.nodes._mask import Mask
@@ -202,6 +202,15 @@ class RegionPropsNodes(BaseNodesOperator):
             intensity-based properties. Must have the same shape as labels
             (excluding the label values).
 
+        Raises
+        ------
+        ValueError
+            If the graph already has a `scale` metadata entry that differs from
+            this operator's `spacing`. Region properties such as `perimeter` or
+            `axis_major_length` are computed using `spacing`, so a mismatch would
+            silently make the graph's `scale` metadata describe a different
+            resolution than the one used to compute them.
+
         Examples
         --------
         Add nodes from a single 2D labeled image:
@@ -229,8 +238,25 @@ class RegionPropsNodes(BaseNodesOperator):
         node_op.add_nodes(graph, labels=labels, t=0, intensity_image=fluorescence_image)
         ```
         """
-        if "shape" not in graph.metadata:
-            graph.metadata.update(shape=labels.shape)
+        existing_shape = graph.metadata.get(DEFAULT_METADATA_KEYS.SHAPE)
+        if existing_shape is None:
+            graph.metadata.update(**{DEFAULT_METADATA_KEYS.SHAPE: labels.shape})
+        elif tuple(existing_shape) != tuple(labels.shape):
+            LOG.warning(
+                "Graph metadata `shape` is %s, which does not match `labels.shape` %s.",
+                tuple(existing_shape),
+                tuple(labels.shape),
+            )
+
+        if self._spacing is not None:
+            existing_scale = graph.metadata.get(DEFAULT_METADATA_KEYS.SCALE)
+            if existing_scale is None:
+                graph.metadata.update(**{DEFAULT_METADATA_KEYS.SCALE: self._spacing})
+            elif tuple(existing_scale) != tuple(self._spacing):
+                raise ValueError(
+                    f"Graph metadata `scale` is {tuple(existing_scale)}, which does not match "
+                    f"this operator's `spacing` {tuple(self._spacing)}."
+                )
 
         if t is None:
             time_points = range(labels.shape[0])

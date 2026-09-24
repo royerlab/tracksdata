@@ -12,13 +12,34 @@ if TYPE_CHECKING:
     from tracksdata.graph.filters._base_filter import BaseFilter
 
 
+def _rstar_coordinates(values: np.ndarray, tree_ndims: int) -> np.ndarray:
+    """Convert coordinates to rstar's float64 representation and pad 1D indexes."""
+    coordinates = np.ascontiguousarray(values, dtype=np.float64)
+    if coordinates.shape[1] == tree_ndims:
+        return coordinates
+
+    padding = np.zeros((coordinates.shape[0], tree_ndims - coordinates.shape[1]), dtype=np.float64)
+    return np.ascontiguousarray(np.hstack((coordinates, padding)))
+
+
+def _rstar_window(keys: tuple[slice, ...], tree_ndims: int) -> tuple[list[float], list[float]]:
+    """Convert slices to closed lower and upper rstar corners."""
+    corners = np.stack(
+        [[key.start, key.stop] for key in keys],
+        axis=1,
+        dtype=np.float32,
+    )
+    padded_corners = _rstar_coordinates(corners, tree_ndims)
+    return padded_corners[0].tolist(), padded_corners[1].tolist()
+
+
 class DataFrameSpatialFilter:
     """
-    Internal spatial filter implementation using spatial_graph library.
+    Internal spatial filter implementation using rstar-python.
 
     This class provides the low-level spatial indexing functionality for efficiently
-    querying nodes within spatial regions of interest. It wraps the spatial_graph
-    library to create a spatial index from node coordinates.
+    querying nodes within spatial regions of interest. It wraps rstar-python to create
+    a spatial index from node coordinates.
 
     Parameters
     ----------
@@ -34,11 +55,12 @@ class DataFrameSpatialFilter:
         indices: pl.Series,
         df: pl.DataFrame,
     ) -> None:
-        from spatial_graph import PointRTree
+        from rstar_python import PyRTree
 
         start_time = time.time()
         self._attr_keys = df.columns
         self._ndims = len(self._attr_keys)
+        self._tree_ndims = max(self._ndims, 2)
 
         if df.is_empty():
             self._node_rtree = None
@@ -46,15 +68,14 @@ class DataFrameSpatialFilter:
 
         indices = np.ascontiguousarray(indices.to_numpy(), dtype=np.int64).copy()
         node_pos = np.ascontiguousarray(df.to_numpy(), dtype=np.float32)
-        self._node_rtree = PointRTree(
-            item_dtype="int64",
-            coord_dtype="float32",
-            dims=self._ndims,
+        self._node_rtree = PyRTree(dims=self._tree_ndims)
+        self._node_rtree.bulk_load(
+            _rstar_coordinates(node_pos, self._tree_ndims),
+            data=indices.tolist(),
         )
-        self._node_rtree.insert_point_items(indices, node_pos)
 
         end_time = time.time()
-        LOG.info(f"Time to create spatial graph: {end_time - start_time} seconds")
+        LOG.info(f"Time to create spatial index: {end_time - start_time} seconds")
 
     def __getitem__(self, keys: tuple[slice, ...]) -> list[int]:
         """
@@ -94,18 +115,14 @@ class DataFrameSpatialFilter:
 
         start_time = time.time()
 
-        roi = np.stack(
-            [[s.start, s.stop] for s in keys],  # subtractring 1e-8 because the spatial graph is inclusive
-            axis=1,
-            dtype=np.float32,
-        )
-        node_ids = self._node_rtree.search(*roi)
+        min_corner, max_corner = _rstar_window(keys, self._tree_ndims)
+        node_ids = self._node_rtree.locate_in_envelope_ids(min_corner, max_corner)
 
         end_time = time.time()
 
         LOG.info(f"Time to query nodes in ROI: {end_time - start_time} seconds")
 
-        return node_ids.tolist()
+        return node_ids
 
 
 class SpatialFilter:
@@ -174,7 +191,7 @@ class SpatialFilter:
         keys : tuple[slice, ...]
             Tuple of slices defining the spatial bounds for each coordinate dimension.
             Must match the number of coordinate dimensions specified in attr_keys.
-            Each slice defines [start, stop) bounds for that dimension.
+            Each slice defines inclusive [start, stop] bounds for that dimension.
 
         Returns
         -------
@@ -208,22 +225,14 @@ class SpatialFilter:
         node_ids: list[int],
         new_attrs: list[dict[str, Any]],
     ) -> None:
-        from spatial_graph import PointRTree
+        from rstar_python import PyRTree
 
         for node_id, attrs in zip(node_ids, new_attrs, strict=True):
             if self._df_filter._node_rtree is None:
-                self._df_filter._node_rtree = PointRTree(
-                    item_dtype="int64",
-                    coord_dtype="float32",
-                    dims=len(self._attr_keys),
-                )
-                self._df_filter._ndims = len(self._attr_keys)
+                self._df_filter._node_rtree = PyRTree(dims=self._df_filter._tree_ndims)
 
-            positions = self._attrs_to_point(attrs)
-            self._df_filter._node_rtree.insert_point_items(
-                np.atleast_1d(node_id).astype(np.int64),
-                positions,
-            )
+            positions = _rstar_coordinates(self._attrs_to_point(attrs), self._df_filter._tree_ndims)
+            self._df_filter._node_rtree.insert(positions[0].tolist(), data=int(node_id))
 
     def _remove_node(
         self,
@@ -235,11 +244,8 @@ class SpatialFilter:
             return
 
         for node_id, attrs in zip(node_ids, old_attrs, strict=True):
-            positions = self._attrs_to_point(attrs)
-            self._df_filter._node_rtree.delete_items(
-                np.atleast_1d(node_id).astype(np.int64),
-                positions,
-            )
+            positions = _rstar_coordinates(self._attrs_to_point(attrs), self._df_filter._tree_ndims)
+            self._df_filter._node_rtree.remove_item(positions[0].tolist(), data=int(node_id))
 
     def _update_node(
         self,
@@ -284,7 +290,7 @@ class BBoxSpatialFilter:
         frame_attr_key: str | None = DEFAULT_ATTR_KEYS.T,
         bbox_attr_key: str = DEFAULT_ATTR_KEYS.BBOX,
     ) -> None:
-        from spatial_graph import PointRTree
+        from rstar_python import PyBBoxRTree
 
         self._graph = graph
         self._frame_attr_key = frame_attr_key
@@ -318,12 +324,13 @@ class BBoxSpatialFilter:
                 positions_max = np.ascontiguousarray(
                     np.hstack((frames[:, np.newaxis], bboxes[:, num_dims:])), dtype=np.float32
                 )
-            self._node_rtree = PointRTree(
-                item_dtype="int64",
-                coord_dtype="float32",
-                dims=self._ndims,
+            self._tree_ndims = max(self._ndims, 2)
+            self._node_rtree = PyBBoxRTree(dims=self._tree_ndims)
+            self._node_rtree.bulk_load(
+                _rstar_coordinates(positions_min, self._tree_ndims),
+                _rstar_coordinates(positions_max, self._tree_ndims),
+                data=node_ids.tolist(),
             )
-            self._node_rtree.insert_bb_items(node_ids, positions_min, positions_max)
 
         # setup signal connections
         self._graph.node_added.connect(self._add_node)
@@ -379,15 +386,8 @@ class BBoxSpatialFilter:
         if len(keys) != self._ndims:
             raise ValueError(f"Expected {self._ndims} keys, got {len(keys)}")
 
-        node_ids = self._node_rtree.search(
-            *(
-                np.stack(
-                    [[s.start, s.stop] for s in keys],
-                    axis=1,
-                    dtype=np.float32,
-                )
-            )
-        )
+        min_corner, max_corner = _rstar_window(keys, self._tree_ndims)
+        node_ids = self._node_rtree.intersection(min_corner, max_corner)
         return self._graph.filter(node_ids=node_ids)
 
     def _attrs_to_bb_window(self, attrs: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
@@ -433,7 +433,7 @@ class BBoxSpatialFilter:
         new_attrs : list[dict[str, Any]]
             Current node attributes to insert into the spatial index.
         """
-        from spatial_graph import PointRTree
+        from rstar_python import PyBBoxRTree
 
         for node_id, attrs in zip(node_ids, new_attrs, strict=True):
             if self._node_rtree is None:
@@ -446,18 +446,17 @@ class BBoxSpatialFilter:
                 else:
                     self._ndims = num_dims + 1  # +1 for the frame dimension
 
-                self._node_rtree = PointRTree(
-                    item_dtype="int64",
-                    coord_dtype="float32",
-                    dims=self._ndims,
-                )
+                self._tree_ndims = max(self._ndims, 2)
+                self._node_rtree = PyBBoxRTree(dims=self._tree_ndims)
 
             positions_min, positions_max = self._attrs_to_bb_window(attrs)
+            positions_min = _rstar_coordinates(positions_min, self._tree_ndims)
+            positions_max = _rstar_coordinates(positions_max, self._tree_ndims)
 
-            self._node_rtree.insert_bb_items(
-                np.atleast_1d(node_id).astype(np.int64),
-                positions_min,
-                positions_max,
+            self._node_rtree.insert(
+                positions_min[0].tolist(),
+                positions_max[0].tolist(),
+                data=int(node_id),
             )
 
     def _remove_node(
@@ -480,11 +479,13 @@ class BBoxSpatialFilter:
 
         for node_id, attrs in zip(node_ids, old_attrs, strict=True):
             positions_min, positions_max = self._attrs_to_bb_window(attrs)
+            positions_min = _rstar_coordinates(positions_min, self._tree_ndims)
+            positions_max = _rstar_coordinates(positions_max, self._tree_ndims)
 
-            self._node_rtree.delete_items(
-                np.atleast_1d(node_id).astype(np.int64),
-                positions_min,
-                positions_max,
+            self._node_rtree.remove_item(
+                positions_min[0].tolist(),
+                positions_max[0].tolist(),
+                data=int(node_id),
             )
 
     def _update_node(

@@ -13,7 +13,7 @@
     "3.12"
   ],
   "install_command": [
-    "python -mpip install --force-reinstall .[spatial]"
+    "python -mpip install --force-reinstall .  spatial-graph"
   ],
   "matrix": {},
   "show_commit_url": "https://github.com/royerlab/tracksdata/commit/",

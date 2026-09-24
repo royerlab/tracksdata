@@ -36,7 +36,13 @@ from zarr.storage import StoreLike
 from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.utils._logging import LOG
 
-__all__ = ["convert_geff_prop_dtype", "geff_prop_dtype", "read_graph_metadata"]
+__all__ = [
+    "append_graph_metadata",
+    "convert_geff_prop_dtype",
+    "geff_prop_dtype",
+    "read_graph_metadata",
+    "remove_graph_metadata",
+]
 
 _EXTRA_KEY = "tracksdata"
 
@@ -74,6 +80,69 @@ def read_graph_metadata(source: StoreLike | GeffMetadata) -> dict[str, Any]:
     metadata = source.extra.get(_EXTRA_KEY, {})
 
     return {k: v for k, v in metadata.items() if not BaseGraph._is_private_metadata_key(k)}
+
+
+def append_graph_metadata(store: StoreLike, **kwargs: Any) -> None:
+    """
+    Append tracksdata graph metadata into an existing geff store, without loading the graph.
+
+    Counterpart to :func:`read_graph_metadata`. Merges ``kwargs`` into the store's
+    existing `extra["tracksdata"]` entry, so previously written keys are preserved
+    unless overwritten. Private metadata keys (starting with
+    `BaseGraph._PRIVATE_METADATA_PREFIX`) are rejected, matching `graph.metadata`.
+
+    Parameters
+    ----------
+    store : StoreLike
+        The store or path of the geff dataset.
+    **kwargs : Any
+        The metadata entries to write, e.g. `shape=(5, 100, 100)`.
+
+    Examples
+    --------
+    ```python
+    append_graph_metadata("tracks.geff", shape=(5, 100, 100))
+    read_graph_metadata("tracks.geff")["shape"]  # [5, 100, 100]
+    ```
+    """
+    BaseGraph._validate_metadata_keys(kwargs.keys(), is_public=True)
+
+    metadata = GeffMetadata.read(store)
+    extra = dict(metadata.extra)
+    extra[_EXTRA_KEY] = {**extra.get(_EXTRA_KEY, {}), **kwargs}
+    metadata.extra = extra
+    metadata.write(store)
+
+
+def remove_graph_metadata(store: StoreLike, key: str) -> None:
+    """
+    Remove a tracksdata graph metadata entry from an existing geff store, without loading the graph.
+
+    Counterpart to :func:`read_graph_metadata`. A no-op if ``key`` is not present.
+
+    Parameters
+    ----------
+    store : StoreLike
+        The store or path of the geff dataset.
+    key : str
+        The metadata key to remove.
+
+    Examples
+    --------
+    ```python
+    remove_graph_metadata("tracks.geff", "shape")
+    "shape" in read_graph_metadata("tracks.geff")  # False
+    ```
+    """
+    BaseGraph._validate_metadata_key(key, is_public=True)
+
+    metadata = GeffMetadata.read(store)
+    extra = dict(metadata.extra)
+    tracksdata_extra = dict(extra.get(_EXTRA_KEY, {}))
+    tracksdata_extra.pop(key, None)
+    extra[_EXTRA_KEY] = tracksdata_extra
+    metadata.extra = extra
+    metadata.write(store)
 
 
 def geff_prop_dtype(

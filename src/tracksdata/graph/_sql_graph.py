@@ -36,6 +36,7 @@ from tracksdata.utils._dtypes import (
     deserialize_attr_schema,
     flatten_struct_dtype,
     flatten_struct_value,
+    normalize_struct_value,
     polars_dtype_to_sqlalchemy_type,
     process_attr_key_args,
     serialize_attr_schema,
@@ -50,7 +51,7 @@ from tracksdata.utils._signal import (
 )
 
 if TYPE_CHECKING:
-    from tracksdata.graph._graph_view import GraphView
+    from tracksdata.graph._graph_view import GraphView, ViewMode
 
 
 T = TypeVar("T")
@@ -81,6 +82,38 @@ def _data_numpy_to_native(data: dict[str, Any]) -> None:
         # (0-dim) arrays, which must be passed through untouched.
         if isinstance(v, np.generic):
             data[k] = v.item()
+
+
+def _normalize_updated_value(value: Any, schema: AttrSchema | None) -> Any:
+    """Return the logical value represented by a SQL update input."""
+    if schema is not None and isinstance(schema.dtype, pl.Struct) and isinstance(value, dict):
+        return normalize_struct_value(value, schema.dtype)
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
+def _updated_attrs_by_id(
+    attrs: dict[str, Any],
+    node_ids: Sequence[int],
+    schemas: dict[str, AttrSchema],
+    old_attrs_by_id: dict[int, dict[str, Any]] | None = None,
+) -> dict[int, dict[str, Any]]:
+    """Broadcast applied update values by node without reading them back from SQL."""
+    scalar_keys = {
+        key
+        for key, value in attrs.items()
+        if np.isscalar(value)
+        or (key in schemas and isinstance(schemas[key].dtype, pl.Struct) and isinstance(value, dict))
+    }
+    updated_attrs_by_id: dict[int, dict[str, Any]] = {}
+    for position, node_id in enumerate(node_ids):
+        node_attrs = dict(old_attrs_by_id[node_id]) if old_attrs_by_id is not None else {}
+        for key, value in attrs.items():
+            applied_value = value if key in scalar_keys else value[position]
+            node_attrs[key] = _normalize_updated_value(applied_value, schemas.get(key))
+        updated_attrs_by_id[node_id] = node_attrs
+    return updated_attrs_by_id
 
 
 def _resolve_attr_filter_column(
@@ -489,8 +522,10 @@ class SQLFilter(BaseFilter):
         self,
         node_attr_keys: Sequence[str] | None = None,
         edge_attr_keys: Sequence[str] | None = None,
+        *,
+        mode: "ViewMode | None" = None,
     ) -> "GraphView":
-        from tracksdata.graph._graph_view import GraphView
+        from tracksdata.graph._graph_view import GraphView, ViewMode
 
         # Give the node_attr_keys as a list, since otherwise the SQL results return the
         # Ensure the time key is in the node attributes
@@ -544,6 +579,7 @@ class SQLFilter(BaseFilter):
             rx_graph=rx_graph,
             node_map_to_root=node_map_to_root,
             root=self._graph,
+            mode=mode if mode is not None else ViewMode.WRITE_THROUGH,
             node_attr_keys=node_attr_keys,
             edge_attr_keys=edge_attr_keys,
         )
@@ -653,6 +689,7 @@ class SQLGraph(BaseGraph):
         engine_kwargs: dict[str, Any] | None = None,
         overwrite: bool = False,
     ):
+        super().__init__()
         self._url = sa.engine.URL.create(
             drivername,
             username=username,
@@ -1971,6 +2008,8 @@ class SQLGraph(BaseGraph):
         node_schemas[schema.key] = schema
         self.__node_attr_schemas = node_schemas
 
+        self._maintain_views_attr_key(schema, "node")
+
     def remove_node_attr_key(self, key: str) -> None:
         if key not in self.node_attr_keys():
             raise ValueError(f"Node attribute key {key} does not exist")
@@ -1982,6 +2021,8 @@ class SQLGraph(BaseGraph):
         self._drop_attr_columns(self.Node, key, node_schemas.get(key))
         node_schemas.pop(key, None)
         self.__node_attr_schemas = node_schemas
+
+        self._maintain_views_remove_attr_key(key, "node")
 
     def add_edge_attr_key(
         self,
@@ -1998,6 +2039,8 @@ class SQLGraph(BaseGraph):
         edge_schemas[schema.key] = schema
         self.__edge_attr_schemas = edge_schemas
 
+        self._maintain_views_attr_key(schema, "edge")
+
     def remove_edge_attr_key(self, key: str) -> None:
         if key not in self.edge_attr_keys():
             raise ValueError(f"Edge attribute key {key} does not exist")
@@ -2006,6 +2049,8 @@ class SQLGraph(BaseGraph):
         self._drop_attr_columns(self.Edge, key, edge_schemas.get(key))
         edge_schemas.pop(key, None)
         self.__edge_attr_schemas = edge_schemas
+
+        self._maintain_views_remove_attr_key(key, "edge")
 
     def num_edges(self) -> int:
         with Session(self._engine) as session:
@@ -2186,8 +2231,18 @@ class SQLGraph(BaseGraph):
         if len(updated_node_ids) == 0:
             return
 
-        attr_keys = self.node_attr_keys()
-        if is_signal_on(self.node_updated):
+        node_attr_schemas = self._node_attr_schemas()
+        attr_keys = [key for key in node_attr_schemas if key != DEFAULT_ATTR_KEYS.NODE_ID]
+        # Views must be maintained even with no listeners, but only some of them
+        # read the before/after snapshots -- see `_views_need_node_attrs`. Each
+        # snapshot is a full query over the updated rows, so skipping one matters.
+        signal_on = is_signal_on(self.node_updated)
+        views_need_old, views_need_new = self._views_need_node_attrs()
+        needs_old = signal_on or views_need_old
+        needs_new = signal_on or views_need_new
+        old_attrs_by_id = None
+        new_attrs_by_id = None
+        if needs_old:
             old_df = self.filter(node_ids=updated_node_ids).node_attrs(
                 attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, *attr_keys]
             )
@@ -2197,17 +2252,30 @@ class SQLGraph(BaseGraph):
 
         self._update_table(self.Node, node_ids, DEFAULT_ATTR_KEYS.NODE_ID, attrs)
 
-        if is_signal_on(self.node_updated):
-            new_df = self.filter(node_ids=updated_node_ids).node_attrs(
-                attr_keys=[DEFAULT_ATTR_KEYS.NODE_ID, *attr_keys]
+        changed_keys = set(attrs.keys())
+        if needs_new:
+            # The write succeeded, so its broadcast input is the new state. Derive
+            # the payload directly instead of querying the same rows again. When an
+            # event will be emitted, overlay the update on the complete old snapshot;
+            # otherwise SQL-backed views need only the changed keys for write-through.
+            new_attrs_by_id = _updated_attrs_by_id(
+                attrs,
+                updated_node_ids,
+                node_attr_schemas,
+                old_attrs_by_id,
             )
-            new_attrs_by_id = new_df.rows_by_key(
-                key=DEFAULT_ATTR_KEYS.NODE_ID, named=True, unique=True, include_key=True
-            )
+        if signal_on:
             emit_node_updated_events(
                 self.node_updated,
                 ((node_id, old_attrs_by_id[node_id], new_attrs_by_id[node_id]) for node_id in updated_node_ids),
-                set(attrs.keys()),
+                changed_keys,
+            )
+        if self._views:
+            self._maintain_views_node_attrs(
+                node_ids=updated_node_ids,
+                old_attrs_by_id=old_attrs_by_id,
+                new_attrs_by_id=new_attrs_by_id,
+                changed_keys=changed_keys,
             )
 
     def update_edge_attrs(
@@ -2217,6 +2285,10 @@ class SQLGraph(BaseGraph):
         edge_ids: Sequence[int] | None = None,
     ) -> None:
         self._update_table(self.Edge, edge_ids, DEFAULT_ATTR_KEYS.EDGE_ID, attrs)
+
+        if self._views:
+            updated_edge_ids = self.edge_ids() if edge_ids is None else list(edge_ids)
+            self._maintain_views_edge_attrs(edge_ids=updated_edge_ids, attrs=attrs)
 
     def assign_tracklet_ids(
         self,
@@ -2485,13 +2557,13 @@ class SQLGraph(BaseGraph):
                 _drop_scratch_table(source_root._engine, selected)
 
     def __getstate__(self) -> dict:
-        data_dict = self.__dict__.copy()
+        data_dict = super().__getstate__()
         for k in ["Base", "Node", "Edge", "Overlap", "Metadata", "_engine"]:
             del data_dict[k]
         return data_dict
 
     def __setstate__(self, state: dict) -> None:
-        self.__dict__.update(state)
+        super().__setstate__(state)
         # recreate deleted objects
         self._engine = sa.create_engine(self._url, **self._engine_kwargs)
         self._define_schema(overwrite=False)

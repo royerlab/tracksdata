@@ -13,7 +13,7 @@ from tracksdata.graph._rustworkx_graph import (
 from tracksdata.utils._cache import cache_method
 
 if TYPE_CHECKING:
-    from tracksdata.graph._graph_view import GraphView
+    from tracksdata.graph._graph_view import GraphView, ViewMode
 
 
 class IndexRXFilter(RXFilter):
@@ -52,8 +52,10 @@ class IndexRXFilter(RXFilter):
         self,
         node_attr_keys: Sequence[str] | str | None = None,
         edge_attr_keys: Sequence[str] | str | None = None,
+        *,
+        mode: "ViewMode | None" = None,
     ) -> "GraphView":
-        from tracksdata.graph._graph_view import GraphView
+        from tracksdata.graph._graph_view import GraphView, ViewMode
 
         node_ids = self.node_ids()
 
@@ -72,6 +74,7 @@ class IndexRXFilter(RXFilter):
             rx_graph,
             node_map_to_root=dict(node_map.items()),
             root=root,
+            mode=mode if mode is not None else ViewMode.WRITE_THROUGH,
             node_attr_keys=node_attr_keys,
             edge_attr_keys=edge_attr_keys,
         )

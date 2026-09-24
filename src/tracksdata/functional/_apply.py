@@ -173,7 +173,7 @@ def _yield_apply_tiled(
     for corner in tiles_corner:
         # corner considers the overlap, so right needs to be shifted by 2 * o
         # np.nextafter is used to convert inclusive to exclusive ranges.
-        # it varies with the scale due to numerical precision of spatial-graph rtree queries
+        # it varies with the scale due to numerical precision of R-tree queries
         slicing_without_overlap = tuple(
             slice(c, np.nextafter(c + t, -np.inf, dtype=np.float32))
             for c, t in zip(corner, tiling_scheme.tile_shape, strict=True)

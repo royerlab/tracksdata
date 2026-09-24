@@ -102,6 +102,44 @@ def test_regionprops_add_nodes_2d() -> None:
     assert areas == [3, 3]
 
 
+def test_regionprops_add_nodes_sets_scale_from_spacing() -> None:
+    """`scale` metadata is set from `spacing` when provided, and left alone otherwise."""
+    labels = np.array([[[1, 1, 0], [1, 0, 2], [0, 2, 2]]], dtype=np.int32)
+
+    graph = RustWorkXGraph()
+    RegionPropsNodes(spacing=(0.5, 0.1)).add_nodes(graph, labels=labels)
+    assert graph.metadata["scale"] == (0.5, 0.1)
+
+    graph_no_spacing = RustWorkXGraph()
+    RegionPropsNodes().add_nodes(graph_no_spacing, labels=labels)
+    assert "scale" not in graph_no_spacing.metadata
+
+
+def test_regionprops_add_nodes_matching_existing_scale_is_a_noop() -> None:
+    """An existing `scale` metadata entry that matches `spacing` is left as-is."""
+    labels = np.array([[[1, 1, 0], [1, 0, 2], [0, 2, 2]]], dtype=np.int32)
+
+    graph = RustWorkXGraph()
+    graph.metadata["scale"] = (0.5, 0.1)
+    RegionPropsNodes(spacing=(0.5, 0.1)).add_nodes(graph, labels=labels)
+    assert graph.metadata["scale"] == (0.5, 0.1)
+
+
+def test_regionprops_add_nodes_raises_on_scale_mismatch() -> None:
+    """A `spacing` that disagrees with the graph's existing `scale` metadata is an error.
+
+    Region properties like `perimeter` are computed using `spacing`, so silently
+    keeping the graph's `scale` would leave it describing a different resolution
+    than the one actually used.
+    """
+    labels = np.array([[[1, 1, 0], [1, 0, 2], [0, 2, 2]]], dtype=np.int32)
+
+    graph = RustWorkXGraph()
+    graph.metadata["scale"] = (1.0, 1.0)
+    with pytest.raises(ValueError, match="does not match"):
+        RegionPropsNodes(spacing=(0.5, 0.1)).add_nodes(graph, labels=labels)
+
+
 def test_regionprops_add_nodes_3d() -> None:
     """Test adding nodes from 3D labels."""
     graph = RustWorkXGraph()
