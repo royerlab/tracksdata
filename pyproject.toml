@@ -41,7 +41,9 @@ dependencies = [
   "rstar-python>=0.2.0",
   "tqdm",
   "polars >= 1.36.0",
-  "sqlalchemy>=2",
+  # polars.read_database imports sqlalchemy.ext.asyncio unconditionally, and
+  # SQLAlchemy 2.1 moved greenlet out of its base deps into the asyncio extra.
+  "sqlalchemy[asyncio]>=2",
   "rich",
   "numba",
   "imagecodecs",
