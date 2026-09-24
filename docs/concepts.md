@@ -30,8 +30,31 @@ graph.create_node_attr_index(["t", "label"])  # composite index
 graph.create_edge_attr_index("score", unique=True)
 ```
 
+### ZarrSQLGraph
+- **Use case**: Querying an existing directed GEFF Zarr store without first loading the complete graph into memory
+- **Performance**: Lazy, chunked reads through xarray-sql and DataFusion
+- **Features**: Read-only scalar filtering and row-selected loading of array properties
+
+```python
+from tracksdata.attrs import NodeAttr
+from tracksdata.graph import ZarrSQLGraph
+
+graph, geff_metadata = ZarrSQLGraph.from_geff("tracks.geff")
+selected = graph.filter(NodeAttr("t") == 10).node_attrs(attr_keys=["node_id", "score"])
+```
+
+`ZarrSQLGraph` supports Zarr v2 and v3 paths or configured Zarr stores. GEFF
+payload arrays remain lazy, although xarray-sql currently creates in-memory integer
+row coordinates proportional to the number of nodes and edges during registration.
+The backend does not support undirected GEFF stores. Numeric and boolean scalar
+properties can be used in SQL filters, except integer or boolean properties that have missing-value
+masks. Strings, nullable integer/boolean properties, fixed-shape arrays, and
+variable-length arrays remain retrievable, but cannot be filter predicates. When
+edits are required, materialize a mutable backend with, for example,
+`RustWorkXGraph.from_other(graph)`.
+
 ### GraphView
-- **Use case**: Results subgraph either backends
+- **Use case**: Result subgraphs from any backend
 - **Performance**: Low overhead, similar to RustWorkXGraph
 - **Features**: Maintains connection to root graph, all operations are mirrored to the root graph
 
