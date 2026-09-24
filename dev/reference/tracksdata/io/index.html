@@ -2183,7 +2183,7 @@ materialized at once. The geff metadata dtype is updated to match.</p>
         </li>
         <li class="doc-section-item field-body">
 <h3 id="tracksdata.io.convert_geff_prop_dtype(key)" class="doc doc-heading doc-heading-parameter">              <b><code>key</code></b>
-</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#str">str</a></code>)
+</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#str">str</a></code>)
           –
           <div class="doc-md-description">
             <p>The property to convert.</p>
@@ -2199,7 +2199,7 @@ materialized at once. The geff metadata dtype is updated to match.</p>
         </li>
         <li class="doc-section-item field-body">
 <h3 id="tracksdata.io.convert_geff_prop_dtype(node_or_edge)" class="doc doc-heading doc-heading-parameter">              <b><code>node_or_edge</code></b>
-</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#str">str</a></code>, default:
+</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#str">str</a></code>, default:
                   <code>&#39;nodes&#39;</code>
 )
           –
@@ -2226,7 +2226,7 @@ converted, leaving the original untouched (safer for shared data). If
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#bool">bool</a></code>
+              <code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#bool">bool</a></code>
           –
           <div class="doc-md-description">
             <p><code>True</code> if a conversion was performed, <code>False</code> if the payload already
@@ -2239,7 +2239,7 @@ had <code>dtype</code>.</p>
 <p><span class="doc-section-title">Raises:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/exceptions.html#KeyError">KeyError</a></code>
+              <code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/exceptions.html#KeyError">KeyError</a></code>
             –
           <div class="doc-md-description">
             <p>If <code>key</code> is not a property of <code>node_or_edge</code> in the geff.</p>
@@ -2683,7 +2683,7 @@ region_props_kwargs : dict[str, Any]
         </li>
         <li class="doc-section-item field-body">
 <h3 id="tracksdata.io.geff_prop_dtype(key)" class="doc doc-heading doc-heading-parameter">              <b><code>key</code></b>
-</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#str">str</a></code>)
+</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#str">str</a></code>)
           –
           <div class="doc-md-description">
             <p>Which property to inspect.</p>
@@ -2691,7 +2691,7 @@ region_props_kwargs : dict[str, Any]
         </li>
         <li class="doc-section-item field-body">
 <h3 id="tracksdata.io.geff_prop_dtype(node_or_edge)" class="doc doc-heading doc-heading-parameter">              <b><code>node_or_edge</code></b>
-</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#str">str</a></code>, default:
+</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#str">str</a></code>, default:
                   <code>&#39;nodes&#39;</code>
 )
           –
@@ -2832,7 +2832,7 @@ JSON round-trip, so tuples come back as lists.</p>
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#dict">dict</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#str">str</a>, <a class="autorefs autorefs-external" title="typing.Any" href="https://docs.python.org/3/library/typing.html#typing.Any">Any</a>]</code>
+              <code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#dict">dict</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#str">str</a>, <a class="autorefs autorefs-external" title="typing.Any" href="https://docs.python.org/3/library/typing.html#typing.Any">Any</a>]</code>
           –
           <div class="doc-md-description">
             <p>The graph metadata, empty if the dataset was not written by tracksdata.</p>
@@ -2951,7 +2951,7 @@ JSON round-trip, so tuples come back as lists.</p>
         </li>
         <li class="doc-section-item field-body">
 <h3 id="tracksdata.io.remove_graph_metadata(key)" class="doc doc-heading doc-heading-parameter">              <b><code>key</code></b>
-</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#str">str</a></code>)
+</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#str">str</a></code>)
           –
           <div class="doc-md-description">
             <p>The metadata key to remove.</p>

@@ -2206,7 +2206,7 @@
 <ul>
 <li class="doc-section-item field-body">
 <h3 class="doc doc-heading doc-heading-parameter" id="tracksdata.nodes.GenericFuncNodeAttrs(func)"> <b><code>func</code></b>
-</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/collections.abc.html#collections.abc.Callable" title="collections.abc.Callable">Callable</a>[[<span title="tracksdata.nodes._generic_nodes.T">T</span>], <span title="tracksdata.nodes._generic_nodes.R">R</span>] | <a class="autorefs autorefs-external" href="https://docs.python.org/3/library/collections.abc.html#collections.abc.Callable" title="collections.abc.Callable">Callable</a>[[<a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#list">list</a>[<span title="tracksdata.nodes._generic_nodes.T">T</span>]], <a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#list">list</a>[<span title="tracksdata.nodes._generic_nodes.R">R</span>]]</code>)
+</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/collections.abc.html#collections.abc.Callable" title="collections.abc.Callable">Callable</a>[[<span title="tracksdata.nodes._generic_nodes.T">T</span>], <span title="tracksdata.nodes._generic_nodes.R">R</span>] | <a class="autorefs autorefs-external" href="https://docs.python.org/3/library/collections.abc.html#collections.abc.Callable" title="collections.abc.Callable">Callable</a>[[<a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#list">list</a>[<span title="tracksdata.nodes._generic_nodes.T">T</span>]], <a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#list">list</a>[<span title="tracksdata.nodes._generic_nodes.R">R</span>]]</code>)
           –
           <div class="doc-md-description">
 <p>Function to apply to the node.
@@ -2217,7 +2217,7 @@ Otherwise, the function must accept two arguments for the mask and the additiona
 </li>
 <li class="doc-section-item field-body">
 <h3 class="doc doc-heading doc-heading-parameter" id="tracksdata.nodes.GenericFuncNodeAttrs(output_key)"> <b><code>output_key</code></b>
-</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#str">str</a></code>)
+</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#str">str</a></code>)
           –
           <div class="doc-md-description">
 <p>Key of the new attribute to add.</p>
@@ -2225,7 +2225,7 @@ Otherwise, the function must accept two arguments for the mask and the additiona
 </li>
 <li class="doc-section-item field-body">
 <h3 class="doc doc-heading doc-heading-parameter" id="tracksdata.nodes.GenericFuncNodeAttrs(attr_keys)"> <b><code>attr_keys</code></b>
-</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/collections.abc.html#collections.abc.Sequence" title="collections.abc.Sequence">Sequence</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#str">str</a>]</code>, default:
+</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/collections.abc.html#collections.abc.Sequence" title="collections.abc.Sequence">Sequence</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#str">str</a>]</code>, default:
                   <code>()</code>
 )
           –
@@ -2235,7 +2235,7 @@ Otherwise, the function must accept two arguments for the mask and the additiona
 </li>
 <li class="doc-section-item field-body">
 <h3 class="doc doc-heading doc-heading-parameter" id="tracksdata.nodes.GenericFuncNodeAttrs(batch_size)"> <b><code>batch_size</code></b>
-</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></code>, default:
+</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#int">int</a></code>, default:
                   <code>0</code>
 )
           –
@@ -2344,7 +2344,7 @@ Batch only contains nodes from the same time point.</p>
 <p><span class="doc-section-title">Raises:</span></p>
 <ul>
 <li class="doc-section-item field-body">
-<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/exceptions.html#ValueError">ValueError</a></code>
+<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/exceptions.html#ValueError">ValueError</a></code>
             –
           <div class="doc-md-description">
 <p>If the output key is not found in the graph.</p>
@@ -2405,7 +2405,7 @@ Batch only contains nodes from the same time point.</p>
 <ul>
 <li class="doc-section-item field-body">
 <h4 class="doc doc-heading doc-heading-parameter" id="tracksdata.nodes.GenericFuncNodeAttrs._node_attrs_per_time(t)"> <b><code>t</code></b>
-</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></code>)
+</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#int">int</a></code>)
           –
           <div class="doc-md-description">
 <p>The time point to add attributes for.</p>
@@ -2557,7 +2557,7 @@ Such that, when provided, <code>frames[t]</code> will be passed to the <code>fun
 </li>
 <li class="doc-section-item field-body">
 <h4 class="doc doc-heading doc-heading-parameter" id="tracksdata.nodes.GenericFuncNodeAttrs.add_node_attrs(t)"> <b><code>t</code></b>
-</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a> | None</code>, default:
+</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#int">int</a> | None</code>, default:
                   <code>None</code>
 )
           –
@@ -2748,7 +2748,7 @@ Examples</p>
       cached
       property
    (tracksdata.nodes.Mask.size)">size</a></code></b>
-              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></code>)
+              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#int">int</a></code>)
           –
           <div class="doc-md-description">
 <p>Get the number of pixels that are part of the object.</p>
@@ -3091,7 +3091,7 @@ This is used to fix bounding box and mask after changes to the mask.</p>
 <ul>
 <li class="doc-section-item field-body">
 <h4 class="doc doc-heading doc-heading-parameter" id="tracksdata.nodes.Mask._crop_overhang(image_shape)"> <b><code>image_shape</code></b>
-</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#tuple">tuple</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a>, ...]</code>)
+</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#tuple">tuple</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#int">int</a>, ...]</code>)
           –
           <div class="doc-md-description">
 <p>The shape of the image.</p>
@@ -3165,7 +3165,7 @@ This is used to fix bounding box and mask after changes to the mask.</p>
 <p><span class="doc-section-title">Returns:</span></p>
 <ul>
 <li class="doc-section-item field-body">
-<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#tuple">tuple</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#tuple">tuple</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#slice">slice</a>, ...], <a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#tuple">tuple</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#slice">slice</a>, ...]] | None</code>
+<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#tuple">tuple</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#tuple">tuple</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#slice">slice</a>, ...], <a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#tuple">tuple</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#slice">slice</a>, ...]] | None</code>
           –
           <div class="doc-md-description">
 <p>The slicing into <code>self.mask</code> and <code>other.mask</code> selecting the same
@@ -3268,7 +3268,7 @@ absolute coordinates, or None if the bounding boxes do not overlap.</p>
 </li>
 <li class="doc-section-item field-body">
 <h4 class="doc doc-heading doc-heading-parameter" id="tracksdata.nodes.Mask.crop(shape)"> <b><code>shape</code></b>
-</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#tuple">tuple</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a>, ...] | None</code>, default:
+</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#tuple">tuple</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#int">int</a>, ...] | None</code>, default:
                   <code>None</code>
 )
           –
@@ -3370,7 +3370,7 @@ absolute coordinates, or None if the bounding boxes do not overlap.</p>
 <ul>
 <li class="doc-section-item field-body">
 <h4 class="doc doc-heading doc-heading-parameter" id="tracksdata.nodes.Mask.dilate(radius)"> <b><code>radius</code></b>
-</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></code>)
+</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#int">int</a></code>)
           –
           <div class="doc-md-description">
 <p>The radius of the dilation.</p>
@@ -3378,7 +3378,7 @@ absolute coordinates, or None if the bounding boxes do not overlap.</p>
 </li>
 <li class="doc-section-item field-body">
 <h4 class="doc doc-heading doc-heading-parameter" id="tracksdata.nodes.Mask.dilate(image_shape)"> <b><code>image_shape</code></b>
-</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#tuple">tuple</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a>, ...] | None</code>, default:
+</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#tuple">tuple</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#int">int</a>, ...] | None</code>, default:
                   <code>None</code>
 )
           –
@@ -3475,7 +3475,7 @@ Regions outside the image are cropped.</p>
 </li>
 <li class="doc-section-item field-body">
 <h4 class="doc doc-heading doc-heading-parameter" id="tracksdata.nodes.Mask.from_coordinates(radius)"> <b><code>radius</code></b>
-</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></code>)
+</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#int">int</a></code>)
           –
           <div class="doc-md-description">
 <p>The radius of the mask.</p>
@@ -3483,7 +3483,7 @@ Regions outside the image are cropped.</p>
 </li>
 <li class="doc-section-item field-body">
 <h4 class="doc doc-heading doc-heading-parameter" id="tracksdata.nodes.Mask.from_coordinates(image_shape)"> <b><code>image_shape</code></b>
-</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#tuple">tuple</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a>, ...] | None</code>, default:
+</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#tuple">tuple</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#int">int</a>, ...] | None</code>, default:
                   <code>None</code>
 )
           –
@@ -3626,7 +3626,7 @@ When provided crops regions outside the image.</p>
 <p><span class="doc-section-title">Returns:</span></p>
 <ul>
 <li class="doc-section-item field-body">
-<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#float">float</a></code>
+<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#float">float</a></code>
           –
           <div class="doc-md-description">
 <p>The intersection between the two masks.</p>
@@ -3691,7 +3691,7 @@ considering their bounding boxes location.</p>
 <p><span class="doc-section-title">Returns:</span></p>
 <ul>
 <li class="doc-section-item field-body">
-<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#float">float</a></code>
+<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#float">float</a></code>
           –
           <div class="doc-md-description">
 <p>The IoU between the two masks.</p>
@@ -3749,7 +3749,7 @@ considering their bounding boxes location.</p>
 <ul>
 <li class="doc-section-item field-body">
 <h4 class="doc doc-heading doc-heading-parameter" id="tracksdata.nodes.Mask.mask_indices(offset)"> <b><code>offset</code></b>
-</h4>              (<code><a class="autorefs autorefs-external" href="https://numpy.org/doc/stable/reference/typing.html#numpy.typing.NDArray" title="numpy.typing.NDArray">NDArray</a>[<a class="autorefs autorefs-external" href="https://numpy.org/doc/stable/reference/arrays.scalars.html#numpy.integer" title="numpy.integer">integer</a>] | <a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></code>, default:
+</h4>              (<code><a class="autorefs autorefs-external" href="https://numpy.org/doc/stable/reference/typing.html#numpy.typing.NDArray" title="numpy.typing.NDArray">NDArray</a>[<a class="autorefs autorefs-external" href="https://numpy.org/doc/stable/reference/arrays.scalars.html#numpy.integer" title="numpy.integer">integer</a>] | <a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#int">int</a></code>, default:
                   <code>0</code>
 )
           –
@@ -3761,7 +3761,7 @@ considering their bounding boxes location.</p>
 <p><span class="doc-section-title">Returns:</span></p>
 <ul>
 <li class="doc-section-item field-body">
-<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#tuple">tuple</a>[<a class="autorefs autorefs-external" href="https://numpy.org/doc/stable/reference/typing.html#numpy.typing.NDArray" title="numpy.typing.NDArray">NDArray</a>[<a class="autorefs autorefs-external" href="https://numpy.org/doc/stable/reference/arrays.scalars.html#numpy.integer" title="numpy.integer">integer</a>], ...]</code>
+<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#tuple">tuple</a>[<a class="autorefs autorefs-external" href="https://numpy.org/doc/stable/reference/typing.html#numpy.typing.NDArray" title="numpy.typing.NDArray">NDArray</a>[<a class="autorefs autorefs-external" href="https://numpy.org/doc/stable/reference/arrays.scalars.html#numpy.integer" title="numpy.integer">integer</a>], ...]</code>
           –
           <div class="doc-md-description">
 <p>The indices of the pixels that are part of the object.</p>
@@ -3909,7 +3909,7 @@ image_shape : tuple[int, ...] | None
 </li>
 <li class="doc-section-item field-body">
 <h4 class="doc doc-heading doc-heading-parameter" id="tracksdata.nodes.Mask.paint_buffer(value)"> <b><code>value</code></b>
-</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a> | <a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#float">float</a></code>)
+</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#int">int</a> | <a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#float">float</a></code>)
           –
           <div class="doc-md-description">
 <p>The value to paint the object.</p>
@@ -3917,7 +3917,7 @@ image_shape : tuple[int, ...] | None
 </li>
 <li class="doc-section-item field-body">
 <h4 class="doc doc-heading doc-heading-parameter" id="tracksdata.nodes.Mask.paint_buffer(offset)"> <b><code>offset</code></b>
-</h4>              (<code><a class="autorefs autorefs-external" href="https://numpy.org/doc/stable/reference/typing.html#numpy.typing.NDArray" title="numpy.typing.NDArray">NDArray</a>[<a class="autorefs autorefs-external" href="https://numpy.org/doc/stable/reference/arrays.scalars.html#numpy.integer" title="numpy.integer">integer</a>] | <a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></code>, default:
+</h4>              (<code><a class="autorefs autorefs-external" href="https://numpy.org/doc/stable/reference/typing.html#numpy.typing.NDArray" title="numpy.typing.NDArray">NDArray</a>[<a class="autorefs autorefs-external" href="https://numpy.org/doc/stable/reference/arrays.scalars.html#numpy.integer" title="numpy.integer">integer</a>] | <a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#int">int</a></code>, default:
                   <code>0</code>
 )
           –
@@ -4039,7 +4039,7 @@ image coordinates.</p>
 <ul>
 <li class="doc-section-item field-body">
 <h4 class="doc doc-heading doc-heading-parameter" id="tracksdata.nodes.Mask.regionprops(**kwargs)"> <b><code>**kwargs</code></b>
-</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#dict">dict</a></code>, default:
+</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#dict">dict</a></code>, default:
                   <code>{}</code>
 )
           –
@@ -4160,7 +4160,7 @@ image coordinates.</p>
 <ul>
 <li class="doc-section-item field-body">
 <h3 class="doc doc-heading doc-heading-parameter" id="tracksdata.nodes.MaskDiskAttrs(radius)"> <b><code>radius</code></b>
-</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></code>)
+</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#int">int</a></code>)
           –
           <div class="doc-md-description">
 <p>The radius of the mask.</p>
@@ -4168,7 +4168,7 @@ image coordinates.</p>
 </li>
 <li class="doc-section-item field-body">
 <h3 class="doc doc-heading doc-heading-parameter" id="tracksdata.nodes.MaskDiskAttrs(image_shape)"> <b><code>image_shape</code></b>
-</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#tuple">tuple</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a>, ...]</code>)
+</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#tuple">tuple</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#int">int</a>, ...]</code>)
           –
           <div class="doc-md-description">
 <p>The shape of the image, must match the number of  of the attr_keys.</p>
@@ -4176,7 +4176,7 @@ image coordinates.</p>
 </li>
 <li class="doc-section-item field-body">
 <h3 class="doc doc-heading doc-heading-parameter" id="tracksdata.nodes.MaskDiskAttrs(attr_keys)"> <b><code>attr_keys</code></b>
-</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/collections.abc.html#collections.abc.Sequence" title="collections.abc.Sequence">Sequence</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#str">str</a>] | None</code>, default:
+</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/collections.abc.html#collections.abc.Sequence" title="collections.abc.Sequence">Sequence</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#str">str</a>] | None</code>, default:
                   <code>None</code>
 )
           –
@@ -4187,7 +4187,7 @@ If not provided, DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X w
 </li>
 <li class="doc-section-item field-body">
 <h3 class="doc doc-heading doc-heading-parameter" id="tracksdata.nodes.MaskDiskAttrs(output_key)"> <b><code>output_key</code></b>
-</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#str">str</a></code>, default:
+</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#str">str</a></code>, default:
                   <code><span title="tracksdata.constants.DEFAULT_ATTR_KEYS.MASK">MASK</span></code>
 )
           –
@@ -4308,7 +4308,7 @@ If not provided, DEFAULT_ATTR_KEYS.Z, DEFAULT_ATTR_KEYS.Y, DEFAULT_ATTR_KEYS.X w
 <ul>
 <li class="doc-section-item field-body">
 <h4 class="doc doc-heading doc-heading-parameter" id="tracksdata.nodes.MaskDiskAttrs._node_attrs_per_time(t)"> <b><code>t</code></b>
-</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></code>)
+</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#int">int</a></code>)
           –
           <div class="doc-md-description">
 <p>The time point to add attributes for.</p>
@@ -4460,7 +4460,7 @@ Such that, when provided, <code>frames[t]</code> will be passed to the <code>fun
 </li>
 <li class="doc-section-item field-body">
 <h4 class="doc doc-heading doc-heading-parameter" id="tracksdata.nodes.MaskDiskAttrs.add_node_attrs(t)"> <b><code>t</code></b>
-</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a> | None</code>, default:
+</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#int">int</a> | None</code>, default:
                   <code>None</code>
 )
           –
@@ -4580,7 +4580,7 @@ of nodes per time point can vary randomly within a specified range.</p>
 <ul>
 <li class="doc-section-item field-body">
 <h3 class="doc doc-heading doc-heading-parameter" id="tracksdata.nodes.RandomNodes(n_time_points)"> <b><code>n_time_points</code></b>
-</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></code>)
+</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#int">int</a></code>)
           –
           <div class="doc-md-description">
 <p>The number of time points to generate nodes for.</p>
@@ -4588,7 +4588,7 @@ of nodes per time point can vary randomly within a specified range.</p>
 </li>
 <li class="doc-section-item field-body">
 <h3 class="doc doc-heading doc-heading-parameter" id="tracksdata.nodes.RandomNodes(n_nodes_per_tp)"> <b><code>n_nodes_per_tp</code></b>
-</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#tuple">tuple</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a>, <a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a>]</code>)
+</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#tuple">tuple</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#int">int</a>, <a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#int">int</a>]</code>)
           –
           <div class="doc-md-description">
 <p>The minimum and maximum number of nodes to generate per time point.
@@ -4611,7 +4611,7 @@ The actual number is randomly chosen within this range for each time point.</p>
 </li>
 <li class="doc-section-item field-body">
 <h3 class="doc doc-heading doc-heading-parameter" id="tracksdata.nodes.RandomNodes(random_state)"> <b><code>random_state</code></b>
-</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></code>, default:
+</h3>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#int">int</a></code>, default:
                   <code>0</code>
 )
           –
@@ -4624,7 +4624,7 @@ The actual number is randomly chosen within this range for each time point.</p>
 <ul>
 <li class="doc-section-item field-body">
 <b><code><span title="tracksdata.nodes.RandomNodes.n_time_points">n_time_points</span></code></b>
-              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></code>)
+              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#int">int</a></code>)
           –
           <div class="doc-md-description">
 <p>Number of time points to generate.</p>
@@ -4632,7 +4632,7 @@ The actual number is randomly chosen within this range for each time point.</p>
 </li>
 <li class="doc-section-item field-body">
 <b><code><span title="tracksdata.nodes.RandomNodes.n_nodes">n_nodes</span></code></b>
-              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#tuple">tuple</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a>, <a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a>]</code>)
+              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#tuple">tuple</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#int">int</a>, <a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#int">int</a>]</code>)
           –
           <div class="doc-md-description">
 <p>Range of nodes per time point.</p>
@@ -4640,7 +4640,7 @@ The actual number is randomly chosen within this range for each time point.</p>
 </li>
 <li class="doc-section-item field-body">
 <b><code><span title="tracksdata.nodes.RandomNodes.spatial_cols">spatial_cols</span></code></b>
-              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#list">list</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#str">str</a>]</code>)
+              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#list">list</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#str">str</a>]</code>)
           –
           <div class="doc-md-description">
 <p>Names of spatial coordinate columns.</p>
@@ -4753,7 +4753,7 @@ The actual number is randomly chosen within this range for each time point.</p>
 <ul>
 <li class="doc-section-item field-body">
 <h4 class="doc doc-heading doc-heading-parameter" id="tracksdata.nodes.RandomNodes._nodes_per_time(t)"> <b><code>t</code></b>
-</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></code>)
+</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#int">int</a></code>)
           –
           <div class="doc-md-description">
 <p>The time point to add nodes for.</p>
@@ -4773,7 +4773,7 @@ The actual number is randomly chosen within this range for each time point.</p>
 <p><span class="doc-section-title">Returns:</span></p>
 <ul>
 <li class="doc-section-item field-body">
-<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#list">list</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#dict">dict</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#str">str</a>, <a class="autorefs autorefs-external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="typing.Any">Any</a>]]</code>
+<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#list">list</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#dict">dict</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#str">str</a>, <a class="autorefs autorefs-external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="typing.Any">Any</a>]]</code>
           –
           <div class="doc-md-description">
 <p>The nodes to add to the graph.</p>
@@ -5088,7 +5088,7 @@ _spacing : tuple[float, float] | None
 <p><span class="doc-section-title">Returns:</span></p>
 <ul>
 <li class="doc-section-item field-body">
-<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#list">list</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#str">str</a>]</code>
+<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#list">list</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#str">str</a>]</code>
           –
           <div class="doc-md-description">
 <p>The names of the axes of the labels.</p>
@@ -5215,7 +5215,7 @@ and bulk adds all nodes.</p>
 <ul>
 <li class="doc-section-item field-body">
 <h4 class="doc doc-heading doc-heading-parameter" id="tracksdata.nodes.RegionPropsNodes._nodes_per_time(t)"> <b><code>t</code></b>
-</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></code>)
+</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#int">int</a></code>)
           –
           <div class="doc-md-description">
 <p>The time point to assign to the created nodes.</p>
@@ -5243,7 +5243,7 @@ and bulk adds all nodes.</p>
 <p><span class="doc-section-title">Returns:</span></p>
 <ul>
 <li class="doc-section-item field-body">
-<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#list">list</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#dict">dict</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#str">str</a>, <a class="autorefs autorefs-external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="typing.Any">Any</a>]]</code>
+<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#list">list</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#dict">dict</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#str">str</a>, <a class="autorefs autorefs-external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="typing.Any">Any</a>]]</code>
           –
           <div class="doc-md-description">
 <p>The nodes to add to the graph.</p>
@@ -5253,7 +5253,7 @@ and bulk adds all nodes.</p>
 <p><span class="doc-section-title">Raises:</span></p>
 <ul>
 <li class="doc-section-item field-body">
-<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/exceptions.html#ValueError">ValueError</a></code>
+<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/exceptions.html#ValueError">ValueError</a></code>
             –
           <div class="doc-md-description">
 <p>If labels is not 2D or 3D.</p>
@@ -5446,7 +5446,7 @@ When <code>t</code> is provided, it should be padded to include the time dimensi
 </li>
 <li class="doc-section-item field-body">
 <h4 class="doc doc-heading doc-heading-parameter" id="tracksdata.nodes.RegionPropsNodes.add_nodes(t)"> <b><code>t</code></b>
-</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a> | None</code>, default:
+</h4>              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/functions.html#int">int</a> | None</code>, default:
                   <code>None</code>
 )
           –
@@ -5471,7 +5471,7 @@ intensity-based properties. Must have the same shape as labels
 <p><span class="doc-section-title">Raises:</span></p>
 <ul>
 <li class="doc-section-item field-body">
-<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/exceptions.html#ValueError">ValueError</a></code>
+<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/exceptions.html#ValueError">ValueError</a></code>
             –
           <div class="doc-md-description">
 <p>If the graph already has a <code>scale</code> metadata entry that differs from
@@ -5731,7 +5731,7 @@ resolution than the one used to compute them.</p>
 <p><span class="doc-section-title">Returns:</span></p>
 <ul>
 <li class="doc-section-item field-body">
-<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#list">list</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#str">str</a>]</code>
+<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#list">list</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/builtins/stdtypes.html#str">str</a>]</code>
           –
           <div class="doc-md-description">
 <p>List of attribute key names that will be added to nodes.</p>
