@@ -76,7 +76,29 @@ tracks_df, track_graph, track_labels = td.functional.to_napari_format(
 )
 
 viewer = napari.Viewer()
-viewer.add_labels(track_labels)
+viewer.add_labels(track_labels, scale=track_labels.scale)
 viewer.add_tracks(tracks_df, graph=track_graph)
 napari.run()
 ```
+
+Large 3D data materializes a lot of voxels per timepoint, which is slow to render. Pass
+`downscale` to draw the labels coarsely, and pick per-axis factors that equalize the
+*physical* voxel size — for anisotropic data that usually means leaving `z` alone:
+
+```python
+import numpy as np
+
+tracks_df, track_graph, track_labels = td.functional.to_napari_format(
+    solution_graph,
+    shape=labels.shape,
+    mask_key="mask",
+    downscale=(1, 4, 4),
+    dtype=np.uint32,
+)
+```
+
+Downscaling is nearest-neighbor. Objects thinner than the factor are drawn as a single
+voxel so that they stay visible and selectable, but their shape is meaningless, and a
+voxel covered by several objects may show either of them. Use the full-resolution view
+for anything quantitative, and for editing: coordinates taken from a downscaled layer
+refer to downscaled voxels and must not be written back into the graph as-is.

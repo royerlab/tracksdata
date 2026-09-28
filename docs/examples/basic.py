@@ -134,8 +134,10 @@ def basic_tracking_example(show_napari_viewer: bool = True) -> None:
         print("Opening napari viewer...")
         viewer = napari.Viewer()
 
-        # Add original segmented labels
-        viewer.add_labels(track_labels, name="Tracked Labels")
+        # Add original segmented labels.
+        # For large 3D data, pass `downscale=(1, 4, 4)` to `to_napari_format` above to
+        # render the labels coarsely; this example's data is small enough not to need it.
+        viewer.add_labels(track_labels, name="Tracked Labels", scale=track_labels.scale)
 
         # Add tracking trajectories with lineage information
         viewer.add_tracks(tracks_df, graph=track_graph, name="Tracks")

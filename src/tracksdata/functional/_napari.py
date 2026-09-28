@@ -9,26 +9,40 @@ from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph._base_graph import BaseGraph
 
 if TYPE_CHECKING:
+    import numpy as np
+
     from tracksdata.array._graph_array import GraphArrayView
 
 
 @overload
 def to_napari_format(
     graph: BaseGraph,
-    shape: tuple[int, ...] | None,
-    solution_key: str | None,
-    output_tracklet_id_key: str,
-    mask_key: None,
+    shape: tuple[int, ...] | None = ...,
+    solution_key: str | None = ...,
+    output_tracklet_id_key: str = ...,
+    *,
+    mask_key: None = ...,
+    chunk_shape: tuple[int] | None = ...,
+    buffer_cache_size: int | None = ...,
+    allow_frame_skip: bool = ...,
+    downscale: int | tuple[int, ...] | None = ...,
+    dtype: "np.dtype | None" = ...,
 ) -> tuple[pl.DataFrame, dict[int, int]]: ...
 
 
 @overload
 def to_napari_format(
     graph: BaseGraph,
-    shape: tuple[int, ...] | None,
-    solution_key: str | None,
-    output_tracklet_id_key: str,
+    shape: tuple[int, ...] | None = ...,
+    solution_key: str | None = ...,
+    output_tracklet_id_key: str = ...,
+    *,
     mask_key: str,
+    chunk_shape: tuple[int] | None = ...,
+    buffer_cache_size: int | None = ...,
+    allow_frame_skip: bool = ...,
+    downscale: int | tuple[int, ...] | None = ...,
+    dtype: "np.dtype | None" = ...,
 ) -> tuple[pl.DataFrame, dict[int, int], "GraphArrayView"]: ...
 
 
@@ -41,6 +55,8 @@ def to_napari_format(
     chunk_shape: tuple[int] | None = None,
     buffer_cache_size: int | None = None,
     allow_frame_skip: bool = False,
+    downscale: int | tuple[int, ...] | None = None,
+    dtype: "np.dtype | None" = None,
 ) -> (
     tuple[
         pl.DataFrame,
@@ -82,6 +98,16 @@ def to_napari_format(
     allow_frame_skip : bool, optional
         Whether to allow frame skipping when assigning tracklet ids. If True, tracklets can skip
 
+    downscale : int | tuple[int, ...] | None, optional
+        Render the labels layer at a reduced resolution. `shape` stays at full resolution.
+        See [GraphArrayView][tracksdata.array.GraphArrayView] for the trade-offs; in
+        short, prefer per-axis factors matched to the physical voxel size, and do not
+        edit a graph through a downscaled layer.
+    dtype : np.dtype | None, optional
+        The dtype of the labels layer. Worth passing together with `downscale`: the
+        inferred dtype follows the attribute column, which is often wider than tracklet
+        ids need, and passing it explicitly also skips the inference query.
+
     Examples
     --------
 
@@ -89,6 +115,16 @@ def to_napari_format(
     labels = ...
     graph = ...
     tracks_data, dict_graph, array_view = to_napari_format(graph, labels.shape, mask_key="mask")
+    viewer.add_labels(array_view, scale=array_view.scale)
+    ```
+
+    For large 3D data, render coarsely. Pick factors that equalize physical voxel size,
+    which for anisotropic data means leaving `z` alone:
+
+    ```python
+    tracks_data, dict_graph, array_view = to_napari_format(
+        graph, labels.shape, mask_key="mask", downscale=(1, 4, 4), dtype=np.uint32
+    )
     ```
 
     Returns
@@ -130,6 +166,8 @@ def to_napari_format(
             attr_key=output_tracklet_id_key,
             chunk_shape=chunk_shape,
             buffer_cache_size=buffer_cache_size,
+            downscale=downscale,
+            dtype=dtype,
         )
 
         return tracks_data, dict_graph, array_view

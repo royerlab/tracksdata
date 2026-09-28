@@ -32,6 +32,36 @@ def _validate_shape(
     return shape
 
 
+def _normalize_downscale(
+    downscale: int | Sequence[int] | None,
+    ndim: int,
+) -> np.ndarray:
+    """
+    Normalize `downscale` to an int64 vector of per-spatial-axis factors.
+
+    Unlike `chunk_shape`, a short sequence is rejected rather than padded: `downscale`
+    changes the physical meaning of every voxel, so a wrong-length sequence would show
+    up as misregistered data rather than as an error.
+    """
+    if downscale is None:
+        return np.ones(ndim, dtype=np.int64)
+
+    if not np.issubdtype(np.asarray(downscale).dtype, np.integer):
+        raise ValueError(f"`downscale` must be integer, got {downscale!r}")
+
+    if np.isscalar(downscale):
+        factors = np.full(ndim, downscale, dtype=np.int64)
+    else:
+        factors = np.asarray(downscale, dtype=np.int64).reshape(-1)
+        if len(factors) != ndim:
+            raise ValueError(f"`downscale` must have length {ndim}, got {len(factors)}")
+
+    if np.any(factors < 1):
+        raise ValueError(f"`downscale` factors must be >= 1, got {factors.tolist()}")
+
+    return factors
+
+
 def chain_indices(slicing1: ArrayIndex | None, slicing2: ArrayIndex | None) -> ArrayIndex:
     """Chain two array indexing operations into a single one.
 
@@ -136,10 +166,37 @@ class GraphArrayView(BaseReadOnlyArray):
     shape : tuple[int, ...] | None, optional
         The shape of the array. If None, the shape is inferred from the graph metadata `shape` key.
     chunk_shape : tuple[int] | None, optional
-        The chunk shape for the array. If None, the default chunk size is used.
+        The chunk shape for the array, counted in *downscaled* voxels.
+        If None, the default chunk size is used.
     buffer_cache_size : int, optional
         The maximum number of buffers to keep in the cache for the array.
         If None, the default buffer cache size is used.
+    downscale : int | tuple[int, ...] | None, optional
+        Per-spatial-axis integer factors used to render the graph at a reduced
+        resolution, trading accuracy for memory and speed. `shape` is always given at
+        full resolution; `shape` of the resulting array is `ceil(shape / downscale)`,
+        with the time axis left untouched.
+
+        Prefer the tuple form and pick factors that equalize *physical* voxel size, i.e.
+        `scale[i] * downscale[i]` roughly constant across spatial axes. Microscopy data
+        is usually already anisotropic, so an isotropic factor coarsens the axis that
+        has least to give: for `scale=(1.97, 0.485, 0.485)`, `downscale=(1, 4, 4)` both
+        saves more memory than `(2, 2, 2)` and preserves z.
+
+        Rendering is nearest-neighbor (see `Mask.paint_buffer`). Objects thinner than
+        the factor are drawn as a single voxel so that they stay visible and selectable,
+        but their shape and size are meaningless, and the value of a voxel covered by
+        more than one object is unspecified. Use `downscale=1` for anything quantitative
+        such as metrics or CTC export.
+
+        Coordinates read out of this array are in downscaled coordinates. Writing them
+        back into the graph without rescaling corrupts it, so editing a graph through a
+        view with `downscale != 1` is unsupported.
+
+    See Also
+    --------
+    [Mask.paint_buffer][tracksdata.nodes.Mask.paint_buffer]:
+        The rendering primitive, which documents the sampling convention.
     """
 
     def __init__(
@@ -152,6 +209,7 @@ class GraphArrayView(BaseReadOnlyArray):
         chunk_shape: tuple[int, ...] | int | None = None,
         buffer_cache_size: int | None = None,
         dtype: np.dtype | None = None,
+        downscale: int | tuple[int, ...] | None = None,
     ):
         if attr_key not in graph.node_attr_keys(return_ids=True):
             raise ValueError(f"Attribute key '{attr_key}' not found in graph. Expected '{graph.node_attr_keys()}'")
@@ -176,7 +234,21 @@ class GraphArrayView(BaseReadOnlyArray):
                     dtype = np.uint8
 
         self._dtype = dtype
-        self.original_shape = _validate_shape(shape, graph, "GraphArrayView")
+
+        # `full_shape`, `Mask.bbox` and `offset` are in graph (full-resolution) coordinates.
+        # `original_shape`, `_indices`, `chunk_shape` and the cache buffers are in view
+        # (downscaled) coordinates. Only `_fill_array` and `_bbox_to_slices` cross over.
+        # normalized to a tuple: the graph metadata may hold a list, which would make
+        # the public shape attributes compare unequal depending on the graph backend
+        self.full_shape = tuple(int(s) for s in _validate_shape(shape, graph, "GraphArrayView"))
+        self._downscale = _normalize_downscale(downscale, len(self.full_shape) - 1)
+        # `reindex` shallow-copies, so derived views share this array; keep it immutable
+        self._downscale.flags.writeable = False
+        self._offset_vec = self._offset_as_array(len(self.full_shape) - 1)
+        self.original_shape = (
+            self.full_shape[0],
+            *((np.asarray(self.full_shape[1:], dtype=np.int64) + self._downscale - 1) // self._downscale).tolist(),
+        )
 
         chunk_shape = chunk_shape or get_options().gav_chunk_shape
         if isinstance(chunk_shape, int):
@@ -225,6 +297,38 @@ class GraphArrayView(BaseReadOnlyArray):
     def dtype(self) -> np.dtype:
         """Returns the dtype of the array."""
         return np.dtype(self._dtype)
+
+    @property
+    def downscale(self) -> tuple[int, ...]:
+        """Per-spatial-axis downscaling factors, in the order of the spatial axes."""
+        return tuple(int(f) for f in self._downscale)
+
+    @property
+    def scale(self) -> tuple[float, ...]:
+        """
+        Voxel size of this array, aligned with `shape`, for use as a napari `scale`.
+
+        This is a convenience for callers that have no other source of physical scale.
+        A caller that already tracks one must instead multiply its own scale by
+        `downscale`: using this property alongside an existing scale double-counts the
+        downscaling. Note also that when the graph carries no `scale` metadata this
+        falls back to `downscale` alone, which looks like a valid scale but is not.
+
+        Slice steps are deliberately not folded in.
+        """
+        base = self.graph.metadata.get(DEFAULT_METADATA_KEYS.SCALE)
+        if base is None:
+            base = np.ones(len(self._downscale))
+        else:
+            base = np.asarray(base, dtype=float).reshape(-1)
+            if len(base) != len(self._downscale):
+                raise ValueError(
+                    f"Graph metadata '{DEFAULT_METADATA_KEYS.SCALE}' has length {len(base)}, "
+                    f"expected {len(self._downscale)} (spatial axes only, without time)."
+                )
+        scale = (1.0, *(base * self._downscale).tolist())
+        # drop axes that were indexed away, so `scale` stays aligned with `shape`
+        return tuple(s for s, ind in zip(scale, self._indices, strict=True) if not np.isscalar(ind))
 
     def __getitem__(self, index: ArrayIndex) -> "GraphArrayView":
         """Return a sliced view of the GraphArrayView.
@@ -346,6 +450,13 @@ class GraphArrayView(BaseReadOnlyArray):
         np.ndarray
             The filled buffer.
         """
+        # the window is in view coordinates, the spatial index is in graph coordinates.
+        # coarse `[a, b)` covers full-resolution `[a * f, b * f)`; the index treats the
+        # upper corner as closed, so this stays over-inclusive, which is safe.
+        volume_slicing = tuple(
+            slice(int(s.start) * int(f), int(s.stop) * int(f))
+            for s, f in zip(volume_slicing, self._downscale, strict=True)
+        )
         subgraph = self._spatial_filter[(slice(time, time), *volume_slicing)]
         df = subgraph.node_attrs(
             attr_keys=[self._attr_key, DEFAULT_ATTR_KEYS.MASK],
@@ -353,7 +464,7 @@ class GraphArrayView(BaseReadOnlyArray):
 
         for mask, value in zip(df[DEFAULT_ATTR_KEYS.MASK], df[self._attr_key], strict=True):
             mask: Mask
-            mask.paint_buffer(buffer, value, offset=self._offset)
+            mask.paint_buffer(buffer, value, offset=self._offset_vec, downscale=self._downscale)
 
     def _offset_as_array(self, ndim: int) -> np.ndarray:
         """Normalize `offset` to a vector for each spatial axis."""
@@ -372,20 +483,26 @@ class GraphArrayView(BaseReadOnlyArray):
         Returns `None` when the bbox does not overlap the current array volume.
         """
         bbox = np.asarray(bbox, dtype=np.int64).reshape(-1)
-        ndim = len(self.original_shape) - 1
+        ndim = len(self.full_shape) - 1
         if len(bbox) != 2 * ndim:
             raise ValueError(f"`bbox` must have length {2 * ndim}, got {len(bbox)}")
 
-        offset = self._offset_as_array(ndim)
-        start = bbox[:ndim] + offset
-        stop = bbox[ndim:] + offset
+        start = bbox[:ndim] + self._offset_vec
+        stop = bbox[ndim:] + self._offset_vec
 
-        shape = np.asarray(self.original_shape[1:], dtype=np.int64)
+        shape = np.asarray(self.full_shape[1:], dtype=np.int64)
         start = np.clip(start, 0, shape)
         stop = np.clip(stop, 0, shape)
 
         if np.any(stop <= start):
             return None
+
+        # Floor the start and ceil the stop. Painting can touch output voxels
+        # `[ceil(start / f), ceil(stop / f))`, and a too-small object instead gets a
+        # fallback voxel at `center // f`, which can fall *below* `ceil(start / f)`.
+        # Flooring the stop would leave the last partially covered voxel stale.
+        start = start // self._downscale
+        stop = (stop + self._downscale - 1) // self._downscale
 
         return tuple(slice(int(s), int(e)) for s, e in zip(start, stop, strict=True))
 

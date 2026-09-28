@@ -10,6 +10,27 @@ from tracksdata.nodes import MaskDiskAttrs
 
 @pytest.mark.parametrize("metadata_shape", [True, False])
 def test_napari_conversion(metadata_shape: bool) -> None:
+    _run_napari_conversion(metadata_shape)
+
+
+def test_napari_conversion_downscale() -> None:
+    """`downscale` and `dtype` must reach the array view, with `shape` staying full-resolution."""
+    array_view = _run_napari_conversion(
+        metadata_shape=False,
+        downscale=(1, 2, 2),
+        dtype=np.uint32,
+    )
+
+    assert array_view.full_shape == (2, 10, 22, 32)
+    assert array_view.shape == (2, 10, 11, 16)
+    assert array_view.downscale == (1, 2, 2)
+    assert array_view.dtype == np.uint32
+    assert array_view.scale == (1.0, 1.0, 2.0, 2.0)
+    # the disks are still rendered, just coarsely
+    assert np.asarray(array_view[0]).any()
+
+
+def _run_napari_conversion(metadata_shape: bool, **kwargs):
     positions = np.asarray(
         [
             [0, 5, 10, 20],  # t=0, z=5, y=10, x=20
@@ -55,6 +76,7 @@ def test_napari_conversion(metadata_shape: bool) -> None:
         graph,
         shape=arg_shape,
         mask_key=DEFAULT_ATTR_KEYS.MASK,
+        **kwargs,
     )
 
     assert dict_graph == tracklet_id_graph
@@ -66,7 +88,9 @@ def test_napari_conversion(metadata_shape: bool) -> None:
         positions,
     )
 
-    assert array_view.shape == (2, 10, 22, 32)
+    if not kwargs:
+        assert array_view.shape == (2, 10, 22, 32)
+        np.testing.assert_equal(np.unique(array_view[0]), [0, 1])
+        np.testing.assert_equal(np.unique(array_view[1]), [0, 2, 3])
 
-    np.testing.assert_equal(np.unique(array_view[0]), [0, 1])
-    np.testing.assert_equal(np.unique(array_view[1]), [0, 2, 3])
+    return array_view
