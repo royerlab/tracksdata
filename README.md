@@ -11,7 +11,7 @@ A common data structure and basic tools for multi-object tracking.
 ## Features
 
 - Graph-based representation of tracking problems
-- In-memory (RustWorkX) and database-backed (SQL) graph backends
+- In-memory (RustWorkX), database-backed (SQL), and lazy read-only GEFF/Zarr graph backends
 - Nodes and edges can take arbitrary attributes
 - SQLGraph backend can index frequently queried attributes for faster filtering
 - Standardize API for node operators (e.g. defining objects and their attributes)
@@ -35,7 +35,7 @@ It uses graphs to represent detections (nodes) and their connections (edges), ma
 Key benefits:
 - Consistent data representation for tracking problems
 - Modular components that can be combined as needed
-- Support for both small datasets (in-memory) and large datasets (database)
+- Support for small in-memory datasets and large database- or GEFF-backed datasets
 
 ## Documentation
 

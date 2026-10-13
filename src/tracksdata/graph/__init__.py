@@ -4,6 +4,7 @@ from tracksdata.graph._base_graph import BaseGraph, MetadataView
 from tracksdata.graph._graph_view import GraphView, ViewMode
 from tracksdata.graph._rustworkx_graph import IndexedRXGraph, RustWorkXGraph
 from tracksdata.graph._sql_graph import SQLGraph
+from tracksdata.graph._zarr_sql_graph import ZarrSQLGraph
 
 InMemoryGraph = RustWorkXGraph
 
@@ -16,4 +17,5 @@ __all__ = [
     "RustWorkXGraph",
     "SQLGraph",
     "ViewMode",
+    "ZarrSQLGraph",
 ]
