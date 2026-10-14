@@ -2,6 +2,7 @@ import math
 
 import polars as pl
 import pytest
+from ilpy import Preference
 
 from tracksdata.attrs import Attr
 from tracksdata.constants import DEFAULT_ATTR_KEYS
@@ -833,3 +834,105 @@ def test_ilp_solver_init_with_merge_weight() -> None:
     solver = ILPSolver(merge_weight=merge_expr)
     assert solver.merge_weight_expr is not None
     assert str(solver.merge_weight_expr) == str(merge_expr)
+
+
+def test_ilp_solver_preference_default() -> None:
+    """The default order is Gurobi, then SCIP, which keeps old behavior."""
+    solver = ILPSolver()
+    assert solver._solver_preference == [Preference.Gurobi, Preference.Scip]
+
+
+def test_ilp_solver_preference_single_values() -> None:
+    """A single enum or a single name gives a one-item list."""
+    assert ILPSolver(solver_preference=Preference.Scip)._solver_preference == [Preference.Scip]
+    assert ILPSolver(solver_preference="scip")._solver_preference == [Preference.Scip]
+    # The name match ignores case.
+    assert ILPSolver(solver_preference="SCIP")._solver_preference == [Preference.Scip]
+
+
+def test_ilp_solver_preference_sequence() -> None:
+    """A sequence of enums and names keeps its order."""
+    solver = ILPSolver(solver_preference=[Preference.Gurobi, "scip"])
+    assert solver._solver_preference == [Preference.Gurobi, Preference.Scip]
+
+
+def test_ilp_solver_preference_unknown_name() -> None:
+    """An unknown backend name raises a clear ValueError."""
+    with pytest.raises(ValueError, match="Unknown solver preference"):
+        ILPSolver(solver_preference="not_a_solver")
+
+
+def test_ilp_solver_preference_empty_sequence() -> None:
+    """An empty sequence names no backend and is an error."""
+    with pytest.raises(ValueError, match="at least one backend"):
+        ILPSolver(solver_preference=[])
+
+
+def test_ilp_solver_preference_invalid_type() -> None:
+    """A value that is not a Preference, a str, or a sequence raises TypeError."""
+    with pytest.raises(TypeError, match="Preference, a str, or a sequence"):
+        ILPSolver(solver_preference=3)
+
+
+def test_ilp_solver_tries_each_preference(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The solve loop tries every preference in order and then raises.
+
+    A fake Solver fails for every backend. The test checks that the loop tries
+    both preferences, in order, and then raises the final error.
+    """
+    from tracksdata.solvers import _ilp_solver
+
+    attempted: list[Preference] = []
+
+    class _FailingSolver:
+        def __init__(self, *args: object, preference: Preference, **kwargs: object) -> None:
+            attempted.append(preference)
+            raise RuntimeError("no backend available in this test")
+
+    monkeypatch.setattr(_ilp_solver, "Solver", _FailingSolver)
+
+    graph = RustWorkXGraph()
+    graph.add_node_attr_key("x", dtype=pl.Float64)
+    graph.add_node_attr_key("y", dtype=pl.Float64)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64)
+    node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
+    node1 = graph.add_node({DEFAULT_ATTR_KEYS.T: 1, "x": 1.0, "y": 1.0})
+    graph.add_edge(node0, node1, {DEFAULT_ATTR_KEYS.EDGE_DIST: -1.0})
+
+    solver = ILPSolver(solver_preference=[Preference.Gurobi, Preference.Scip])
+    with pytest.raises(RuntimeError, match="Failed to solve"):
+        solver.solve(graph)
+
+    assert attempted == [Preference.Gurobi, Preference.Scip]
+
+
+def test_ilp_solver_solve_with_preference_scip() -> None:
+    """A solve that selects SCIP finds a non-trivial solution.
+
+    SCIP is open-source, so this test needs no Gurobi license and no GPU.
+    """
+    graph = RustWorkXGraph()
+
+    graph.add_node_attr_key("x", dtype=pl.Float64)
+    graph.add_node_attr_key("y", dtype=pl.Float64)
+    graph.add_edge_attr_key(DEFAULT_ATTR_KEYS.EDGE_DIST, dtype=pl.Float64)
+
+    node0 = graph.add_node({DEFAULT_ATTR_KEYS.T: 0, "x": 0.0, "y": 0.0})
+    node1 = graph.add_node({DEFAULT_ATTR_KEYS.T: 1, "x": 1.0, "y": 1.0})
+    node2 = graph.add_node({DEFAULT_ATTR_KEYS.T: 1, "x": 2.0, "y": 2.0})
+
+    graph.add_edge(node0, node1, {DEFAULT_ATTR_KEYS.EDGE_DIST: -1.0})
+    graph.add_edge(node0, node2, {DEFAULT_ATTR_KEYS.EDGE_DIST: -2.0})
+
+    solver = ILPSolver(solver_preference="scip", return_solution=True)
+    solution_graph = solver.solve(graph)
+
+    node_attrs = graph.node_attrs()
+    edge_attrs = graph.edge_attrs()
+
+    selected_edges = edge_attrs.filter(edge_attrs[DEFAULT_ATTR_KEYS.SOLUTION])
+    selected_nodes = node_attrs.filter(node_attrs[DEFAULT_ATTR_KEYS.SOLUTION])
+
+    assert len(selected_edges) > 0
+    assert len(selected_nodes) > 0
+    assert solution_graph is not None

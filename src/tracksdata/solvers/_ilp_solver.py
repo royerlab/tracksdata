@@ -1,3 +1,5 @@
+from collections.abc import Sequence
+
 import numpy as np
 import polars as pl
 from ilpy import (
@@ -17,6 +19,50 @@ from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.graph._graph_view import GraphView
 from tracksdata.solvers._base_solver import BaseSolver
 from tracksdata.utils._logging import LOG
+
+_DEFAULT_SOLVER_PREFERENCE = (Preference.Gurobi, Preference.Scip)
+_PREFERENCE_BY_NAME = {name.lower(): member for name, member in Preference.__members__.items()}
+_VALID_PREFERENCE_NAMES = ", ".join(sorted(Preference.__members__))
+
+
+def _coerce_preference(value: Preference | str) -> Preference:
+    """Return the ilpy Preference for a Preference or a backend name."""
+    if isinstance(value, Preference):
+        return value
+    if isinstance(value, str):
+        key = value.strip().lower()
+        if key in _PREFERENCE_BY_NAME:
+            return _PREFERENCE_BY_NAME[key]
+        if key == "cuopt":
+            raise ValueError(
+                "Solver preference 'cuopt' needs ilpy >= 0.6.0, which adds Preference.CuOpt. "
+                f"The installed ilpy exposes these backends: {_VALID_PREFERENCE_NAMES}."
+            )
+        raise ValueError(f"Unknown solver preference {value!r}. Valid backends: {_VALID_PREFERENCE_NAMES}.")
+    raise TypeError(f"A solver preference must be a Preference or a str, not {type(value).__name__}.")
+
+
+def _normalize_solver_preference(
+    solver_preference: Preference | str | Sequence[Preference | str] | None,
+) -> list[Preference]:
+    """Return the ordered list of backends to try.
+
+    None gives the default order. A single value gives a one-item list. A
+    sequence keeps its order. The list must not be empty.
+    """
+    if solver_preference is None:
+        return list(_DEFAULT_SOLVER_PREFERENCE)
+    if isinstance(solver_preference, (Preference, str)):
+        return [_coerce_preference(solver_preference)]
+    if isinstance(solver_preference, Sequence):
+        preferences = [_coerce_preference(value) for value in solver_preference]
+        if not preferences:
+            raise ValueError("solver_preference must name at least one backend.")
+        return preferences
+    raise TypeError(
+        "solver_preference must be a Preference, a str, or a sequence of these, "
+        f"not {type(solver_preference).__name__}."
+    )
 
 
 class ILPSolver(BaseSolver):
@@ -64,6 +110,12 @@ class ILPSolver(BaseSolver):
         Optimality gap tolerance (0.0 for exact solutions).
     timeout : float | None
         Time limit for solving in seconds. If None, no timeout is set.
+    solver_preference : Preference | str | Sequence[Preference | str] | None, default None
+        Solver backends to try, in order. The solver uses the first backend that
+        succeeds and stops. Accepts an ilpy Preference, a backend name as a string
+        (for example "gurobi", "cuopt", or "scip"), or a sequence of either. A
+        string is matched to a Preference by name, without case. The name "cuopt"
+        needs ilpy >= 0.6.0. When None, the order is Gurobi, then SCIP.
 
     Attributes
     ----------
@@ -146,6 +198,7 @@ class ILPSolver(BaseSolver):
         return_solution: bool = True,
         gap: float = 0.0,
         timeout: float | None = None,
+        solver_preference: Preference | str | Sequence[Preference | str] | None = None,
     ):
         super().__init__(output_key=output_key, reset=reset, return_solution=return_solution)
         self.edge_weight_expr = EdgeAttr(edge_weight)
@@ -157,6 +210,7 @@ class ILPSolver(BaseSolver):
         self.num_threads = num_threads
         self.gap = gap
         self.timeout = timeout
+        self._solver_preference = _normalize_solver_preference(solver_preference)
         self.reset_model()
 
     def reset_model(self) -> None:
@@ -344,7 +398,7 @@ class ILPSolver(BaseSolver):
             raise ValueError("No edges found in the graph, there is nothing to solve.")
 
         solution = None
-        for preference in [Preference.Gurobi, Preference.Scip]:
+        for preference in self._solver_preference:
             try:
                 solver = Solver(
                     num_variables=self._count,
@@ -360,7 +414,10 @@ class ILPSolver(BaseSolver):
                 solution = solver.solve()
                 break
             except Exception as e:
-                LOG.warning(f"Solver failed with {preference.name}, trying Scip.\nGot error:\n{e}")
+                LOG.warning(
+                    f"Solver failed with preference {preference.name}. "
+                    f"Trying the next preference, if any.\nGot error:\n{e}"
+                )
                 continue
 
         if solution is None:

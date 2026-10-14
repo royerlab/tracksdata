@@ -96,12 +96,14 @@ def _load_tracks_file(tracks_file: Path) -> dict[int, int]:
         A dictionary mapping track IDs to their parent track IDs.
     """
     tracklet_id_graph = {}
+    columns = ["tracklet_id", "start", "end", "parent_tracklet_id"]
 
     try:
         df = pl.read_csv(
             tracks_file,
             separator=" ",
             has_header=False,
+            new_columns=columns,
             use_pyarrow=True,
         )
     except pa.ArrowInvalid:
@@ -110,15 +112,9 @@ def _load_tracks_file(tracks_file: Path) -> dict[int, int]:
             tracks_file,
             separator=" ",
             has_header=False,
+            new_columns=columns,
             use_pyarrow=False,
         )
-
-    df = df.rename(
-        {
-            "column_1": "tracklet_id",
-            "column_4": "parent_tracklet_id",
-        }
-    )
 
     df = df.filter(pl.col("parent_tracklet_id") > 0)
 
