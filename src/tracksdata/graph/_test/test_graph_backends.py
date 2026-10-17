@@ -172,6 +172,113 @@ def test_valid_attr_keys_are_not_rejected(graph_backend: BaseGraph) -> None:
     assert graph_backend.filter(EdgeAttr("w") == 1.0).edge_ids() == [ids["e"]]
 
 
+def _numpy_id_graph(graph: BaseGraph) -> dict[str, int]:
+    """A 3-node / 2-edge chain with one int node attr and one int edge attr."""
+    graph.add_node_attr_key("area", dtype=pl.Float64, default_value=0.0)
+    graph.add_node_attr_key("label", dtype=pl.Int64, default_value=0)
+    graph.add_edge_attr_key("rank", dtype=pl.Int64, default_value=0)
+    a = graph.add_node({"t": 0, "area": 1.0, "label": 10})
+    b = graph.add_node({"t": 1, "area": 2.0, "label": 20})
+    c = graph.add_node({"t": 2, "area": 3.0, "label": 30})
+    e_ab = graph.add_edge(a, b, {"rank": 0})
+    e_bc = graph.add_edge(b, c, {"rank": 1})
+    graph.add_overlap(b, c)
+    return {"a": a, "b": b, "c": c, "e_ab": e_ab, "e_bc": e_bc}
+
+
+# `np.int64` is not a subclass of `int`, and numpy integers leak out of nearly every
+# numpy / polars / scikit-image operation, so they reach the graph API constantly.
+# Database drivers do not know them: `sqlite3` falls back to the buffer protocol and
+# binds `np.int64(7)` as an 8-byte BLOB, so `node_id == np.int64(7)` matched nothing and
+# lookups silently reported "not found" instead of raising. Every read path below must
+# therefore give the same answer for a Python int and for the equal numpy integer.
+_NUMPY_ID_ACCESSORS: dict[str, Callable[[BaseGraph, dict[str, int], Callable[[int], Any]], Any]] = {
+    "has_node": lambda g, i, c: g.has_node(c(i["a"])),
+    "has_edge": lambda g, i, c: g.has_edge(c(i["a"]), c(i["b"])),
+    "edge_id": lambda g, i, c: g.edge_id(c(i["a"]), c(i["b"])),
+    "successors(scalar)": lambda g, i, c: g.successors(c(i["a"])),
+    "successors(list)": lambda g, i, c: g.successors([c(i["a"])]),
+    "predecessors(scalar)": lambda g, i, c: g.predecessors(c(i["b"])),
+    "predecessors(list)": lambda g, i, c: g.predecessors([c(i["b"])]),
+    "in_degree(scalar)": lambda g, i, c: g.in_degree(c(i["b"])),
+    "in_degree(list)": lambda g, i, c: g.in_degree([c(i["b"])]),
+    "out_degree(list)": lambda g, i, c: g.out_degree([c(i["a"])]),
+    "filter(node_ids).node_ids": lambda g, i, c: sorted(g.filter(node_ids=[c(i["a"])]).node_ids()),
+    "filter(node_ids).edge_ids": lambda g, i, c: sorted(g.filter(node_ids=[c(i["a"]), c(i["b"])]).edge_ids()),
+    "filter(node_ids).node_attrs": lambda g, i, c: (
+        g.filter(node_ids=[c(i["a"])]).node_attrs(attr_keys=["t"]).to_dicts()
+    ),
+    "filter(node_ids).subgraph": lambda g, i, c: sorted(
+        g.filter(node_ids=[c(i["a"]), c(i["b"])]).subgraph().node_ids()
+    ),
+    "filter(NodeAttr == value)": lambda g, i, c: sorted(g.filter(NodeAttr("label") == c(20)).node_ids()),
+    "filter(EdgeAttr == value)": lambda g, i, c: sorted(g.filter(EdgeAttr("rank") == c(1)).edge_ids()),
+    "filter(NodeAttr is_in values)": lambda g, i, c: sorted(
+        g.filter(NodeAttr("label").is_in([c(10), c(20)])).node_ids()
+    ),
+    "nodes[id]": lambda g, i, c: g.nodes[c(i["a"])]["area"],
+    "edges[id]": lambda g, i, c: g.edges[c(i["e_ab"])]["rank"],
+    # `overlaps` keeps only pairs with *both* endpoints in `node_ids`
+    "overlaps": lambda g, i, c: g.overlaps([c(i["b"]), c(i["c"])]),
+}
+
+
+@pytest.mark.parametrize(
+    "accessor",
+    list(_NUMPY_ID_ACCESSORS.values()),
+    ids=list(_NUMPY_ID_ACCESSORS.keys()),
+)
+def test_numpy_integer_ids_read_paths(
+    graph_backend: BaseGraph,
+    accessor: Callable[[BaseGraph, dict[str, int], Callable[[int], Any]], Any],
+) -> None:
+    """A numpy integer id or filter value behaves exactly like the equal Python int."""
+    ids = _numpy_id_graph(graph_backend)
+
+    expected = accessor(graph_backend, ids, int)
+    assert accessor(graph_backend, ids, np.int64) == expected
+
+
+@pytest.mark.parametrize("cast", [int, np.int64], ids=["int", "np.int64"])
+def test_numpy_integer_ids_write_paths(graph_backend: BaseGraph, cast: Callable[[int], Any]) -> None:
+    """Mutating calls take effect whether the id is a Python int or a numpy integer."""
+    ids = _numpy_id_graph(graph_backend)
+
+    graph_backend.update_node_attrs(node_ids=[cast(ids["a"])], attrs={"area": 9.0})
+    assert graph_backend.nodes[ids["a"]]["area"] == 9.0
+
+    graph_backend.update_edge_attrs(edge_ids=[cast(ids["e_ab"])], attrs={"rank": 7})
+    assert graph_backend.edges[ids["e_ab"]]["rank"] == 7
+
+    new_edge = graph_backend.add_edge(cast(ids["a"]), cast(ids["c"]), {"rank": 2})
+    assert graph_backend.has_edge(ids["a"], ids["c"])
+
+    graph_backend.remove_edge(edge_id=cast(new_edge))
+    assert not graph_backend.has_edge(ids["a"], ids["c"])
+
+    graph_backend.remove_edge(cast(ids["a"]), cast(ids["b"]))
+    assert not graph_backend.has_edge(ids["a"], ids["b"])
+
+    graph_backend.remove_node(cast(ids["a"]))
+    assert not graph_backend.has_node(ids["a"])
+
+    graph_backend.bulk_remove_nodes([cast(ids["b"])])
+    assert not graph_backend.has_node(ids["b"])
+
+
+def test_numpy_integer_ids_bulk_add(graph_backend: BaseGraph) -> None:
+    """Bulk adds accept numpy integer ids and store them as native integers."""
+    graph_backend.add_edge_attr_key("rank", dtype=pl.Int64, default_value=0)
+    node_ids = graph_backend.bulk_add_nodes([{"t": 0}, {"t": 1}])
+
+    graph_backend.bulk_add_edges([{"source_id": np.int64(node_ids[0]), "target_id": np.int64(node_ids[1]), "rank": 0}])
+
+    assert graph_backend.has_edge(node_ids[0], node_ids[1])
+    edge_df = graph_backend.edge_attrs(attr_keys=[DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET])
+    assert edge_df[DEFAULT_ATTR_KEYS.EDGE_SOURCE].to_list() == [node_ids[0]]
+    assert edge_df[DEFAULT_ATTR_KEYS.EDGE_TARGET].to_list() == [node_ids[1]]
+
+
 def test_add_node(graph_backend: BaseGraph) -> None:
     """Test adding nodes with various attributes."""
 

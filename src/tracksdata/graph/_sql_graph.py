@@ -43,6 +43,7 @@ from tracksdata.utils._dtypes import (
     sqlalchemy_type_to_polars_dtype,
 )
 from tracksdata.utils._logging import LOG
+from tracksdata.utils._numpy_native import is_int_like, to_native, to_native_list
 from tracksdata.utils._signal import (
     emit_node_added_events,
     emit_node_removed_events,
@@ -66,11 +67,7 @@ def _data_numpy_to_native(data: dict[str, Any]) -> None:
     """
     Convert numpy scalars to native Python scalars in place.
 
-    Database drivers do not know about numpy scalar types. ``sqlite3``, for example,
-    falls back to the buffer protocol and stores ``np.int64(7)`` as its raw
-    little-endian byte buffer (a BLOB), silently corrupting a column declared as
-    ``BIGINT``. Numpy floats and strings happen to survive because they subclass
-    their Python counterparts, which makes the corruption look selective.
+    See :func:`tracksdata.utils._numpy_native.to_native` for why drivers need this.
 
     Parameters
     ----------
@@ -78,10 +75,7 @@ def _data_numpy_to_native(data: dict[str, Any]) -> None:
         The data to convert. Modified in place.
     """
     for k, v in data.items():
-        # `np.generic` is the base class of every numpy scalar, and excludes
-        # (0-dim) arrays, which must be passed through untouched.
-        if isinstance(v, np.generic):
-            data[k] = v.item()
+        data[k] = to_native(v)
 
 
 def _normalize_updated_value(value: Any, schema: AttrSchema | None) -> Any:
@@ -146,7 +140,11 @@ def _to_sql_clause(f: Filter, table: type[DeclarativeBase]) -> Any:
     struct-field comparisons resolve to the flat physical column.
     """
     if isinstance(f, AttrComparison):
-        return f.op(_resolve_attr_filter_column(table, f), f.other)
+        # The compared value is bound as a SQL parameter, so numpy scalars (including
+        # the sequence of them that `is_in` takes) must be converted first.
+        other = f.other
+        other = to_native_list(other) if isinstance(other, list | tuple | np.ndarray) else to_native(other)
+        return f.op(_resolve_attr_filter_column(table, f), other)
 
     assert isinstance(f, AttrFilter)
     if f.op == "not":
@@ -200,9 +198,7 @@ class _SQLIDSet:
         *,
         occurrences: int = 1,
     ) -> None:
-        if hasattr(ids, "tolist"):
-            ids = ids.tolist()
-        self._ids: list[int] = list(ids)
+        self._ids: list[int] = to_native_list(ids)
         # Hold the engine, not the graph, so this set does not participate in
         # the graph -> SQLFilter -> _SQLIDSet -> graph reference cycle.
         # Otherwise the scratch table would only be dropped after Python's
@@ -1122,10 +1118,7 @@ class SQLGraph(BaseGraph):
         ValueError
             If any node_id does not exist in the graph.
         """
-        if hasattr(node_ids, "tolist"):
-            node_ids = node_ids.tolist()
-        else:
-            node_ids = list(node_ids)
+        node_ids = to_native_list(node_ids)
 
         if len(node_ids) == 0:
             return
@@ -1277,10 +1270,10 @@ class SQLGraph(BaseGraph):
         [add_overlap][tracksdata.graph.SQLGraph.add_overlap]:
             Add a single overlap to the graph.
         """
-        if hasattr(overlaps, "tolist"):
-            overlaps = overlaps.tolist()
-
-        overlaps = [{"source_id": int(source_id), "target_id": int(target_id)} for source_id, target_id in overlaps]
+        # `overlaps` is a nested sequence, so each id is converted individually
+        overlaps = [
+            {"source_id": to_native(source_id), "target_id": to_native(target_id)} for source_id, target_id in overlaps
+        ]
         self._chunked_sa_write(Session.bulk_insert_mappings, overlaps, self.Overlap)
 
     def overlaps(
@@ -1297,8 +1290,8 @@ class SQLGraph(BaseGraph):
         filtered in Polars afterwards to avoid a quadratic blow-up of bound
         parameters.
         """
-        if hasattr(node_ids, "tolist"):
-            node_ids = node_ids.tolist()
+        if node_ids is not None:
+            node_ids = to_native_list(node_ids)
 
         with Session(self._engine) as session:
             base_query = session.query(self.Overlap.source_id, self.Overlap.target_id)
@@ -1367,14 +1360,15 @@ class SQLGraph(BaseGraph):
         """
         single_node = False
         filter_node_ids: list[int] | None
-        if isinstance(node_ids, int):
-            node_ids = [node_ids]
+        if is_int_like(node_ids):
+            node_ids = [to_native(node_ids)]
             filter_node_ids = node_ids
             single_node = True
         elif node_ids is None:
             node_ids = self.node_ids()
             filter_node_ids = None
         else:
+            node_ids = to_native_list(node_ids)
             filter_node_ids = node_ids
 
         if isinstance(attr_keys, str):
@@ -2081,8 +2075,7 @@ class SQLGraph(BaseGraph):
                 LOG.info("No ids to update, skipping")
                 return
 
-            if hasattr(ids, "tolist"):
-                ids = ids.tolist()
+            ids = to_native_list(ids)
 
         # Handle array values with bulk_update_mappings
         schemas = self._attr_schemas_for_table(table_class)
@@ -2327,8 +2320,8 @@ class SQLGraph(BaseGraph):
     ) -> list[int] | int:
         edge_key_col = getattr(self.Edge, node_key)
 
-        if isinstance(node_ids, int):
-            stmt = sa.select(sa.func.count()).where(edge_key_col == node_ids)
+        if is_int_like(node_ids):
+            stmt = sa.select(sa.func.count()).where(edge_key_col == to_native(node_ids))
             with Session(self._engine) as session:
                 return int(session.execute(stmt).scalar())
 
@@ -2339,6 +2332,7 @@ class SQLGraph(BaseGraph):
             if node_ids is None:
                 degree.update(session.execute(base_stmt).all())
             else:
+                node_ids = to_native_list(node_ids)
                 # Chunk the IN(...) so the bound-parameter count stays below
                 # the backend's limit (notably SQLite's
                 # ``SQLITE_MAX_VARIABLE_NUMBER``). Each chunk's group-by result
@@ -2662,7 +2656,7 @@ class SQLGraph(BaseGraph):
         Check if the graph has a node with the given id.
         """
         with Session(self._engine) as session:
-            return session.scalar(sa.sql.expression.exists().where(self.Node.node_id == node_id).select())
+            return session.scalar(sa.sql.expression.exists().where(self.Node.node_id == to_native(node_id)).select())
 
     def has_edge(self, source_id: int, target_id: int) -> bool:
         """
@@ -2671,7 +2665,7 @@ class SQLGraph(BaseGraph):
         with Session(self._engine) as session:
             return (
                 session.query(self.Edge)
-                .filter(self.Edge.source_id == source_id, self.Edge.target_id == target_id)
+                .filter(self.Edge.source_id == to_native(source_id), self.Edge.target_id == to_native(target_id))
                 .count()
                 > 0
             )
@@ -2683,7 +2677,7 @@ class SQLGraph(BaseGraph):
         with Session(self._engine) as session:
             edge_id = (
                 session.query(self.Edge.edge_id)
-                .filter(self.Edge.source_id == source_id, self.Edge.target_id == target_id)
+                .filter(self.Edge.source_id == to_native(source_id), self.Edge.target_id == to_native(target_id))
                 .scalar()
             )
             if edge_id is None:
@@ -2704,10 +2698,7 @@ class SQLGraph(BaseGraph):
         ValueError
             If any edge_id does not exist in the graph.
         """
-        if hasattr(edge_ids, "tolist"):
-            edge_ids = edge_ids.tolist()
-        else:
-            edge_ids = list(edge_ids)
+        edge_ids = to_native_list(edge_ids)
 
         if len(edge_ids) == 0:
             return
