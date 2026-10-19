@@ -51,6 +51,7 @@ class BaseFilter(abc.ABC):
         edge_attr_keys: list[str] | None = None,
         *,
         mode: "ViewMode | None" = None,
+        root_fallback: bool = False,
     ) -> "GraphView":
         """
         Get a subgraph of the graph resulting from the filter.
@@ -59,6 +60,11 @@ class BaseFilter(abc.ABC):
             How the resulting view relates to its root graph (write-through
             only, or live-updating). Defaults to ``ViewMode.WRITE_THROUGH``
             when None.
+        root_fallback : bool
+            When True, reading a node attribute key the resulting view does not
+            hold is served from the root graph instead of raising. Off by
+            default: the fetch goes to the root's storage, which for a SQL root
+            means a query per read.
         """
 
     @abc.abstractmethod

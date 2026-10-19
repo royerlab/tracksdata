@@ -6,6 +6,7 @@ import bidict
 import numpy as np
 import polars as pl
 import rustworkx as rx
+from typing_extensions import override
 
 from tracksdata.attrs import Filter
 from tracksdata.constants import DEFAULT_ATTR_KEYS
@@ -13,6 +14,7 @@ from tracksdata.graph._base_graph import BaseGraph
 from tracksdata.graph._mapped_graph_mixin import MappedGraphMixin
 from tracksdata.graph._rustworkx_graph import IndexedRXGraph, RustWorkXGraph, RXFilter
 from tracksdata.graph.filters._indexed_filter import IndexRXFilter
+from tracksdata.utils._dataframe import unpack_array_attrs
 from tracksdata.utils._dtypes import AttrSchema
 from tracksdata.utils._signal import (
     emit_node_added_events,
@@ -107,6 +109,13 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
     sync : bool, default True
         Whether to automatically synchronize changes in the view.
         By default only the root graph is updated.
+    root_fallback : bool, default False
+        When True, reading a node attribute key this view does not hold is
+        served from the root graph instead of raising. This is what makes a
+        view built with a reduced `node_attr_keys` usable for the keys it left
+        out -- at the cost of going to the root's storage for them, which for a
+        SQL root is a query per read. Read path only -- writes already go
+        straight to the root for keys the view does not hold.
 
     Attributes
     ----------
@@ -157,6 +166,7 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         mode: ViewMode = ViewMode.WRITE_THROUGH,
         node_attr_keys: list[str] | None = None,
         edge_attr_keys: list[str] | None = None,
+        root_fallback: bool = False,
     ) -> None:
         # Initialize RustWorkXGraph
         RustWorkXGraph.__init__(self, rx_graph=None)  # rx_graph is not used to avoid initialization
@@ -210,6 +220,10 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
                 *self._edge_attr_keys,
             ]
             self._edge_attr_keys = list(dict.fromkeys(self._edge_attr_keys))
+
+        # When set, a read for a node attribute key this view does not hold is
+        # served from the root instead of raising. See `_node_attrs_from_node_ids`.
+        self._root_fallback = root_fallback
 
         # use parent graph overlaps
         self._overlaps = None
@@ -362,6 +376,52 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
                 except ValueError:
                     pass
             return keys
+
+    @override
+    def _validate_attr_keys(
+        self,
+        attr_keys: Sequence[str] | str | None,
+        mode: Literal["node", "edge"],
+    ) -> None:
+        """
+        Same validation as any other graph, plus a pointer when the key is only
+        missing because this view was built without it.
+
+        A view built with an explicit `node_attr_keys` list is otherwise a trap:
+        the key exists, the root has it, and the error says only that this graph
+        does not.
+
+        Parameters
+        ----------
+        attr_keys : Sequence[str] | str | None
+            The attribute keys to validate. `None` means "all keys" and is always valid.
+        mode : Literal["node", "edge"]
+            Whether to validate against node or edge attribute keys. The root-fallback
+            hint only ever applies to `"node"`; edge keys raise exactly as the base
+            implementation does.
+
+        Raises
+        ------
+        KeyError
+            If any key is not a declared attribute key of this view. When the key is
+            held by the root but excluded from this view, and `root_fallback` was not
+            set, the message also names `root_fallback=True` as the fix.
+        """
+        try:
+            super()._validate_attr_keys(attr_keys, mode)
+        except KeyError as err:
+            if mode != "node" or self._root_fallback:
+                raise
+            if isinstance(attr_keys, str):
+                attr_keys = [attr_keys]
+            _, missing = self._split_node_attr_keys(attr_keys)
+            on_root = sorted(set(missing) & set(self._root.node_attr_keys(return_ids=True)))
+            if not on_root:
+                raise
+            raise KeyError(
+                f"{err.args[0]} The root graph does hold {on_root}; build the view with "
+                "`root_fallback=True` to read those through it."
+            ) from None
 
     def edge_attr_keys(self, return_ids: bool = False) -> list[str]:
         """
@@ -1037,6 +1097,151 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
             raise RuntimeError("Out of sync graph view cannot be used to get predecessors")
         return super().predecessors(node_ids, attr_keys, return_attrs=return_attrs)
 
+    def _split_node_attr_keys(self, attr_keys: Sequence[str] | None) -> tuple[list[str], list[str]]:
+        """
+        Partition requested node attribute keys by whether this view holds them
+        locally.
+
+        Purely a membership check against this view's own `node_attr_keys()` --
+        it does not consult `root_fallback` or validate `request_from_root`
+        against the root. Callers decide what to do with each half.
+
+        `None` means "every key this view holds" -- it never reaches into the
+        root, since a fallback would silently pull in the columns the view was
+        built to leave out.
+
+        Parameters
+        ----------
+        attr_keys : Sequence[str] | None
+            The requested keys to partition. `None` means "every key this view
+            holds" (see above).
+
+        Returns
+        -------
+        tuple[list[str], list[str]]
+            `(present_locally, request_from_root)`, each in the order keys
+            appeared in `attr_keys` (or in `node_attr_keys()` order, when
+            `attr_keys` is `None`).
+        """
+        if attr_keys is None:
+            return self.node_attr_keys(return_ids=True), []
+
+        local = set(self.node_attr_keys(return_ids=True))
+        present_locally = [k for k in attr_keys if k in local]
+        request_from_root = [k for k in attr_keys if k not in local]
+        return present_locally, request_from_root
+
+    def _local_node_attrs_from_node_ids(
+        self,
+        id_keys: list[str],
+        *,
+        node_ids: list[int] | None = None,
+        attr_keys: Sequence[str] | str | None = None,
+        unpack: bool = False,
+    ) -> pl.DataFrame:
+        """
+        Read node attributes entirely from this view's own local storage.
+
+        The plain, no-fallback case: every requested key (or every key this view
+        holds, if `attr_keys` is `None`) is assumed to already live in this
+        view's `rx_graph`, so this is a direct call into the base
+        implementation plus the local -> external ID remap every `GraphView`
+        read needs.
+
+        Parameters
+        ----------
+        id_keys : list[str]
+            ID columns to remap from local to external IDs via
+            `_map_df_to_external` (NODE_ID, EDGE_SOURCE, EDGE_TARGET).
+        node_ids : list[int] | None
+            External node IDs to read, mapped to local IDs before the read.
+            `None` means every node in the view.
+        attr_keys : Sequence[str] | str | None
+            Keys to read, assumed local. `None` means every key this view holds.
+        unpack : bool
+            Whether to unpack array-typed columns into separate columns.
+
+        Returns
+        -------
+        pl.DataFrame
+            One row per requested node, with external IDs.
+        """
+        node_dfs = super()._node_attrs_from_node_ids(
+            node_ids=self._map_to_local(node_ids),
+            attr_keys=attr_keys,
+            unpack=unpack,
+        )
+        return self._map_df_to_external(node_dfs, id_keys)
+
+    def _fallback_node_attrs_from_node_ids(
+        self,
+        id_keys: list[str],
+        *,
+        node_ids: list[int] | None,
+        attr_keys: list[str],
+        local_keys: list[str],
+        root_keys: list[str],
+        unpack: bool,
+    ) -> pl.DataFrame:
+        """
+        Read a mix of locally-held and root-only attribute keys, joined on NODE_ID.
+
+        Only called when `root_fallback=True` and the request actually includes
+        at least one key this view does not hold locally. Fetches `local_keys`
+        from this view and `root_keys` from `self._root`, for exactly the rows
+        this view covers, and joins the two on NODE_ID.
+
+        Parameters
+        ----------
+        id_keys : list[str]
+            ID columns to remap from local to external IDs via
+            `_map_df_to_external` (NODE_ID, EDGE_SOURCE, EDGE_TARGET).
+        node_ids : list[int] | None
+            External node IDs to read. `None` means every node in the view.
+        attr_keys : list[str]
+            The full requested key list (local and root keys combined), in the
+            order the result should be returned in.
+        local_keys : list[str]
+            The subset of `attr_keys` this view holds locally.
+        root_keys : list[str]
+            The subset of `attr_keys` this view does not hold; fetched from
+            `self._root` instead.
+        unpack : bool
+            Whether to unpack array-typed columns into separate columns.
+
+        Returns
+        -------
+        pl.DataFrame
+            One row per requested node, columns in `attr_keys` order, with
+            external IDs.
+        """
+        node_id_key = DEFAULT_ATTR_KEYS.NODE_ID
+        external_ids = self.node_ids() if node_ids is None else list(node_ids)
+
+        # NODE_ID is needed as the join key even when the caller did not ask for
+        # it, and `unpack` is deferred until after the join so that it sees the
+        # same columns it would have on a view holding all of them.
+        local_df = self._local_node_attrs_from_node_ids(
+            id_keys,
+            node_ids=external_ids,
+            attr_keys=[node_id_key, *local_keys],
+            unpack=False,
+        )
+
+        # Ask the root for exactly the rows this view covers -- never for all of
+        # its rows, which include the ones this view deliberately dropped.
+        root_df = self._root.filter(node_ids=external_ids).node_attrs(attr_keys=[node_id_key, *root_keys])
+
+        # `maintain_order="left"` is not optional: callers zip columns
+        # positionally, so a reordered join would pair the wrong values.
+        node_dfs = local_df.join(root_df, on=node_id_key, how="left", maintain_order="left")
+        node_dfs = node_dfs.select(attr_keys)
+
+        if unpack:
+            node_dfs = unpack_array_attrs(node_dfs)
+
+        return node_dfs
+
     def _node_attrs_from_node_ids(
         self,
         *,
@@ -1044,15 +1249,62 @@ class GraphView(MappedGraphMixin, RustWorkXGraph):
         attr_keys: Sequence[str] | str | None = None,
         unpack: bool = False,
     ) -> pl.DataFrame:
-        node_dfs = super()._node_attrs_from_node_ids(
-            node_ids=self._map_to_local(node_ids),
+        """
+        Get the attributes of the nodes as a polars DataFrame.
+
+        Dispatches to one of two strategies, so that a request never pays for
+        root access it does not need: `_local_node_attrs_from_node_ids` when
+        every requested key lives in this view (always true when
+        `root_fallback=False`, or when the request simply does not name an
+        excluded key), `_fallback_node_attrs_from_node_ids` only when at least
+        one requested key is held solely by the root.
+
+        Parameters
+        ----------
+        node_ids : list[int] | None
+            The external IDs of the nodes to get the attributes for.
+            If None, all nodes in the view are used.
+        attr_keys : Sequence[str] | str | None
+            The attribute keys to get. If None, every key this view holds is
+            used -- never a key only reachable via `root_fallback`, since that
+            would silently widen the result past what the view was built with.
+        unpack : bool
+            Whether to unpack array attributes into multiple scalar attributes.
+
+        Returns
+        -------
+        pl.DataFrame
+            A polars DataFrame with the attributes of the nodes, in `attr_keys`
+            order when `attr_keys` is given, with external IDs.
+        """
+        id_keys = [DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET]
+
+        if isinstance(attr_keys, str):
+            attr_keys = [attr_keys]
+        elif attr_keys is not None:
+            attr_keys = list(dict.fromkeys(attr_keys))
+
+        if not self._root_fallback:
+            # Nothing to route: every key is either local (fine) or missing,
+            # and the usual local-read validation rejects the latter.
+            return self._local_node_attrs_from_node_ids(id_keys, node_ids=node_ids, attr_keys=attr_keys, unpack=unpack)
+
+        local_keys, root_keys = self._split_node_attr_keys(attr_keys)
+
+        if not root_keys:
+            return self._local_node_attrs_from_node_ids(id_keys, node_ids=node_ids, attr_keys=local_keys, unpack=unpack)
+
+        # root_keys is only ever non-empty when attr_keys was an explicit list --
+        # _split_node_attr_keys(None) always returns an empty second element.
+        self._root._validate_attr_keys(root_keys, "node")
+        return self._fallback_node_attrs_from_node_ids(
+            id_keys,
+            node_ids=node_ids,
             attr_keys=attr_keys,
+            local_keys=local_keys,
+            root_keys=root_keys,
             unpack=unpack,
         )
-        node_dfs = self._map_df_to_external(
-            node_dfs, [DEFAULT_ATTR_KEYS.NODE_ID, DEFAULT_ATTR_KEYS.EDGE_SOURCE, DEFAULT_ATTR_KEYS.EDGE_TARGET]
-        )
-        return node_dfs
 
     def node_attrs(
         self,
