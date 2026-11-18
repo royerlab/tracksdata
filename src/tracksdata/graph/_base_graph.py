@@ -2086,21 +2086,20 @@ class BaseGraph(abc.ABC):
             else:
                 track_node_props = None
 
+            def _geff_prop_dtype(dtype: pl.DataType) -> DTypeLike:
+                # geff stores strings with its own "str" dtype
+                return np.str_ if dtype == pl.String else polars_dtype_to_numpy_dtype(dtype, compatibility=True)
+
             node_props_metadata = {
                 k: PropMetadata(
                     identifier=k,
-                    dtype=(
-                        polars_dtype_to_numpy_dtype(v.dtype, compatibility=True)
-                        if k != DEFAULT_ATTR_KEYS.MASK
-                        else np.bool_
-                    ),
+                    dtype=(_geff_prop_dtype(v.dtype) if k != DEFAULT_ATTR_KEYS.MASK else np.bool_),
                     varlength=k == DEFAULT_ATTR_KEYS.MASK,
                 )
                 for k, v in node_attrs.to_dict().items()
             }
             edge_props_metadata = {
-                k: PropMetadata(identifier=k, dtype=polars_dtype_to_numpy_dtype(v.dtype, compatibility=True))
-                for k, v in edge_attrs.to_dict().items()
+                k: PropMetadata(identifier=k, dtype=_geff_prop_dtype(v.dtype)) for k, v in edge_attrs.to_dict().items()
             }
 
             geff_metadata = geff.GeffMetadata(

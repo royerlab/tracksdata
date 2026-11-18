@@ -3122,6 +3122,29 @@ def test_geff_roundtrip_custom_metadata(graph_backend: BaseGraph) -> None:
     assert custom_metadata.extra == {"downstream": {"hello": "world"}}
 
 
+def test_geff_roundtrip_string_attrs(graph_backend: BaseGraph) -> None:
+    """String node and edge attributes survive a geff roundtrip."""
+
+    graph_backend.add_node_attr_key("label", pl.String)
+    graph_backend.add_edge_attr_key("kind", pl.String)
+
+    node_a = graph_backend.add_node({"t": 0, "label": "a"})
+    node_b = graph_backend.add_node({"t": 1, "label": "longer_label"})
+    graph_backend.add_edge(node_a, node_b, {"kind": "division"})
+
+    output_store = MemoryStore()
+    graph_backend.to_geff(geff_store=output_store)
+
+    assert GeffMetadata.read(output_store).node_props_metadata["label"].dtype == "str"
+
+    geff_graph, _ = IndexedRXGraph.from_geff(output_store)
+
+    node_attrs = geff_graph.node_attrs().sort(DEFAULT_ATTR_KEYS.T)
+    assert node_attrs["label"].dtype == pl.String
+    assert node_attrs["label"].to_list() == ["a", "longer_label"]
+    assert geff_graph.edge_attrs()["kind"].to_list() == ["division"]
+
+
 def test_geff_custom_metadata_overrides_graph_metadata(graph_backend: BaseGraph) -> None:
     """On key collisions the caller-supplied `extra["tracksdata"]` wins."""
 

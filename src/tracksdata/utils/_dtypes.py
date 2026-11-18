@@ -127,6 +127,9 @@ def column_to_numpy(series: pl.Series) -> np.ndarray:
     """
     if series.dtype == pl.Binary:
         return np.asarray(series.to_list())
+    elif series.dtype == pl.String:
+        # polars returns an object array, which geff would treat as variable-length arrays
+        return series.to_numpy().astype(str)
     else:
         return series.to_numpy()
 
