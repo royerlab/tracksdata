@@ -7,7 +7,7 @@ name = "tracksdata"
 dynamic = ["version"]
 description = 'A Python library for multi-object tracking data structures and algorithms'
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "BSD-3-Clause"
 keywords = ["cell-tracking", "tracking", "multi-object-tracking", "computer-vision", "graph", "machine-learning"]
 authors = [
@@ -24,9 +24,10 @@ classifiers = [
   "Intended Audience :: Science/Research",
   "License :: OSI Approved :: BSD License",
   "Programming Language :: Python",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Programming Language :: Python :: Implementation :: CPython",
   "Topic :: Scientific/Engineering",
   "Topic :: Scientific/Engineering :: Image Processing",
@@ -41,7 +42,9 @@ dependencies = [
   "rstar-python>=0.2.0",
   "tqdm",
   "polars >= 1.36.0",
-  "sqlalchemy>=2",
+  # polars.read_database imports sqlalchemy.ext.asyncio unconditionally, and
+  # SQLAlchemy 2.1 moved greenlet out of its base deps into the asyncio extra.
+  "sqlalchemy[asyncio]>=2",
   "rich",
   "numba",
   "imagecodecs",
@@ -51,13 +54,6 @@ dependencies = [
   "bidict>=0.23.1",
   "geff>=1.1.3.1.1",
   "psygnal>=0.14.0",
-  # zarr 2.x's util.py imports cbuffer_sizes/cbuffer_metainfo from
-  # numcodecs.blosc, which numcodecs >= 0.16 removed. Pin numcodecs per
-  # Python version (mirroring geff) instead of pinning zarr, so tracksdata
-  # remains co-installable with downstream tools still on zarr 2.x.
-  "numcodecs>=0.13",
-  "numcodecs>=0.13,<0.16; python_version > '3.10,<=3.11'", # TODO: remove pin once the 16 release is stable
-  "numcodecs>=0.15; python_version >= '3.13'", # TODO: remove pin once the 16 release is stable
 ]
 
 [project.optional-dependencies]
@@ -71,7 +67,7 @@ test = [
   "traccuracy>=0.4.2",
   "pytest-qt",
   "napari",
-  "pyqt5",
+  "pyqt6",
 ]
 docs = [
   "mkdocs",
@@ -101,7 +97,7 @@ version-file = "src/tracksdata/__about__.py"
 
 # https://docs.astral.sh/ruff
 [tool.ruff]
-target-version = "py310"
+target-version = "py311"
 src = ["src"]
 line-length = 120
 

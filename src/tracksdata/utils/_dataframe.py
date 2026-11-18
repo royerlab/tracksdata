@@ -26,7 +26,8 @@ def unpack_array_attrs(df: pl.DataFrame) -> pl.DataFrame:
         return df
 
     for col in array_cols:
-        df = df.with_columns(pl.col(col).arr.to_struct(lambda x: f"{col}_{x}")).unnest(col)  # noqa: B023
+        fields = [f"{col}_{i}" for i in range(df.schema[col].shape[0])]
+        df = df.with_columns(pl.col(col).arr.to_struct(fields)).unnest(col)
 
     return unpack_array_attrs(df)
 

@@ -2,7 +2,7 @@
 
 ## Requirements
 
-TracksData requires Python 3.10 or later.
+TracksData requires Python 3.11 or later.
 
 ## Install TracksData
 

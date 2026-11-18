@@ -6,7 +6,23 @@ import pytest
 
 from tracksdata.constants import DEFAULT_ATTR_KEYS
 from tracksdata.graph import RustWorkXGraph
+from tracksdata.io._ctc import _load_tracks_file
 from tracksdata.nodes._mask import Mask
+
+
+@pytest.mark.parametrize(
+    ("contents", "expected"),
+    [
+        ("7 2 5 0\n", {}),
+        ("9 6 8 7\n", {9: 7}),
+        ("7 2 5 0\n9 6 8 7\n10 6 9 7\n", {9: 7, 10: 7}),
+    ],
+)
+def test_load_tracks_file(tmp_path: Path, contents: str, expected: dict[int, int]) -> None:
+    tracks_file = tmp_path / "man_track.txt"
+    tracks_file.write_text(contents)
+
+    assert _load_tracks_file(tracks_file) == expected
 
 
 @pytest.mark.parametrize("metadata_shape", [True, False])
