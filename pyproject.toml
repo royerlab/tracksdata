@@ -53,13 +53,10 @@ dependencies = [
   "bidict>=0.23.1",
   "geff>=1.1.3.1.1",
   "psygnal>=0.14.0",
-  # zarr 2.x's util.py imports cbuffer_sizes/cbuffer_metainfo from
-  # numcodecs.blosc, which numcodecs >= 0.16 removed. Pin numcodecs per
-  # Python version (mirroring geff) instead of pinning zarr, so tracksdata
-  # remains co-installable with downstream tools still on zarr 2.x.
+  # numcodecs >= 0.16 is incompatible with zarr 2.x; zarr 2.18.7 caps
+  # numcodecs < 0.16 itself, so no upper pin is needed here.
   "numcodecs>=0.13",
-  "numcodecs>=0.13,<0.16; python_version > '3.10,<=3.11'", # TODO: remove pin once the 16 release is stable
-  "numcodecs>=0.15; python_version >= '3.13'", # TODO: remove pin once the 16 release is stable
+  "numcodecs>=0.15; python_version >= '3.13'",
 ]
 
 [project.optional-dependencies]
